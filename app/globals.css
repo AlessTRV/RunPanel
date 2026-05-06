@@ -1,0 +1,11 @@
+@import "@heroui/styles";
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+
+  body {
+    @apply bg-background text-foreground min-h-screen antialiased;
+  }
+}
