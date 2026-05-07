@@ -14,21 +14,12 @@ export const setupSchema = z.object({
 
 export const createProjectSchema = z.object({
   name: z.string().min(1).max(100),
-  sourceType: z.enum(["github", "upload"]),
-  sourceUrl: z.string().url().optional(),
-  sourceBranch: z.string().default("main"),
-  runtimeType: z.enum(["node", "static", "docker"]),
-  port: z.number().int().min(1).max(65535).optional(),
-  builderConfig: z.object({
-    buildCmd: z.string().optional(),
-    startCmd: z.string().optional(),
-    installCmd: z.string().optional(),
-    packageManager: z.enum(["auto", "npm", "bun", "pnpm", "yarn"]).optional(),
-  }).optional(),
 });
 
 export const updateProjectSchema = z.object({
   name: z.string().min(1).max(100).optional(),
+  sourceType: z.enum(["github", "upload"]).optional(),
+  sourceUrl: z.string().url().optional(),
   sourceBranch: z.string().optional(),
   runtimeType: z.enum(["node", "static", "docker"]).optional(),
   port: z.number().int().min(1).max(65535).optional().nullable(),
@@ -57,4 +48,25 @@ export const createServiceSchema = z.object({
   type: z.enum(["postgresql", "mysql", "redis", "mongodb"]),
   version: z.string().min(1),
   port: z.number().int().min(1).max(65535),
+  projectId: z.string().optional(),
+  credentials: z.object({
+    user: z.string().optional(),
+    password: z.string().optional(),
+    database: z.string().optional(),
+  }).optional(),
+});
+
+export const createAppSchema = z.object({
+  projectId: z.string().min(1),
+  sourceType: z.enum(["github", "upload"]),
+  sourceUrl: z.string().url().optional(),
+  sourceBranch: z.string().default("main"),
+  runtimeType: z.enum(["node", "static", "docker"]),
+  port: z.number().int().min(1).max(65535).optional(),
+  builderConfig: z.object({
+    buildCmd: z.string().optional(),
+    startCmd: z.string().optional(),
+    installCmd: z.string().optional(),
+    packageManager: z.enum(["auto", "npm", "bun", "pnpm", "yarn"]).optional(),
+  }).optional(),
 });

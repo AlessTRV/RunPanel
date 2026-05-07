@@ -3,7 +3,6 @@ import { requireAuth } from "@/lib/auth-guard";
 import { getDb } from "@/lib/db";
 import { generateId, slugify } from "@/lib/utils";
 import { createProjectSchema } from "@/lib/validation";
-import { gitClone } from "@/services/git-manager";
 import crypto from "crypto";
 
 export async function GET() {
@@ -17,9 +16,16 @@ export async function GET() {
       (SELECT started_at FROM deployments WHERE project_id = p.id ORDER BY started_at DESC LIMIT 1) as last_deploy_at
     FROM projects p
     ORDER BY p.created_at DESC
-  `).all();
+  `).all() as Record<string, unknown>[];
 
-  return NextResponse.json(projects);
+  // Attach services for each project
+  const stmtServices = db.prepare("SELECT * FROM services WHERE project_id = ?");
+  const result = projects.map((p) => ({
+    ...p,
+    services: stmtServices.all(p.id as string),
+  }));
+
+  return NextResponse.json(result);
 }
 
 export async function POST(request: NextRequest) {
@@ -35,13 +41,12 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const { name, sourceType, sourceUrl, sourceBranch, runtimeType, port, builderConfig } = parsed.data;
+  const { name } = parsed.data;
   const id = generateId();
   const slug = slugify(name);
 
   const db = getDb();
 
-  // Check slug uniqueness
   const existing = db.prepare("SELECT id FROM projects WHERE slug = ?").get(slug);
   if (existing) {
     return NextResponse.json(
@@ -50,36 +55,13 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Clone repo if GitHub source
-  if (sourceType === "github" && sourceUrl) {
-    try {
-      await gitClone(sourceUrl, sourceBranch || "main", slug);
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "Clone failed";
-      return NextResponse.json(
-        { error: `Failed to clone repository: ${message}` },
-        { status: 400 }
-      );
-    }
-  }
-
   const webhookSecret = crypto.randomBytes(20).toString("hex");
 
+  // Create project as empty container — app and services added separately
   db.prepare(`
-    INSERT INTO projects (id, name, slug, source_type, source_url, source_branch, runtime_type, builder_config, port, webhook_secret)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    id,
-    name,
-    slug,
-    sourceType,
-    sourceUrl || null,
-    sourceBranch || "main",
-    runtimeType,
-    JSON.stringify(builderConfig || {}),
-    port || null,
-    webhookSecret
-  );
+    INSERT INTO projects (id, name, slug, source_type, runtime_type, webhook_secret)
+    VALUES (?, ?, ?, 'upload', 'node', ?)
+  `).run(id, name, slug, webhookSecret);
 
   const project = db.prepare("SELECT * FROM projects WHERE id = ?").get(id);
   return NextResponse.json(project, { status: 201 });

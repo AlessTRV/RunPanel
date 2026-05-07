@@ -77,6 +77,11 @@ const migrations: string[] = [
   ALTER TABLE deployments ADD COLUMN start_cmd TEXT;
   ALTER TABLE deployments ADD COLUMN artifact_dir TEXT;
   `,
+  // Migration 3: Link services to projects
+  `
+  ALTER TABLE services ADD COLUMN project_id TEXT REFERENCES projects(id) ON DELETE CASCADE;
+  CREATE INDEX IF NOT EXISTS idx_services_project ON services(project_id);
+  `,
 ];
 
 export function runMigrations(db: Database.Database) {

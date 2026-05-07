@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth-guard";
 import { getDb } from "@/lib/db";
 import { updateProjectSchema } from "@/lib/validation";
+import { processManager } from "@/services/process-manager";
+import { removeService } from "@/services/service-provisioner";
 import fs from "fs";
 import path from "path";
 import { config } from "@/lib/config";
@@ -51,9 +53,11 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   const updates: string[] = [];
   const values: unknown[] = [];
 
-  const { name, sourceBranch, runtimeType, port, autoDeploy, builderConfig } = parsed.data;
+  const { name, sourceType, sourceUrl, sourceBranch, runtimeType, port, autoDeploy, builderConfig } = parsed.data;
 
   if (name !== undefined) { updates.push("name = ?"); values.push(name); }
+  if (sourceType !== undefined) { updates.push("source_type = ?"); values.push(sourceType); }
+  if (sourceUrl !== undefined) { updates.push("source_url = ?"); values.push(sourceUrl); }
   if (sourceBranch !== undefined) { updates.push("source_branch = ?"); values.push(sourceBranch); }
   if (runtimeType !== undefined) { updates.push("runtime_type = ?"); values.push(runtimeType); }
   if (port !== undefined) { updates.push("port = ?"); values.push(port); }
@@ -82,10 +86,29 @@ export async function DELETE(_request: NextRequest, { params }: Params) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
 
+  // Stop running process
+  try {
+    await processManager.stop(project.slug as string, project.runtime_type as string);
+  } catch { /* ignore */ }
+
+  // Stop and remove all services linked to this project
+  const services = db.prepare("SELECT * FROM services WHERE project_id = ?").all(projectId) as Record<string, unknown>[];
+  for (const svc of services) {
+    try { await removeService(svc.name as string); } catch { /* ignore */ }
+  }
+  db.prepare("DELETE FROM services WHERE project_id = ?").run(projectId);
+
   // Delete project files
   const repoDir = path.join(config.reposDir, project.slug as string);
   if (fs.existsSync(repoDir)) {
     fs.rmSync(repoDir, { recursive: true, force: true });
+  }
+
+  // Delete PM2 wrapper files
+  const pm2Dir = path.join(config.dataDir, "pm2");
+  for (const ext of [".js", ".json", ".cmd", ".sh"]) {
+    const f = path.join(pm2Dir, `${project.slug}${ext}`);
+    if (fs.existsSync(f)) fs.rmSync(f);
   }
 
   // DB cascade handles deployments, env_vars, webhook_deliveries

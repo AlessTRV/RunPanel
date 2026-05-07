@@ -32,9 +32,14 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const { name, type, version, port } = parsed.data;
+  const { name, type, version, port, projectId, credentials: customCreds } = parsed.data;
   const id = generateId();
-  const credentials = generateCredentials(type);
+  const defaultCreds = generateCredentials(type);
+  const credentials = {
+    user: customCreds?.user || defaultCreds.user,
+    password: customCreds?.password || defaultCreds.password,
+    database: customCreds?.database || defaultCreds.database,
+  };
 
   const db = getDb();
 
@@ -44,8 +49,8 @@ export async function POST(request: NextRequest) {
     const connString = getConnectionString(config);
 
     db.prepare(`
-      INSERT INTO services (id, name, type, version, status, container_id, port, credentials, config)
-      VALUES (?, ?, ?, ?, 'running', ?, ?, ?, ?)
+      INSERT INTO services (id, name, type, version, status, container_id, port, credentials, config, project_id)
+      VALUES (?, ?, ?, ?, 'running', ?, ?, ?, ?, ?)
     `).run(
       id,
       name,
@@ -54,7 +59,8 @@ export async function POST(request: NextRequest) {
       containerId,
       port,
       encrypt(JSON.stringify({ ...credentials, connectionString: connString })),
-      JSON.stringify({})
+      JSON.stringify({}),
+      projectId || null
     );
 
     const service = db.prepare("SELECT * FROM services WHERE id = ?").get(id);
