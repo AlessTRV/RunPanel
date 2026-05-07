@@ -30,6 +30,12 @@ export async function buildProject(
 
   let builder = builderMap[runtimeType];
 
+  // If node builder but no package.json, auto-detect (might be Docker or other)
+  if (builder && runtimeType === "node" && !(await builder.detect(projectDir))) {
+    const detected = await detectBuilder(projectDir);
+    if (detected) builder = detected;
+  }
+
   // If not found by type, auto-detect
   if (!builder) {
     builder = (await detectBuilder(projectDir)) || customBuilder;

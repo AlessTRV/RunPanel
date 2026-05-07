@@ -12,7 +12,7 @@ const statusConfig: Record<Status, { variant: "primary" | "secondary" | "tertiar
   pending: { variant: "soft", className: "text-foreground-400 bg-default-100", label: "Pending" },
   building: { variant: "soft", className: "text-warning bg-warning/10", label: "Building" },
   failed: { variant: "soft", className: "text-danger bg-danger/10", label: "Failed" },
-  superseded: { variant: "soft", className: "text-foreground-400 bg-default-100", label: "Superseded" },
+  superseded: { variant: "soft", className: "text-success/60 bg-success/5", label: "Completed" },
 };
 
 export function StatusBadge({ status }: { status: string }) {
