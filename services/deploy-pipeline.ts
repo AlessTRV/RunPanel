@@ -112,6 +112,8 @@ export async function executeDeploy(
       "SELECT key, value FROM env_vars WHERE project_id = ?"
     ).all(project.id) as { key: string; value: string }[];
 
+    appendLog(`Loaded ${envRows.length} env var(s)`);
+
     const envVars: Record<string, string> = {};
     for (const row of envRows) {
       envVars[row.key] = decrypt(row.value);

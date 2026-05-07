@@ -169,8 +169,13 @@ export default function ProjectDetailPage() {
     if (activeTab !== "env") return;
     setEnvLoading(true);
     fetch(`/api/projects/${projectId}/env?reveal=true`)
-      .then(r => r.json())
-      .then((data) => setEnvVars(data.map((v: {key:string;value:string}) => ({key:v.key,value:v.value}))))
+      .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+      .then((data) => {
+        if (Array.isArray(data)) {
+          setEnvVars(data.map((v: {key:string;value:string}) => ({key:v.key,value:v.value})));
+        }
+      })
+      .catch((e) => toast.error(`Failed to load env vars: ${e.message}`))
       .finally(() => setEnvLoading(false));
   }, [activeTab, projectId]);
 
@@ -218,11 +223,13 @@ export default function ProjectDetailPage() {
 
   async function handleEnvSave() {
     const valid = envVars.filter(v => v.key.trim());
+    if (valid.length === 0) { toast.error("No variables to save"); return; }
     setEnvSaving(true);
     try {
       const res = await fetch(`/api/projects/${projectId}/env`, { method: "PUT", headers: {"Content-Type":"application/json"}, body: JSON.stringify({vars:valid}) });
-      if (res.ok) { toast.success("Variables saved"); setEnvVars(valid); } else { const d = await res.json(); toast.error(d.error || "Failed"); }
-    } catch { toast.error("Failed"); }
+      if (res.ok) { const d = await res.json(); toast.success(`${d.count || valid.length} variable(s) saved`); setEnvVars(valid); }
+      else { const d = await res.json(); toast.error(d.error || "Failed to save"); }
+    } catch (e) { toast.error(`Save failed: ${e instanceof Error ? e.message : "unknown error"}`); }
     finally { setEnvSaving(false); }
   }
 
