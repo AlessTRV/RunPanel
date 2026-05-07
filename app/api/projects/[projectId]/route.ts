@@ -53,9 +53,10 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   const updates: string[] = [];
   const values: unknown[] = [];
 
-  const { name, sourceType, sourceUrl, sourceBranch, runtimeType, port, autoDeploy, builderConfig } = parsed.data;
+  const { name, appName, sourceType, sourceUrl, sourceBranch, runtimeType, port, autoDeploy, builderConfig } = parsed.data;
 
   if (name !== undefined) { updates.push("name = ?"); values.push(name); }
+  if (appName !== undefined) { updates.push("app_name = ?"); values.push(appName || null); }
   if (sourceType !== undefined) { updates.push("source_type = ?"); values.push(sourceType); }
   if (sourceUrl !== undefined) { updates.push("source_url = ?"); values.push(sourceUrl); }
   if (sourceBranch !== undefined) { updates.push("source_branch = ?"); values.push(sourceBranch); }
@@ -111,7 +112,10 @@ export async function DELETE(_request: NextRequest, { params }: Params) {
     if (fs.existsSync(f)) fs.rmSync(f);
   }
 
-  // DB cascade handles deployments, env_vars, webhook_deliveries
+  // Manual cascade delete (FK constraints lost in migration 6)
+  db.prepare("DELETE FROM deployments WHERE project_id = ?").run(projectId);
+  db.prepare("DELETE FROM env_vars WHERE project_id = ?").run(projectId);
+  db.prepare("DELETE FROM webhook_deliveries WHERE project_id = ?").run(projectId);
   db.prepare("DELETE FROM projects WHERE id = ?").run(projectId);
 
   return NextResponse.json({ success: true });

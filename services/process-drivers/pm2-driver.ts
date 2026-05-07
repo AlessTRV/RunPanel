@@ -126,8 +126,8 @@ child.on("error", (e) => { console.error("Process error:", e.message); process.e
   async stop(slug: string): Promise<void> {
     const name = processName(slug);
     try {
-      await shellExec(`npx pm2 stop ${name}`, { timeout: 15_000 });
-    } catch { /* might already be stopped */ }
+      await shellExec(`npx pm2 delete ${name}`, { timeout: 15_000 });
+    } catch { /* might already be stopped/deleted */ }
   },
 
   async restart(slug: string): Promise<void> {

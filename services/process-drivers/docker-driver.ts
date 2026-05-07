@@ -37,8 +37,8 @@ export const dockerDriver: IProcessDriver = {
   async stop(slug: string): Promise<void> {
     const name = containerName(slug);
     try {
-      await exec("docker", ["stop", name], { timeout: 30_000 });
-    } catch { /* might already be stopped */ }
+      await exec("docker", ["rm", "-f", name], { timeout: 30_000 });
+    } catch { /* might already be removed */ }
   },
 
   async restart(slug: string): Promise<void> {
