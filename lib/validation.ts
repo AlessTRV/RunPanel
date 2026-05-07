@@ -1,16 +1,19 @@
 import { z } from "zod";
 
 export const loginSchema = z.object({
-  password: z.string().min(1, "Password is required"),
+  password: z.string().min(1, "Password is required").max(128, "Password too long"),
 });
 
 export const setupSchema = z.object({
-  password: z.string().min(8, "Password must be at least 8 characters"),
-  confirmPassword: z.string(),
+  password: z.string().min(8, "Password must be at least 8 characters").max(128, "Password too long"),
+  confirmPassword: z.string().max(128),
 }).refine((data) => data.password === data.confirmPassword, {
   message: "Passwords do not match",
   path: ["confirmPassword"],
 });
+
+export const runtimeTypes = ["node", "docker", "custom"] as const;
+export type RuntimeType = (typeof runtimeTypes)[number];
 
 export const createProjectSchema = z.object({
   name: z.string().min(1).max(100),
@@ -18,10 +21,11 @@ export const createProjectSchema = z.object({
 
 export const updateProjectSchema = z.object({
   name: z.string().min(1).max(100).optional(),
+  appName: z.string().max(100).optional().nullable(),
   sourceType: z.enum(["github", "upload"]).optional(),
-  sourceUrl: z.string().url().optional(),
+  sourceUrl: z.string().url().optional().nullable(),
   sourceBranch: z.string().optional(),
-  runtimeType: z.enum(["node", "static", "docker"]).optional(),
+  runtimeType: z.enum(runtimeTypes).optional().nullable(),
   port: z.number().int().min(1).max(65535).optional().nullable(),
   autoDeploy: z.boolean().optional(),
   builderConfig: z.object({
@@ -53,20 +57,5 @@ export const createServiceSchema = z.object({
     user: z.string().optional(),
     password: z.string().optional(),
     database: z.string().optional(),
-  }).optional(),
-});
-
-export const createAppSchema = z.object({
-  projectId: z.string().min(1),
-  sourceType: z.enum(["github", "upload"]),
-  sourceUrl: z.string().url().optional(),
-  sourceBranch: z.string().default("main"),
-  runtimeType: z.enum(["node", "static", "docker"]),
-  port: z.number().int().min(1).max(65535).optional(),
-  builderConfig: z.object({
-    buildCmd: z.string().optional(),
-    startCmd: z.string().optional(),
-    installCmd: z.string().optional(),
-    packageManager: z.enum(["auto", "npm", "bun", "pnpm", "yarn"]).optional(),
   }).optional(),
 });

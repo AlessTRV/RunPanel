@@ -3,6 +3,7 @@ import { getDb } from "@/lib/db";
 import { generateId } from "@/lib/utils";
 import { verifyWebhookSignature } from "@/services/git-manager";
 import { executeDeploy } from "@/services/deploy-pipeline";
+import type { GitHubPushPayload } from "@/lib/types";
 
 type Params = { params: Promise<{ projectId: string }> };
 
@@ -15,9 +16,16 @@ export async function POST(request: NextRequest, { params }: Params) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
 
-  // Verify signature
+  // Verify signature — limit payload size to 1MB
   const signature = request.headers.get("x-hub-signature-256") || "";
+  const contentLength = parseInt(request.headers.get("content-length") || "0");
+  if (contentLength > 1024 * 1024) {
+    return NextResponse.json({ error: "Payload too large" }, { status: 413 });
+  }
   const body = await request.text();
+  if (body.length > 1024 * 1024) {
+    return NextResponse.json({ error: "Payload too large" }, { status: 413 });
+  }
 
   if (!verifyWebhookSignature(Buffer.from(body), signature, project.webhook_secret as string)) {
     db.prepare(`
@@ -28,7 +36,12 @@ export async function POST(request: NextRequest, { params }: Params) {
     return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
   }
 
-  const payload = JSON.parse(body);
+  let payload: GitHubPushPayload;
+  try {
+    payload = JSON.parse(body);
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  }
   const event = request.headers.get("x-github-event");
 
   // Only handle push events
@@ -51,9 +64,9 @@ export async function POST(request: NextRequest, { params }: Params) {
     return NextResponse.json({ message: "Auto-deploy disabled" });
   }
 
-  // Check branch matches
-  const ref = payload.ref || "";
-  const pushBranch = ref.replace("refs/heads/", "");
+  // Check branch matches — sanitize to prevent injection
+  const ref = typeof payload.ref === "string" ? payload.ref : "";
+  const pushBranch = ref.replace("refs/heads/", "").replace(/[^a-zA-Z0-9._/-]/g, "");
   if (pushBranch !== project.source_branch) {
     db.prepare(`
       INSERT INTO webhook_deliveries (id, project_id, status, payload_summary)

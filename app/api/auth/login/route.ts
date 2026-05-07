@@ -7,12 +7,37 @@ import {
   createSession,
 } from "@/lib/auth";
 
+// Simple in-memory rate limiter: max 5 attempts per IP per 15 minutes
+const attempts = new Map<string, { count: number; resetAt: number }>();
+const MAX_ATTEMPTS = 5;
+const WINDOW_MS = 15 * 60 * 1000;
+
+function isRateLimited(ip: string): boolean {
+  const now = Date.now();
+  const entry = attempts.get(ip);
+  if (!entry || now > entry.resetAt) {
+    attempts.set(ip, { count: 1, resetAt: now + WINDOW_MS });
+    return false;
+  }
+  entry.count++;
+  return entry.count > MAX_ATTEMPTS;
+}
+
 export async function POST(request: NextRequest) {
+  const ip = request.headers.get("x-forwarded-for") || request.headers.get("x-real-ip") || "unknown";
+
+  if (isRateLimited(ip)) {
+    return NextResponse.json(
+      { error: "Too many login attempts. Try again in 15 minutes." },
+      { status: 429 }
+    );
+  }
+
   const body = await request.json();
   const { password, setup } = body;
 
-  if (!password || typeof password !== "string") {
-    return NextResponse.json({ error: "Password is required" }, { status: 400 });
+  if (!password || typeof password !== "string" || password.length > 128) {
+    return NextResponse.json({ error: "Invalid password" }, { status: 400 });
   }
 
   // First-run setup
@@ -25,6 +50,8 @@ export async function POST(request: NextRequest) {
     }
     await setAdminPassword(password);
     await createSession();
+    // Clear rate limit on successful setup
+    attempts.delete(ip);
     return NextResponse.json({ success: true });
   }
 
@@ -42,6 +69,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid password" }, { status: 401 });
   }
 
+  // Clear rate limit on successful login
+  attempts.delete(ip);
   await createSession();
   return NextResponse.json({ success: true });
 }

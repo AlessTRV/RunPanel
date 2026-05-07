@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth-guard";
 import { config } from "@/lib/config";
+import { isValidSlug } from "@/lib/utils";
 import fs from "fs";
 import path from "path";
 import { execFile } from "child_process";
@@ -23,9 +24,26 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // Validate slug to prevent path traversal
+  if (!isValidSlug(projectSlug)) {
+    return NextResponse.json(
+      { error: "Invalid project slug" },
+      { status: 400 }
+    );
+  }
+
   if (!file.name.endsWith(".zip")) {
     return NextResponse.json(
       { error: "Only ZIP files are supported" },
+      { status: 400 }
+    );
+  }
+
+  // Validate ZIP magic bytes (PK\x03\x04)
+  const header = Buffer.from(await file.slice(0, 4).arrayBuffer());
+  if (header[0] !== 0x50 || header[1] !== 0x4B || header[2] !== 0x03 || header[3] !== 0x04) {
+    return NextResponse.json(
+      { error: "File is not a valid ZIP archive" },
       { status: 400 }
     );
   }

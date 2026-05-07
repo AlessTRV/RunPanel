@@ -48,9 +48,12 @@ export async function provisionService(config: ServiceConfig): Promise<string> {
     "--restart", "unless-stopped",
   ];
 
-  // Add environment vars
+  // Add environment vars — values passed as separate args to execFile (no shell injection risk)
   for (const [key, value] of Object.entries(dockerConfig.env)) {
-    args.push("-e", `${key}=${value}`);
+    // Validate key is alphanumeric, value is passed safely via execFile array
+    if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
+      args.push("-e", `${key}=${value}`);
+    }
   }
 
   // Add volumes

@@ -6,8 +6,20 @@ import { getShellPath, isWindows, buildEnv } from "@/services/env-utils";
 import { getRepoPath } from "@/services/git-manager";
 import { decrypt } from "@/lib/auth";
 
-// Store active shell sessions
-const sessions = new Map<string, { proc: ChildProcess; buffer: string[] }>();
+// Store active shell sessions with last activity timestamp
+const sessions = new Map<string, { proc: ChildProcess; buffer: string[]; lastActivity: number }>();
+
+// Auto-cleanup: kill sessions idle for more than 10 minutes
+const SESSION_TIMEOUT_MS = 10 * 60 * 1000;
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, session] of sessions) {
+    if (now - session.lastActivity > SESSION_TIMEOUT_MS) {
+      try { session.proc.kill(); } catch { /* ignore */ }
+      sessions.delete(key);
+    }
+  }
+}, 60_000);
 
 type Params = { params: Promise<{ projectId: string }> };
 
@@ -59,15 +71,16 @@ export async function POST(request: NextRequest, { params }: Params) {
       windowsHide: true,
     });
 
-    const session = { proc, buffer: [] as string[] };
+    const session = { proc, buffer: [] as string[], lastActivity: Date.now() };
     sessions.set(sessionKey, session);
 
     const pushLine = (data: Buffer) => {
       const text = data.toString();
       session.buffer.push(text);
-      // Keep only last 1000 entries
-      if (session.buffer.length > 1000) {
-        session.buffer = session.buffer.slice(-500);
+      session.lastActivity = Date.now();
+      // Keep buffer bounded (max ~500KB)
+      if (session.buffer.length > 500) {
+        session.buffer = session.buffer.slice(-250);
       }
     };
 
@@ -94,6 +107,7 @@ export async function POST(request: NextRequest, { params }: Params) {
     const session = sessions.get(sessionKey);
     if (session && session.proc.stdin?.writable) {
       session.proc.stdin.write(input);
+      session.lastActivity = Date.now();
     }
     return NextResponse.json({ status: "ok" });
   }
@@ -113,6 +127,8 @@ export async function GET(request: NextRequest, { params }: Params) {
   if (!session) {
     return NextResponse.json({ active: false, output: "" });
   }
+
+  session.lastActivity = Date.now();
 
   // Drain buffer
   const output = session.buffer.join("");
