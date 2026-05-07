@@ -50,6 +50,7 @@ export async function provisionService(config: ServiceConfig, projectSlug?: stri
   const args: string[] = [
     "run", "-d",
     "--name", containerName,
+    "--add-host=host.docker.internal:host-gateway",
     "-p", `${config.port}:${dockerConfig.port}`,
     "--restart", "unless-stopped",
   ];

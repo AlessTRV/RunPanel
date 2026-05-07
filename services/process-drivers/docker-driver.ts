@@ -42,6 +42,7 @@ export const dockerDriver: IProcessDriver = {
     await exec("docker", [
       "run", "-d",
       "--name", name,
+      "--add-host=host.docker.internal:host-gateway",
       ...networkArgs,
       ...portArgs,
       ...envArgs,
