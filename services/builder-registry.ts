@@ -2,6 +2,7 @@ import { IBuilder, BuildContext, BuildResult } from "./builders/types";
 import { dockerBuilder } from "./builders/docker-builder";
 import { nodeBuilder } from "./builders/node-builder";
 import { staticBuilder } from "./builders/static-builder";
+import { customBuilder } from "./builders/custom-builder";
 
 // Detection order: Docker first, then Node, then Static (fallback)
 const builders: IBuilder[] = [dockerBuilder, nodeBuilder, staticBuilder];
@@ -20,18 +21,18 @@ export async function buildProject(
   runtimeType: string,
   ctx: Omit<BuildContext, "projectDir">
 ): Promise<BuildResult> {
-  // If runtime type is explicitly set, use that builder
   const builderMap: Record<string, IBuilder> = {
     node: nodeBuilder,
-    static: staticBuilder,
+    static: staticBuilder, // kept for backward compatibility
     docker: dockerBuilder,
+    custom: customBuilder,
   };
 
   let builder = builderMap[runtimeType];
 
   // If not found by type, auto-detect
   if (!builder) {
-    builder = (await detectBuilder(projectDir)) || staticBuilder;
+    builder = (await detectBuilder(projectDir)) || customBuilder;
   }
 
   return builder.build({ projectDir, ...ctx });

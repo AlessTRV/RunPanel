@@ -82,6 +82,46 @@ const migrations: string[] = [
   ALTER TABLE services ADD COLUMN project_id TEXT REFERENCES projects(id) ON DELETE CASCADE;
   CREATE INDEX IF NOT EXISTS idx_services_project ON services(project_id);
   `,
+  // Migration 4: App name separate from project name
+  `
+  ALTER TABLE projects ADD COLUMN app_name TEXT;
+  `,
+  // Migration 5: Missing indexes for performance
+  `
+  CREATE INDEX IF NOT EXISTS idx_env_vars_project ON env_vars(project_id);
+  `,
+  // Migration 6: Add 'custom' runtime type — recreate projects table with updated CHECK
+  `
+  CREATE TABLE projects_new (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    slug TEXT NOT NULL UNIQUE,
+    source_type TEXT NOT NULL CHECK(source_type IN ('github', 'upload')),
+    source_url TEXT,
+    source_branch TEXT DEFAULT 'main',
+    runtime_type TEXT NOT NULL DEFAULT 'node' CHECK(runtime_type IN ('node', 'static', 'docker', 'custom')),
+    builder_config TEXT DEFAULT '{}',
+    port INTEGER,
+    status TEXT NOT NULL DEFAULT 'stopped' CHECK(status IN ('stopped', 'running', 'deploying', 'error')),
+    auto_deploy INTEGER NOT NULL DEFAULT 0,
+    webhook_secret TEXT,
+    app_name TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  INSERT INTO projects_new SELECT id, name, slug, source_type, source_url, source_branch, runtime_type, builder_config, port, status, auto_deploy, webhook_secret, app_name, created_at, updated_at FROM projects;
+  DROP TABLE projects;
+  ALTER TABLE projects_new RENAME TO projects;
+  `,
+  // Migration 7: Manual cascade delete since FKs were lost in migration 6
+  // SQLite can't add FK constraints after table creation, so we handle cascade in application code
+  // This migration just cleans up any orphaned records from the migration 6 data loss
+  `
+  DELETE FROM deployments WHERE project_id NOT IN (SELECT id FROM projects);
+  DELETE FROM env_vars WHERE project_id NOT IN (SELECT id FROM projects);
+  DELETE FROM webhook_deliveries WHERE project_id NOT IN (SELECT id FROM projects);
+  DELETE FROM services WHERE project_id IS NOT NULL AND project_id NOT IN (SELECT id FROM projects);
+  `,
 ];
 
 export function runMigrations(db: Database.Database) {

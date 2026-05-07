@@ -6,6 +6,10 @@ export interface BuildContext {
   packageManager?: "auto" | "npm" | "bun" | "pnpm" | "yarn";
   envVars: Record<string, string>;
   onLog: (line: string) => void;
+  // Docker template fields
+  dockerImage?: string;
+  dockerTemplate?: string;
+  dockerFields?: Record<string, string>;
 }
 
 export interface BuildResult {

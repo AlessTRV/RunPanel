@@ -131,6 +131,9 @@ export async function executeDeploy(
       startCmd: builderConfig.startCmd,
       installCmd: builderConfig.installCmd,
       packageManager: builderConfig.packageManager as BuildContext["packageManager"],
+      dockerImage: builderConfig.dockerImage as string | undefined,
+      dockerTemplate: builderConfig.dockerTemplate as string | undefined,
+      dockerFields: builderConfig.dockerFields as Record<string, string> | undefined,
       envVars,
       onLog: appendLog,
     });

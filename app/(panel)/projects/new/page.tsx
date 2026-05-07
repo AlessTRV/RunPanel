@@ -33,7 +33,7 @@ export default function NewProjectPage() {
 
       const project = await res.json();
       toast.success("Project created");
-      router.push(`/projects/${project.id}`);
+      router.push("/home");
     } catch {
       toast.error("Failed to create project");
     } finally {

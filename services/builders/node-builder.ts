@@ -30,20 +30,34 @@ export const nodeBuilder: IBuilder = {
       : detectPackageManager(projectDir);
 
     try {
-      // Install dependencies
-      const installCommand = installCmd || pm.install;
-      onLog(`> ${installCommand}`);
-      await runCommand(installCommand, { cwd: projectDir, env: envVars, onLog });
+      // Install dependencies — multi-line custom or auto-detected
+      if (installCmd) {
+        const cmds = installCmd.split("\n").map(c => c.trim()).filter(Boolean);
+        for (const cmd of cmds) {
+          onLog(`> ${cmd}`);
+          await runCommand(cmd, { cwd: projectDir, env: envVars, onLog });
+        }
+      } else {
+        onLog(`> ${pm.install}`);
+        await runCommand(pm.install, { cwd: projectDir, env: envVars, onLog });
+      }
       onLog("Dependencies installed.");
 
-      // Build (if build script exists or custom build command provided)
+      // Build — multi-line custom or auto-detected
       const pkgJson = JSON.parse(fs.readFileSync(path.join(projectDir, "package.json"), "utf-8"));
       const hasBuildScript = pkgJson.scripts?.build;
-      const buildCommand = buildCmd || (hasBuildScript ? `${pm.cmd} run build` : null);
 
-      if (buildCommand) {
-        onLog(`> ${buildCommand}`);
-        await runCommand(buildCommand, { cwd: projectDir, env: envVars, onLog });
+      if (buildCmd) {
+        const cmds = buildCmd.split("\n").map(c => c.trim()).filter(Boolean);
+        for (const cmd of cmds) {
+          onLog(`> ${cmd}`);
+          await runCommand(cmd, { cwd: projectDir, env: envVars, onLog });
+        }
+        onLog("Build completed.");
+      } else if (hasBuildScript) {
+        const cmd = `${pm.cmd} run build`;
+        onLog(`> ${cmd}`);
+        await runCommand(cmd, { cwd: projectDir, env: envVars, onLog });
         onLog("Build completed.");
       }
 

@@ -9,9 +9,9 @@ import {
 import { Icon } from "@iconify/react";
 import { toast } from "sonner";
 
-type Category = "app" | "database";
+type Category = "app" | "database" | "template-nginx" | "template-apache" | "template-caddy";
 type SourceType = "github" | "upload";
-type RuntimeType = "node" | "static" | "docker";
+type RuntimeType = "node" | "docker" | "custom";
 type ServiceType = "postgresql" | "mysql" | "redis" | "mongodb";
 
 const serviceOptions: { type: ServiceType; label: string; icon: string; defaultPort: number; versions: string[] }[] = [
@@ -36,7 +36,59 @@ export default function NewServicePage() {
   const [runtimeType, setRuntimeType] = useState<RuntimeType>("node");
   const [appPort, setAppPort] = useState("");
   const [packageManager, setPackageManager] = useState<"auto"|"npm"|"bun"|"pnpm"|"yarn">("auto");
+  const [installCmd, setInstallCmd] = useState("");
+  const [buildCmd, setBuildCmd] = useState("");
+  const [startCmd, setStartCmd] = useState("");
   const [zipFile, setZipFile] = useState<File | null>(null);
+  const [dockerMode, setDockerMode] = useState<"custom" | string>("custom");
+
+  // Docker templates
+  const dockerTemplates = [
+    {
+      id: "nginx",
+      label: "Nginx",
+      icon: "solar:server-2-bold-duotone",
+      description: "Web server / reverse proxy",
+      fields: [
+        { key: "serverName", label: "Server Name", placeholder: "localhost", default: "localhost" },
+        { key: "rootDir", label: "Root Directory", placeholder: "/usr/share/nginx/html", default: "/usr/share/nginx/html" },
+        { key: "configFile", label: "Config Path (optional)", placeholder: "nginx.conf", default: "" },
+      ],
+      image: "nginx",
+      versions: ["1.27", "1.26", "1.25"],
+      defaultPort: "80",
+    },
+    {
+      id: "apache",
+      label: "Apache",
+      icon: "solar:server-2-bold-duotone",
+      description: "HTTP server",
+      fields: [
+        { key: "documentRoot", label: "Document Root", placeholder: "/var/www/html", default: "/var/www/html" },
+        { key: "serverAdmin", label: "Server Admin Email", placeholder: "admin@example.com", default: "" },
+      ],
+      image: "httpd",
+      versions: ["2.4"],
+      defaultPort: "80",
+    },
+    {
+      id: "caddy",
+      label: "Caddy",
+      icon: "solar:shield-check-bold-duotone",
+      description: "Auto-HTTPS web server",
+      fields: [
+        { key: "domain", label: "Domain", placeholder: "example.com", default: "" },
+        { key: "rootDir", label: "Root Directory", placeholder: "/srv", default: "/srv" },
+        { key: "caddyfile", label: "Caddyfile Path (optional)", placeholder: "Caddyfile", default: "" },
+      ],
+      image: "caddy",
+      versions: ["2.9", "2.8", "2.7"],
+      defaultPort: "80",
+    },
+  ];
+
+  const [dockerTemplateVersion, setDockerTemplateVersion] = useState("");
+  const [dockerTemplateFields, setDockerTemplateFields] = useState<Record<string, string>>({});
 
   // Database state
   const [dbName, setDbName] = useState("");
@@ -62,6 +114,7 @@ export default function NewServicePage() {
   async function handleCreateApp() {
     if (sourceType === "github" && !sourceUrl.trim()) { toast.error("Repository URL required"); return; }
     if (sourceType === "upload" && !zipFile) { toast.error("ZIP file required"); return; }
+    if (runtimeType === "custom" && !startCmd.trim()) { toast.error("Start command is required for custom runtime"); return; }
 
     setLoading(true);
     try {
@@ -75,7 +128,18 @@ export default function NewServicePage() {
           sourceBranch: branch || "main",
           runtimeType,
           port: appPort ? parseInt(appPort) : undefined,
-          builderConfig: { packageManager: packageManager !== "auto" ? packageManager : undefined },
+          builderConfig: {
+            packageManager: packageManager !== "auto" ? packageManager : undefined,
+            installCmd: installCmd.trim() || undefined,
+            buildCmd: buildCmd.trim() || undefined,
+            startCmd: startCmd.trim() || undefined,
+            // Docker template config
+            ...(runtimeType === "docker" && dockerMode !== "custom" ? {
+              dockerTemplate: dockerMode,
+              dockerImage: `${dockerTemplates.find((t) => t.id === dockerMode)?.image}:${dockerTemplateVersion}`,
+              dockerFields: dockerTemplateFields,
+            } : {}),
+          },
         }),
       });
 
@@ -129,6 +193,20 @@ export default function NewServicePage() {
     finally { setLoading(false); }
   }
 
+  // Handle template category selection — pre-fill docker config
+  function selectTemplateCategory(tplId: string) {
+    const tpl = dockerTemplates.find((t) => t.id === tplId);
+    if (!tpl) return;
+    setRuntimeType("docker");
+    setDockerMode(tplId);
+    setAppPort(tpl.defaultPort);
+    setDockerTemplateVersion(tpl.versions[0]);
+    const defaults: Record<string, string> = {};
+    tpl.fields.forEach((f) => { defaults[f.key] = f.default; });
+    setDockerTemplateFields(defaults);
+    setCategory(`template-${tplId}` as Category);
+  }
+
   // Step 1: Choose category
   if (!category) {
     return (
@@ -137,25 +215,89 @@ export default function NewServicePage() {
           <h1 className="text-2xl font-bold">Add to Project</h1>
           <p className="text-sm text-foreground-400">Choose what to add</p>
         </div>
-        <div className="grid grid-cols-2 gap-4 max-w-lg">
+
+        <p className="text-xs font-medium text-foreground-400 mb-3">Application</p>
+        <div className="grid grid-cols-1 gap-4 max-w-2xl mb-6 sm:grid-cols-2 lg:grid-cols-3">
           <Card className="cursor-pointer transition-all hover:border-purple-500/30" onClick={() => setCategory("app")}>
-            <CardContent className="flex flex-col items-center py-8 text-center">
-              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-purple-500/15 mb-3">
-                <Icon icon="solar:code-bold-duotone" className="text-purple-400" width={24} />
+            <CardContent className="flex flex-col items-center py-6 text-center">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-purple-500/15 mb-2">
+                <Icon icon="solar:code-bold-duotone" className="text-purple-400" width={22} />
               </div>
-              <p className="font-semibold">App</p>
-              <p className="text-xs text-foreground-400 mt-1">Deploy from GitHub or ZIP</p>
+              <p className="font-semibold text-sm">App</p>
+              <span className="mt-1.5 inline-block rounded-full bg-purple-500/15 px-2 py-0.5 text-[10px] font-medium text-purple-300">Build your project</span>
             </CardContent>
           </Card>
-          <Card className="cursor-pointer transition-all hover:border-violet-500/30" onClick={() => setCategory("database")}>
-            <CardContent className="flex flex-col items-center py-8 text-center">
-              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-violet-500/15 mb-3">
-                <Icon icon="solar:database-bold-duotone" className="text-violet-400" width={24} />
+          {dockerTemplates.map((tpl) => (
+            <Card key={tpl.id} className="cursor-pointer transition-all hover:border-purple-500/30" onClick={() => selectTemplateCategory(tpl.id)}>
+              <CardContent className="flex flex-col items-center py-6 text-center">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-purple-500/15 mb-2">
+                  <Icon icon={tpl.icon} className="text-purple-400" width={22} />
+                </div>
+                <p className="font-semibold text-sm">{tpl.label}</p>
+                <p className="text-[11px] text-foreground-400 mt-1">{tpl.description}</p>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+
+        <p className="text-xs font-medium text-foreground-400 mb-3">Database</p>
+        <div className="grid grid-cols-2 gap-4 max-w-2xl sm:grid-cols-3 lg:grid-cols-4">
+          {serviceOptions.map((opt) => (
+            <Card key={opt.type} className="cursor-pointer transition-all hover:border-violet-500/30" onClick={() => setCategory("database")}>
+              <CardContent className="flex flex-col items-center py-6 text-center" onClick={() => { handleDbTypeChange(opt.type); setCategory("database"); }}>
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-violet-500/15 mb-2">
+                  <Icon icon={opt.icon} className="text-violet-400" width={22} />
+                </div>
+                <p className="font-semibold text-sm">{opt.label}</p>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // Step 2: Template config (Nginx, Apache, Caddy)
+  if (category.startsWith("template-")) {
+    const tplId = category.replace("template-", "");
+    const tpl = dockerTemplates.find((t) => t.id === tplId);
+    if (!tpl) { setCategory(null); return null; }
+
+    return (
+      <div>
+        <div className="mb-6 flex items-center gap-3">
+          <Button variant="ghost" size="sm" onPress={() => setCategory(null)}><Icon icon="solar:arrow-left-linear" width={18} /></Button>
+          <div>
+            <h1 className="text-2xl font-bold">{tpl.label}</h1>
+            <p className="text-sm text-foreground-400">{tpl.description}</p>
+          </div>
+        </div>
+
+        <div className="max-w-2xl space-y-6">
+          <Card>
+            <CardHeader><CardTitle>Configuration</CardTitle></CardHeader>
+            <CardContent className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-foreground-400 mb-2">Version</label>
+                <div className="flex gap-2">
+                  {tpl.versions.map((v) => (
+                    <Button key={v} variant={dockerTemplateVersion === v ? "primary" : "outline"} size="sm" onPress={() => setDockerTemplateVersion(v)}>{v}</Button>
+                  ))}
+                </div>
               </div>
-              <p className="font-semibold">Database</p>
-              <p className="text-xs text-foreground-400 mt-1">PostgreSQL, MySQL, Redis, MongoDB</p>
+              <TextField value={appPort} onChange={setAppPort}><Label>Port</Label><Input type="number" placeholder={tpl.defaultPort} /></TextField>
+              {tpl.fields.map((f) => (
+                <TextField key={f.key} value={dockerTemplateFields[f.key] || ""} onChange={(val) => setDockerTemplateFields((prev) => ({ ...prev, [f.key]: val }))}>
+                  <Label>{f.label}</Label>
+                  <Input placeholder={f.placeholder} className="font-mono text-sm" />
+                </TextField>
+              ))}
             </CardContent>
           </Card>
+
+          <Button variant="primary" size="lg" className="w-full" isDisabled={loading} onPress={handleCreateApp}>
+            {loading ? <Spinner /> : `Deploy ${tpl.label}`}
+          </Button>
         </div>
       </div>
     );
@@ -202,14 +344,19 @@ export default function NewServicePage() {
           <Card>
             <CardHeader><CardTitle>Runtime</CardTitle><CardDescription>How to run the project</CardDescription></CardHeader>
             <CardContent className="space-y-4">
-              <div className="flex gap-2">
-                {(["node", "static", "docker"] as RuntimeType[]).map((rt) => (
-                  <Button key={rt} variant={runtimeType === rt ? "primary" : "outline"} onPress={() => setRuntimeType(rt)} size="sm">
-                    <Icon icon={rt === "node" ? "solar:code-bold-duotone" : rt === "static" ? "solar:document-bold-duotone" : "solar:box-minimalistic-bold-duotone"} width={16} />
-                    {rt === "node" ? "Node.js" : rt === "static" ? "Static" : "Docker"}
+              <div className="flex gap-2 flex-wrap">
+                {([
+                  { id: "node" as RuntimeType, label: "Node.js", icon: "solar:code-bold-duotone" },
+                  { id: "docker" as RuntimeType, label: "Docker", icon: "solar:box-minimalistic-bold-duotone" },
+                  { id: "custom" as RuntimeType, label: "Custom", icon: "solar:settings-bold-duotone" },
+                ]).map((rt) => (
+                  <Button key={rt.id} variant={runtimeType === rt.id ? "primary" : "outline"} onPress={() => setRuntimeType(rt.id)} size="sm">
+                    <Icon icon={rt.icon} width={16} />
+                    {rt.label}
                   </Button>
                 ))}
               </div>
+
               {runtimeType === "node" && (
                 <div>
                   <label className="block text-sm font-medium text-foreground-400 mb-2">Package Manager</label>
@@ -220,7 +367,35 @@ export default function NewServicePage() {
                   </div>
                 </div>
               )}
+
+              {runtimeType === "docker" && (
+                <p className="text-xs text-foreground-500">Your project must include a Dockerfile. Docker templates are available from the main selection screen.</p>
+              )}
+
               <TextField value={appPort} onChange={setAppPort}><Label>Port (optional)</Label><Input placeholder="3000" type="number" /></TextField>
+
+              {/* Custom commands — always shown for custom, optional for node */}
+              {(runtimeType === "custom" || runtimeType === "node") && (
+                <div className="space-y-3 pt-2 border-t border-white/[0.07]">
+                  <p className="text-xs font-medium text-foreground-400">
+                    {runtimeType === "custom" ? "Commands (required for custom runtime)" : "Advanced (optional overrides)"}
+                  </p>
+                  <p className="text-[11px] text-foreground-500">One command per line. They run in order.</p>
+                  <div>
+                    <label className="block text-sm font-medium text-foreground-400 mb-1">Install Commands</label>
+                    <textarea value={installCmd} onChange={(e) => setInstallCmd(e.target.value)} rows={2} placeholder={runtimeType === "node" ? "auto-detected" : "pip install -r requirements.txt\nnpm install -g pm2"} className="w-full rounded-lg border border-white/[0.07] bg-black/30 px-3 py-2 font-mono text-sm text-foreground-300 outline-none focus:border-purple-500/30 resize-y" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-foreground-400 mb-1">Build Commands</label>
+                    <textarea value={buildCmd} onChange={(e) => setBuildCmd(e.target.value)} rows={2} placeholder={runtimeType === "node" ? "auto-detected" : "python -m compileall .\nnpm run build"} className="w-full rounded-lg border border-white/[0.07] bg-black/30 px-3 py-2 font-mono text-sm text-foreground-300 outline-none focus:border-purple-500/30 resize-y" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-foreground-400 mb-1">Start Command {runtimeType === "custom" && <span className="text-danger">*</span>}</label>
+                    <textarea value={startCmd} onChange={(e) => setStartCmd(e.target.value)} rows={1} placeholder={runtimeType === "node" ? "auto-detected" : "python app.py"} className="w-full rounded-lg border border-white/[0.07] bg-black/30 px-3 py-2 font-mono text-sm text-foreground-300 outline-none focus:border-purple-500/30 resize-y" />
+                    <p className="text-[11px] text-foreground-500 mt-1">Only the first line is used as the process start command.</p>
+                  </div>
+                </div>
+              )}
             </CardContent>
           </Card>
 

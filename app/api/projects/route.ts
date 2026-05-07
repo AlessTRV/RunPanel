@@ -18,11 +18,18 @@ export async function GET() {
     ORDER BY p.created_at DESC
   `).all() as Record<string, unknown>[];
 
-  // Attach services for each project
-  const stmtServices = db.prepare("SELECT * FROM services WHERE project_id = ?");
+  // Batch load all services (avoids N+1 query)
+  const allServices = db.prepare("SELECT * FROM services WHERE project_id IS NOT NULL").all() as Record<string, unknown>[];
+  const servicesByProject = new Map<string, Record<string, unknown>[]>();
+  for (const svc of allServices) {
+    const pid = svc.project_id as string;
+    if (!servicesByProject.has(pid)) servicesByProject.set(pid, []);
+    servicesByProject.get(pid)!.push(svc);
+  }
+
   const result = projects.map((p) => ({
     ...p,
-    services: stmtServices.all(p.id as string),
+    services: servicesByProject.get(p.id as string) || [],
   }));
 
   return NextResponse.json(result);
