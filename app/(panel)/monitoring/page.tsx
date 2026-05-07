@@ -62,7 +62,7 @@ export default function MonitoringPage() {
         <Card>
           <CardHeader>
             <div className="flex items-center gap-3">
-              <Icon icon="solar:processor-bold-duotone" width={24} className="text-primary" />
+              <Icon icon="solar:cpu-bold-duotone" width={24} className="text-primary" />
               <CardTitle>CPU</CardTitle>
             </div>
           </CardHeader>
@@ -85,7 +85,7 @@ export default function MonitoringPage() {
         <Card>
           <CardHeader>
             <div className="flex items-center gap-3">
-              <Icon icon="solar:ram-bold-duotone" width={24} className="text-secondary" />
+              <Icon icon="solar:server-bold-duotone" width={24} className="text-secondary" />
               <CardTitle>Memory</CardTitle>
             </div>
           </CardHeader>

@@ -72,7 +72,7 @@ export default function ServicesPage() {
       </div>
 
       {services.length === 0 ? (
-        <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-divider py-20">
+        <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-white/[0.07] py-20">
           <Icon icon="solar:database-bold-duotone" className="mb-4 text-foreground-300" width={48} />
           <p className="text-foreground-400">No services yet</p>
           <p className="text-sm text-foreground-500">Provision a database or cache service</p>
@@ -95,7 +95,7 @@ export default function ServicesPage() {
                   <StatusBadge status={svc.status} />
                 </div>
               </CardHeader>
-              <CardContent className="flex gap-2 border-t border-divider pt-3">
+              <CardContent className="flex gap-2 border-t border-white/[0.07] pt-3">
                 {svc.status === "running" ? (
                   <>
                     <Button variant="outline" size="sm" onPress={() => handleControl(svc.id, "restart")}>

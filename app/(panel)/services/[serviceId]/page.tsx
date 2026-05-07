@@ -90,7 +90,7 @@ export default function ServiceDetailPage() {
             {showCreds && creds ? (
               <div className="space-y-2 font-mono text-sm">
                 {Object.entries(creds).map(([key, value]) => (
-                  <div key={key} className="flex justify-between rounded-lg bg-content2 px-3 py-2">
+                  <div key={key} className="flex justify-between rounded-lg border border-white/[0.07] bg-black/40 backdrop-blur-xl px-3 py-2">
                     <span className="text-foreground-400">{key}:</span>
                     <span className="text-foreground">{value}</span>
                   </div>

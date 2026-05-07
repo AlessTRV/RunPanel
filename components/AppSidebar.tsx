@@ -13,9 +13,7 @@ interface NavItem {
 }
 
 const navItems: NavItem[] = [
-  { label: "Projects", href: "/projects", icon: "solar:box-bold-duotone" },
-  { label: "Services", href: "/services", icon: "solar:database-bold-duotone" },
-  { label: "Monitoring", href: "/monitoring", icon: "solar:chart-bold-duotone" },
+  { label: "Home", href: "/home", icon: "solar:home-bold-duotone" },
   { label: "Settings", href: "/settings", icon: "solar:settings-bold-duotone" },
 ];
 
@@ -23,16 +21,19 @@ export function AppSidebar() {
   const pathname = usePathname();
 
   return (
-    <aside className="fixed left-0 top-0 z-40 flex h-screen w-64 flex-col border-r border-divider bg-content1">
-      <div className="flex h-16 items-center gap-3 border-b border-divider px-6">
-        <Icon icon="solar:server-bold-duotone" className="text-primary" width={28} />
-        <span className="text-xl font-bold">RunPanel</span>
+    <aside className="fixed left-0 top-0 z-40 flex h-screen w-64 flex-col border-r border-purple-500/10 backdrop-blur-xl" style={{ background: "linear-gradient(180deg, rgba(18,12,32,0.92) 0%, rgba(11,6,19,0.96) 100%)" }}>
+      <div className="flex h-16 items-center gap-3 border-b border-purple-500/10 px-6">
+        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-purple-500/15">
+          <Icon icon="solar:server-bold-duotone" className="text-purple-400" width={20} />
+        </div>
+        <span className="text-lg font-bold bg-gradient-to-r from-purple-200 to-purple-400 bg-clip-text text-transparent">RunPanel</span>
       </div>
 
       <nav className="flex-1 space-y-1 p-3">
         {navItems.map((item) => {
-          const isActive =
-            pathname === item.href || pathname.startsWith(item.href + "/");
+          const isActive = item.href === "/home"
+            ? pathname === "/home" || pathname.startsWith("/projects") || pathname.startsWith("/services")
+            : pathname === item.href || pathname.startsWith(item.href + "/");
           return (
             <Link
               key={item.href}
@@ -40,8 +41,8 @@ export function AppSidebar() {
               className={clsx(
                 "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
                 isActive
-                  ? "bg-primary/10 text-primary"
-                  : "text-foreground-500 hover:bg-default-100 hover:text-foreground"
+                  ? "bg-purple-500/10 text-purple-300"
+                  : "text-foreground-500 hover:bg-purple-500/5 hover:text-foreground"
               )}
             >
               <Icon icon={item.icon} width={22} />
@@ -51,7 +52,7 @@ export function AppSidebar() {
         })}
       </nav>
 
-      <div className="border-t border-divider p-4">
+      <div className="border-t border-purple-500/10 p-4">
         <div className="flex items-center gap-2 text-xs text-foreground-400">
           <Chip size="sm" variant="soft">v0.1.0</Chip>
           <span>RunPanel</span>

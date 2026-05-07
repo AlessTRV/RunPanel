@@ -45,7 +45,7 @@ export function ProjectCard({ project }: { project: Project }) {
             <StatusBadge status={project.status} />
           </div>
         </CardHeader>
-        <CardFooter className="text-xs text-foreground-400 flex gap-4 border-t border-divider pt-3">
+        <CardFooter className="text-xs text-foreground-400 flex gap-4 border-t border-white/[0.07] pt-3">
           <span className="flex items-center gap-1">
             <Icon icon="solar:upload-bold-duotone" width={14} />
             {project.deploy_count} deploys

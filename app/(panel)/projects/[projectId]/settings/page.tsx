@@ -170,11 +170,11 @@ export default function ProjectSettingsPage() {
             <CardDescription>Auto-deploy on GitHub push</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
-            <div className="rounded-lg bg-content2 p-3 font-mono text-xs break-all">
+            <div className="rounded-lg border border-white/[0.07] bg-black/40 backdrop-blur-xl p-3 font-mono text-xs break-all">
               <p className="text-foreground-400 mb-1">Webhook URL:</p>
               <p>{typeof window !== "undefined" ? window.location.origin : ""}/api/webhooks/github/{projectId}</p>
             </div>
-            <div className="rounded-lg bg-content2 p-3 font-mono text-xs break-all">
+            <div className="rounded-lg border border-white/[0.07] bg-black/40 backdrop-blur-xl p-3 font-mono text-xs break-all">
               <p className="text-foreground-400 mb-1">Secret:</p>
               <p>{project.webhook_secret}</p>
             </div>

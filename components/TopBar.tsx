@@ -36,7 +36,7 @@ export function TopBar() {
   }
 
   return (
-    <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-divider bg-background/80 px-6 backdrop-blur-md">
+    <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-purple-500/10 px-6 backdrop-blur-xl" style={{ background: "rgba(11,6,19,0.6)" }}>
       <div className="flex items-center gap-2 text-sm">
         <Icon icon="solar:home-bold-duotone" className="text-foreground-400" width={18} />
         {crumbs.map((crumb, i) => (

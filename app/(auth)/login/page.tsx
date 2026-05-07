@@ -29,7 +29,7 @@ export default function LoginPage() {
       .then((r) => r.json())
       .then((data) => {
         if (data.authenticated) {
-          router.push("/projects");
+          router.push("/home");
         }
         setIsFirstRun(data.firstRun);
       })
@@ -46,7 +46,7 @@ export default function LoginPage() {
         body: JSON.stringify({ password }),
       });
       if (res.ok) {
-        router.push("/projects");
+        router.push("/home");
       } else {
         const data = await res.json();
         toast.error(data.error || "Invalid password");
@@ -75,7 +75,7 @@ export default function LoginPage() {
         body: JSON.stringify({ password, setup: true }),
       });
       if (res.ok) {
-        router.push("/projects");
+        router.push("/home");
       } else {
         const data = await res.json();
         toast.error(data.error || "Setup failed");
@@ -96,8 +96,8 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background p-4">
-      <Card className="w-full max-w-md">
+    <div className="flex min-h-screen items-center justify-center p-4">
+      <Card className="w-full max-w-md border border-purple-500/10 shadow-2xl shadow-purple-500/10">
         <CardHeader className="flex flex-col items-center gap-2 pb-0 pt-8">
           <Icon icon="solar:server-bold-duotone" className="text-primary" width={48} />
           <CardTitle className="text-2xl">RunPanel</CardTitle>

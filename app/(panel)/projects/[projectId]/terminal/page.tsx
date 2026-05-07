@@ -181,7 +181,7 @@ export default function TerminalPage() {
       {mode === "shell" && !active && (
         <div className="mb-2">
           <Button variant="primary" size="sm" isDisabled={starting} onPress={startShell}>
-            {starting ? <Spinner /> : <Icon icon="solar:play-bold" width={16} />}
+            {starting ? <Spinner /> : <Icon icon="solar:play-bold-duotone" width={16} />}
             Start Shell
           </Button>
         </div>
@@ -189,7 +189,7 @@ export default function TerminalPage() {
       {mode === "shell" && active && (
         <div className="mb-2">
           <Button variant="danger" size="sm" onPress={stopShell}>
-            <Icon icon="solar:stop-bold" width={16} />
+            <Icon icon="solar:stop-bold-duotone" width={16} />
             Stop Shell
           </Button>
         </div>
@@ -197,7 +197,7 @@ export default function TerminalPage() {
 
       <div
         ref={termRef}
-        className="h-[500px] overflow-auto rounded-xl bg-black p-4 font-mono text-sm text-green-400"
+        className="h-[500px] overflow-auto rounded-xl border border-white/[0.07] bg-black/50 backdrop-blur-2xl shadow-[0_8px_32px_rgba(0,0,0,0.3)] p-4 font-mono text-sm text-green-400/80"
       >
         {lines.length === 0 && (
           <p className="text-foreground-500">
@@ -223,7 +223,7 @@ export default function TerminalPage() {
             onKeyDown={handleKeyDown}
             placeholder="Type a command..."
             autoFocus
-            className="flex-1 rounded-lg border border-divider bg-black px-3 py-2 font-mono text-sm text-green-400 outline-none focus:border-primary"
+            className="flex-1 rounded-lg border border-white/[0.07] bg-black/50 backdrop-blur-2xl shadow-[0_8px_32px_rgba(0,0,0,0.3)] px-3 py-2 font-mono text-sm text-green-400/80 outline-none focus:border-primary/50"
           />
         </div>
       )}

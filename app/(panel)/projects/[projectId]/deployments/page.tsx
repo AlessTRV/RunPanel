@@ -95,7 +95,7 @@ function DeploymentCard({ deployment: d }: { deployment: Deployment }) {
 
         {/* Row 3: Build log (expandable) */}
         {expanded && buildLog && (
-          <div className="mt-3 max-h-96 overflow-auto rounded-lg bg-content2 p-3">
+          <div className="mt-3 max-h-96 overflow-auto rounded-lg border border-white/[0.07] bg-black/50 backdrop-blur-2xl shadow-[0_8px_32px_rgba(0,0,0,0.3)] p-3">
             <pre className="whitespace-pre-wrap break-words font-mono text-xs text-foreground-400">
               {buildLog}
             </pre>
@@ -145,7 +145,7 @@ export default function DeploymentsPage() {
       </div>
 
       {deployments.length === 0 ? (
-        <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-divider py-20">
+        <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-white/[0.07] py-20">
           <Icon icon="solar:history-bold-duotone" className="mb-4 text-foreground-300" width={48} />
           <p className="text-foreground-400">No deployments yet</p>
           <p className="text-sm text-foreground-500">Deploy your project to see history here</p>
