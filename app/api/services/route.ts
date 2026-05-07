@@ -44,8 +44,15 @@ export async function POST(request: NextRequest) {
   const db = getDb();
 
   try {
+    // Get project slug for network linking
+    let projectSlug: string | undefined;
+    if (projectId) {
+      const proj = db.prepare("SELECT slug FROM projects WHERE id = ?").get(projectId) as { slug: string } | undefined;
+      projectSlug = proj?.slug;
+    }
+
     const config = { name, type: type as "postgresql" | "mysql" | "redis" | "mongodb", version, port, credentials };
-    const containerId = await provisionService(config);
+    const containerId = await provisionService(config, projectSlug);
     const connString = getConnectionString(config);
 
     db.prepare(`

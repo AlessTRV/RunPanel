@@ -279,7 +279,7 @@ export default function ProjectDetailPage() {
     { id: "logs", label: "Logs", icon: "solar:document-text-bold-duotone" },
     { id: "deployments", label: "Deployments", icon: "solar:history-bold-duotone" },
     { id: "env", label: "Env", icon: "solar:key-bold-duotone" },
-    { id: "terminal", label: "Terminal", icon: "solar:monitor-bold-duotone" },
+    ...(project.runtime_type === "docker" ? [{ id: "terminal" as TabId, label: "Terminal", icon: "solar:monitor-bold-duotone" }] : []),
     { id: "settings", label: "Settings", icon: "solar:settings-bold-duotone" },
   ];
 
@@ -387,7 +387,7 @@ export default function ProjectDetailPage() {
             {shellActive && <Button variant="danger" size="sm" onPress={stopShell}><Icon icon="solar:stop-bold-duotone" width={16} />Stop Shell</Button>}
           </div>
           <div ref={termRef} className="h-[280px] sm:h-[400px] overflow-auto rounded-xl border border-white/[0.07] bg-black/50 backdrop-blur-2xl shadow-[0_8px_32px_rgba(0,0,0,0.3)] p-4 font-mono text-sm text-green-400/80">
-            {termLines.length === 0 ? <p className="text-foreground-500">Click &quot;Start Shell&quot; to open an interactive terminal in the project directory.</p> : termLines.map((l, i) => <span key={i} className="whitespace-pre-wrap break-all">{l}</span>)}
+            {termLines.length === 0 ? <p className="text-foreground-500">Click &quot;Start Shell&quot; to open a shell inside the Docker container.</p> : termLines.map((l, i) => <span key={i} className="whitespace-pre-wrap break-all">{l}</span>)}
           </div>
           {shellActive && (
             <div className="mt-2 flex gap-2">

@@ -121,6 +121,12 @@ export async function DELETE(_request: NextRequest, { params }: Params) {
     if (fs.existsSync(f)) fs.rmSync(f);
   }
 
+  // Remove project Docker network
+  try {
+    const { removeProjectNetwork } = await import("@/services/docker-network");
+    await removeProjectNetwork(project.slug as string);
+  } catch { /* ignore */ }
+
   // Manual cascade delete (FK constraints lost in migration 6)
   db.prepare("DELETE FROM deployments WHERE project_id = ?").run(projectId);
   db.prepare("DELETE FROM env_vars WHERE project_id = ?").run(projectId);

@@ -125,6 +125,33 @@ export async function executeDeploy(
       envVars.NODE_ENV = "production";
     }
 
+    // Auto-inject service connection URLs (DB, Redis, etc.)
+    const linkedServices = db.prepare(
+      "SELECT name, type, port, credentials FROM services WHERE project_id = ?"
+    ).all(project.id) as { name: string; type: string; port: number; credentials: string }[];
+
+    const isDockerApp = project.runtime_type === "docker";
+    for (const svc of linkedServices) {
+      const containerName = `runpanel-svc-${svc.name}`;
+      const host = isDockerApp ? containerName : "localhost";
+      let creds: { user?: string; password?: string; database?: string; connectionString?: string } = {};
+      try { creds = JSON.parse(decrypt(svc.credentials)); } catch {}
+
+      const envKey = svc.type === "redis" ? "REDIS_URL" : svc.type === "mongodb" ? "MONGODB_URL" : "DATABASE_URL";
+
+      // Don't overwrite if user already set it
+      if (!envVars[envKey]) {
+        if (svc.type === "redis") {
+          envVars[envKey] = `redis://${creds.password ? `:${creds.password}@` : ""}${host}:${svc.port}/0`;
+        } else if (svc.type === "mongodb") {
+          envVars[envKey] = `mongodb://${creds.user || ""}:${creds.password || ""}@${host}:${svc.port}/${creds.database || ""}`;
+        } else {
+          envVars[envKey] = `${svc.type === "mysql" ? "mysql" : "postgresql"}://${creds.user || ""}:${creds.password || ""}@${host}:${svc.port}/${creds.database || ""}`;
+        }
+        appendLog(`Auto-linked ${svc.type} service "${svc.name}" → ${envKey}`);
+      }
+    }
+
     // Build (install + compile) — process stays running during this phase
     appendLog("\n--- Building ---");
 

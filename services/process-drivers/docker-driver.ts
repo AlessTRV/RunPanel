@@ -30,10 +30,19 @@ export const dockerDriver: IProcessDriver = {
       envArgs.push("-e", `PORT=${opts.port}`);
     }
 
+    // Check if project has a network (connect after run)
+    const { ensureProjectNetwork } = await import("../docker-network");
+    let networkArgs: string[] = [];
+    try {
+      const netName = await ensureProjectNetwork(slug);
+      networkArgs = ["--network", netName];
+    } catch { /* no network */ }
+
     // Run container
     await exec("docker", [
       "run", "-d",
       "--name", name,
+      ...networkArgs,
       ...portArgs,
       ...envArgs,
       imageName,

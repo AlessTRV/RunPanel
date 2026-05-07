@@ -28,12 +28,18 @@ export function generateCredentials(type: string): { user: string; password: str
   return { user: "runpanel", password, database: "runpanel_db" };
 }
 
-export async function provisionService(config: ServiceConfig): Promise<string> {
+export async function provisionService(config: ServiceConfig, projectSlug?: string): Promise<string> {
   const template = getTemplate(config.type);
   if (!template) throw new Error(`Unknown service type: ${config.type}`);
 
   const dockerConfig = template.getDockerConfig(config);
   const containerName = `runpanel-svc-${config.name}`;
+
+  // Ensure project network exists if project is linked
+  if (projectSlug) {
+    const { ensureProjectNetwork } = await import("./docker-network");
+    await ensureProjectNetwork(projectSlug);
+  }
 
   // Remove existing container if any
   try {
@@ -47,6 +53,11 @@ export async function provisionService(config: ServiceConfig): Promise<string> {
     "-p", `${config.port}:${dockerConfig.port}`,
     "--restart", "unless-stopped",
   ];
+
+  // Connect to project network
+  if (projectSlug) {
+    args.push("--network", `runpanel-net-${projectSlug}`);
+  }
 
   // Add environment vars — values passed as separate args to execFile (no shell injection risk)
   for (const [key, value] of Object.entries(dockerConfig.env)) {
