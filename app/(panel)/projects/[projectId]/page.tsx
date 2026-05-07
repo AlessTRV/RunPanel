@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useRef, useCallback } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import {
   Card, CardHeader, CardTitle, CardDescription, CardContent,
   Button, Spinner, TextField, Label, Input,
@@ -42,6 +42,7 @@ type TabId = "logs" | "deployments" | "env" | "terminal" | "settings";
 export default function ProjectDetailPage() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const projectId = params.projectId as string;
 
   const [project, setProject] = useState<Project | null>(null);
@@ -49,6 +50,7 @@ export default function ProjectDetailPage() {
   const [loading, setLoading] = useState(true);
   const [deploying, setDeploying] = useState(false);
   const [activeTab, setActiveTab] = useState<TabId>("logs");
+  const [showProjectSettings, setShowProjectSettings] = useState(searchParams.get("tab") === "settings");
 
   // Logs state
   const [logs, setLogs] = useState<string[]>([]);
@@ -65,20 +67,23 @@ export default function ProjectDetailPage() {
   const [envSaving, setEnvSaving] = useState(false);
 
   // Terminal state
-  const [termMode, setTermMode] = useState<"logs" | "shell">("logs");
   const [shellActive, setShellActive] = useState(false);
   const [shellStarting, setShellStarting] = useState(false);
   const [termLines, setTermLines] = useState<string[]>([]);
   const [termInput, setTermInput] = useState("");
   const termRef = useRef<HTMLDivElement>(null);
-  const termPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const termSeenRef = useRef(new Set<string>());
+
+
 
   // Settings state
   const [settName, setSettName] = useState("");
   const [settBranch, setSettBranch] = useState("");
   const [settPort, setSettPort] = useState("");
   const [settPm, setSettPm] = useState<"auto"|"npm"|"bun"|"pnpm"|"yarn">("auto");
+  const [settAppName, setSettAppName] = useState("");
+  const [settInstallCmd, setSettInstallCmd] = useState("");
+  const [settBuildCmd, setSettBuildCmd] = useState("");
+  const [settStartCmd, setSettStartCmd] = useState("");
   const [settSaving, setSettSaving] = useState(false);
   const [settDeleting, setSettDeleting] = useState(false);
 
@@ -88,8 +93,8 @@ export default function ProjectDetailPage() {
       .then((r) => { if (!r.ok) throw new Error(); return r.json(); })
       .then((p) => {
         setProject(p);
-        setSettName(p.name); setSettBranch(p.source_branch); setSettPort(p.port?.toString() || "");
-        try { const bc = JSON.parse(p.builder_config || "{}"); setSettPm(bc.packageManager || "auto"); } catch {}
+        setSettName(p.name); setSettAppName(p.app_name || ""); setSettBranch(p.source_branch); setSettPort(p.port?.toString() || "");
+        try { const bc = JSON.parse(p.builder_config || "{}"); setSettPm(bc.packageManager || "auto"); setSettInstallCmd(bc.installCmd || ""); setSettBuildCmd(bc.buildCmd || ""); setSettStartCmd(bc.startCmd || ""); } catch {}
       })
       .catch(() => router.push("/home"))
       .finally(() => setLoading(false));
@@ -103,42 +108,49 @@ export default function ProjectDetailPage() {
   }, [project]);
 
   useEffect(() => {
+    const controller = new AbortController();
     const interval = setInterval(async () => {
-      const [pr, st] = await Promise.all([
-        fetch(`/api/projects/${projectId}`).then(r => r.ok ? r.json() : null),
-        fetch(`/api/projects/${projectId}/status`).then(r => r.ok ? r.json() : null),
-      ]);
-      if (pr) {
-        const prev = prevStatusRef.current;
-        prevStatusRef.current = pr.status;
-        setProject(pr);
-        if (prev === "deploying" && pr.status === "running") toast.success("Deploy completed");
-        if (prev === "deploying" && pr.status === "error") toast.error("Deploy failed");
-      }
-      if (st?.process) setProcessInfo(st.process);
-    }, 3000);
-    return () => clearInterval(interval);
+      try {
+        const [prRes, stRes] = await Promise.all([
+          fetch(`/api/projects/${projectId}`, { signal: controller.signal }),
+          fetch(`/api/projects/${projectId}/status`, { signal: controller.signal }),
+        ]);
+        const pr = prRes.ok ? await prRes.json() : null;
+        const st = stRes.ok ? await stRes.json() : null;
+        if (pr) {
+          const prev = prevStatusRef.current;
+          prevStatusRef.current = pr.status;
+          setProject(pr);
+          if (prev === "deploying" && pr.status === "running") toast.success("Deploy completed");
+          if (prev === "deploying" && pr.status === "error") toast.error("Deploy failed");
+        }
+        if (st?.process) setProcessInfo(st.process);
+      } catch (e) { if (e instanceof Error && e.name === "AbortError") return; }
+    }, 5000);
+    return () => { controller.abort(); clearInterval(interval); };
   }, [projectId]);
 
-  // ── Logs polling ──
-  const pollLogs = useCallback(async () => {
-    try {
-      const res = await fetch(`/api/projects/${projectId}/logs?source=process`);
-      if (!res.ok) return;
-      const data = await res.json();
-      for (const l of (data.logs as string[] || [])) {
-        if (!seenLogsRef.current.has(l)) { seenLogsRef.current.add(l); setLogs(p => [...p, l]); }
-      }
-    } catch {}
-  }, [projectId]);
-
+  // ── Logs polling (batched updates, AbortController) ──
   useEffect(() => {
     if (activeTab !== "logs") return;
     seenLogsRef.current.clear(); setLogs([]);
-    pollLogs();
-    const i = setInterval(pollLogs, 2000);
-    return () => clearInterval(i);
-  }, [activeTab, pollLogs]);
+    const controller = new AbortController();
+    const poll = async () => {
+      try {
+        const res = await fetch(`/api/projects/${projectId}/logs?source=process`, { signal: controller.signal });
+        if (!res.ok) return;
+        const data = await res.json();
+        const newLogs: string[] = [];
+        for (const l of (data.logs as string[] || [])) {
+          if (!seenLogsRef.current.has(l)) { seenLogsRef.current.add(l); newLogs.push(l); }
+        }
+        if (newLogs.length > 0) setLogs(p => [...p, ...newLogs]);
+      } catch (e) { if (e instanceof Error && e.name === "AbortError") return; }
+    };
+    poll();
+    const i = setInterval(poll, 3000);
+    return () => { controller.abort(); clearInterval(i); };
+  }, [activeTab, projectId]);
 
   useEffect(() => { if (logsRef.current) logsRef.current.scrollTop = logsRef.current.scrollHeight; }, [logs]);
 
@@ -163,36 +175,23 @@ export default function ProjectDetailPage() {
   }, [activeTab, projectId]);
 
   // ── Terminal polling ──
-  const pollTermLogs = useCallback(async () => {
-    try {
-      const res = await fetch(`/api/projects/${projectId}/logs?source=process`);
-      if (!res.ok) return;
-      const data = await res.json();
-      for (const l of (data.logs as string[] || [])) {
-        if (!termSeenRef.current.has(l)) { termSeenRef.current.add(l); setTermLines(p => [...p, l + "\n"]); }
-      }
-    } catch {}
-  }, [projectId]);
 
   useEffect(() => {
-    if (activeTab !== "terminal") return;
-    if (termPollRef.current) clearInterval(termPollRef.current);
-    if (termMode === "logs") {
-      termSeenRef.current.clear(); setTermLines([]);
-      pollTermLogs();
-      termPollRef.current = setInterval(pollTermLogs, 2000);
-    } else if (termMode === "shell" && shellActive) {
-      termPollRef.current = setInterval(async () => {
-        try {
-          const res = await fetch(`/api/projects/${projectId}/terminal`);
-          const data = await res.json();
-          if (data.output) setTermLines(p => [...p, data.output]);
-          if (!data.active) setShellActive(false);
-        } catch {}
-      }, 300);
-    }
-    return () => { if (termPollRef.current) clearInterval(termPollRef.current); };
-  }, [activeTab, termMode, shellActive, pollTermLogs, projectId]);
+    if (activeTab !== "terminal" || !shellActive) return;
+    const controller = new AbortController();
+    const poll = async () => {
+      try {
+        const res = await fetch(`/api/projects/${projectId}/terminal`, { signal: controller.signal });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data.output) setTermLines(p => [...p, data.output]);
+        if (!data.active) setShellActive(false);
+      } catch (e) { if (e instanceof Error && e.name === "AbortError") return; }
+    };
+    poll();
+    const interval = setInterval(poll, 1000);
+    return () => { controller.abort(); clearInterval(interval); };
+  }, [activeTab, shellActive, projectId]);
 
   useEffect(() => { if (termRef.current) termRef.current.scrollTop = termRef.current.scrollHeight; }, [termLines]);
 
@@ -243,7 +242,7 @@ export default function ProjectDetailPage() {
   async function handleSettSave() {
     setSettSaving(true);
     try {
-      const res = await fetch(`/api/projects/${projectId}`, { method: "PATCH", headers: {"Content-Type":"application/json"}, body: JSON.stringify({ name: settName.trim(), sourceBranch: settBranch, port: settPort ? parseInt(settPort) : null, builderConfig: { packageManager: settPm !== "auto" ? settPm : undefined } }) });
+      const res = await fetch(`/api/projects/${projectId}`, { method: "PATCH", headers: {"Content-Type":"application/json"}, body: JSON.stringify({ name: settName.trim(), appName: settAppName.trim() || null, sourceBranch: settBranch, port: settPort ? parseInt(settPort) : null, builderConfig: { packageManager: settPm !== "auto" ? settPm : undefined, installCmd: settInstallCmd.trim() || undefined, buildCmd: settBuildCmd.trim() || undefined, startCmd: settStartCmd.trim() || undefined } }) });
       if (res.ok) toast.success("Settings saved"); else { const d = await res.json(); toast.error(d.error || "Failed"); }
     } catch { toast.error("Failed"); }
     finally { setSettSaving(false); }
@@ -286,30 +285,43 @@ export default function ProjectDetailPage() {
 
   return (
     <div>
-      {/* Header */}
-      <div className="mb-4 flex items-center gap-4">
+      {/* Header + Controls */}
+      <div className="mb-5 flex flex-col gap-4 md:flex-row md:items-center">
         <Button variant="ghost" size="sm" onPress={() => router.push("/home")}><Icon icon="solar:arrow-left-linear" width={18} /></Button>
         <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-purple-500/15"><Icon icon="solar:box-bold-duotone" className="text-purple-400" width={22} /></div>
-        <div className="flex-1">
-          <div className="flex items-center gap-2"><h1 className="text-xl font-bold">{project.name}</h1><StatusBadge status={project.status} /></div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <h1 className="text-xl font-bold truncate">{project.name}</h1>
+            <StatusBadge status={project.status} />
+            <button onClick={() => setShowProjectSettings(true)} className="text-foreground-500 hover:text-foreground-300 transition-colors" title="Project settings" aria-label="Project settings"><Icon icon="solar:settings-bold-duotone" width={16} /></button>
+          </div>
           <p className="text-xs text-foreground-400">{project.runtime_type} · :{project.port || "auto"} · {project.source_branch}</p>
+        </div>
+        <div className="flex gap-2 flex-shrink-0 flex-wrap">
+          <Button variant="primary" size="sm" isDisabled={deploying || project.status === "deploying"} onPress={() => handleDeploy("deploy")}>{deploying ? <Spinner /> : <Icon icon="solar:upload-bold-duotone" width={16} />}Deploy</Button>
+          <Button variant="outline" size="sm" isDisabled={deploying || project.status === "deploying"} onPress={() => handleDeploy("rebuild")}><Icon icon="solar:refresh-circle-bold-duotone" width={16} />Re-Build</Button>
+          {(project.status === "running" || project.status === "error") && (<><Button variant="outline" size="sm" onPress={() => handleControl("restart")}><Icon icon="solar:refresh-bold-duotone" width={16} />Restart</Button><Button variant="danger" size="sm" onPress={() => handleControl("stop")}><Icon icon="solar:stop-bold-duotone" width={16} />Stop</Button></>)}
+          {(project.status === "stopped" || project.status === "error") && (<Button variant="secondary" size="sm" onPress={() => handleControl("start")}><Icon icon="solar:play-bold-duotone" width={16} />Start</Button>)}
         </div>
       </div>
 
-      {/* Control Bar */}
-      <div className="mb-4 flex gap-2 flex-wrap">
-        <Button variant="primary" size="sm" isDisabled={deploying || project.status === "deploying"} onPress={() => handleDeploy("deploy")}>{deploying ? <Spinner /> : <Icon icon="solar:upload-bold-duotone" width={16} />}Deploy</Button>
-        <Button variant="outline" size="sm" isDisabled={deploying || project.status === "deploying"} onPress={() => handleDeploy("rebuild")}><Icon icon="solar:refresh-circle-bold-duotone" width={16} />Re-Build</Button>
-        {(project.status === "running" || project.status === "error") && (<><Button variant="outline" size="sm" onPress={() => handleControl("restart")}><Icon icon="solar:refresh-bold-duotone" width={16} />Restart</Button><Button variant="danger" size="sm" onPress={() => handleControl("stop")}><Icon icon="solar:stop-bold-duotone" width={16} />Stop</Button></>)}
-        {(project.status === "stopped" || project.status === "error") && (<Button variant="secondary" size="sm" onPress={() => handleControl("start")}><Icon icon="solar:play-bold-duotone" width={16} />Start</Button>)}
-      </div>
-
       {/* Stats */}
-      <div className="grid grid-cols-2 gap-4 mb-5 lg:grid-cols-4">
-        <Card><CardContent className="p-4"><div className="flex items-center justify-between mb-2"><p className="text-sm font-medium text-foreground-400">Status</p><div className={`flex h-8 w-8 items-center justify-center rounded-lg ${processInfo?.running ? "bg-emerald-500/15" : "bg-white/10"}`}><Icon icon="solar:shield-check-bold-duotone" className={processInfo?.running ? "text-emerald-400" : "text-foreground-400"} width={18} /></div></div><p className="text-2xl font-bold">{processInfo?.running ? "Online" : "Offline"}</p>{processInfo?.pid && <p className="text-xs text-foreground-500 mt-1">PID {processInfo.pid}</p>}</CardContent></Card>
-        <Card><CardContent className="p-4"><div className="flex items-center justify-between mb-2"><p className="text-sm font-medium text-foreground-400">Uptime</p><div className="flex h-8 w-8 items-center justify-center rounded-lg bg-purple-500/15"><Icon icon="solar:clock-circle-bold-duotone" className="text-purple-400" width={18} /></div></div><p className="text-2xl font-bold">{processInfo?.uptime ? fmtUptime(processInfo.uptime) : "—"}</p></CardContent></Card>
-        <Card><CardContent className="p-4"><div className="flex items-center justify-between mb-2"><p className="text-sm font-medium text-foreground-400">Memory</p><div className="flex h-8 w-8 items-center justify-center rounded-lg bg-violet-500/15"><Icon icon="solar:server-bold-duotone" className="text-violet-400" width={18} /></div></div><p className="text-2xl font-bold">{processInfo?.memory ? fmtBytes(processInfo.memory) : "—"}</p></CardContent></Card>
-        <Card><CardContent className="p-4"><div className="flex items-center justify-between mb-2"><p className="text-sm font-medium text-foreground-400">CPU</p><div className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-500/15"><Icon icon="solar:cpu-bold-duotone" className="text-amber-400" width={18} /></div></div><p className="text-2xl font-bold">{processInfo?.cpu != null ? `${processInfo.cpu}%` : "—"}</p></CardContent></Card>
+      <div className="grid grid-cols-2 sm:grid-cols-4 mb-5">
+        {[
+          { icon: "solar:shield-check-bold-duotone", color: processInfo?.running ? "text-emerald-400" : "text-foreground-400", label: "Status", value: processInfo?.running ? "Online" : "Offline", sub: processInfo?.pid ? `PID ${processInfo.pid}` : "" },
+          { icon: "solar:clock-circle-bold-duotone", color: "text-purple-400", label: "Uptime", value: processInfo?.uptime ? fmtUptime(processInfo.uptime) : "—", sub: "" },
+          { icon: "solar:server-bold-duotone", color: "text-violet-400", label: "Memory", value: processInfo?.memory ? fmtBytes(processInfo.memory) : "—", sub: "" },
+          { icon: "solar:cpu-bold-duotone", color: "text-amber-400", label: "CPU", value: processInfo?.cpu != null ? `${processInfo.cpu}%` : "—", sub: "" },
+        ].map((stat, i) => (
+          <div key={stat.label} className={`flex flex-col items-center text-center py-2 ${i > 0 ? "border-l border-white/[0.07]" : ""}`}>
+            <div className="flex items-center gap-1.5 mb-1">
+              <Icon icon={stat.icon} className={stat.color} width={14} />
+              <p className="text-xs font-medium text-foreground-500">{stat.label}</p>
+            </div>
+            <p className="text-2xl font-bold">{stat.value}</p>
+            {stat.sub && <p className="text-[11px] text-foreground-500 mt-0.5">{stat.sub}</p>}
+          </div>
+        ))}
       </div>
 
       {/* Tabs */}
@@ -367,19 +379,17 @@ export default function ProjectDetailPage() {
         </div>
       )}
 
-      {/* ═══ TAB: Terminal ═══ */}
+      {/* ═══ TAB: Terminal (Shell only) ═══ */}
       {activeTab === "terminal" && (
         <div>
           <div className="mb-3 flex items-center gap-2">
-            <Button variant={termMode === "logs" ? "primary" : "outline"} size="sm" onPress={() => { if (shellActive) stopShell(); termSeenRef.current.clear(); setTermLines([]); setTermMode("logs"); }}><Icon icon="solar:document-text-bold-duotone" width={16} />Process Logs</Button>
-            <Button variant={termMode === "shell" ? "primary" : "outline"} size="sm" onPress={() => { termSeenRef.current.clear(); setTermLines([]); setTermMode("shell"); }}><Icon icon="solar:monitor-bold-duotone" width={16} />Shell</Button>
-            {termMode === "shell" && !shellActive && <Button variant="primary" size="sm" isDisabled={shellStarting} onPress={startShell}>{shellStarting ? <Spinner /> : <Icon icon="solar:play-bold-duotone" width={16} />}Start</Button>}
-            {termMode === "shell" && shellActive && <Button variant="danger" size="sm" onPress={stopShell}><Icon icon="solar:stop-bold-duotone" width={16} />Stop</Button>}
+            {!shellActive && <Button variant="primary" size="sm" isDisabled={shellStarting} onPress={startShell}>{shellStarting ? <Spinner /> : <Icon icon="solar:play-bold-duotone" width={16} />}Start Shell</Button>}
+            {shellActive && <Button variant="danger" size="sm" onPress={stopShell}><Icon icon="solar:stop-bold-duotone" width={16} />Stop Shell</Button>}
           </div>
           <div ref={termRef} className="h-[400px] overflow-auto rounded-xl border border-white/[0.07] bg-black/50 backdrop-blur-2xl shadow-[0_8px_32px_rgba(0,0,0,0.3)] p-4 font-mono text-sm text-green-400/80">
-            {termLines.length === 0 ? <p className="text-foreground-500">{termMode === "logs" ? "Waiting for process logs..." : 'Click "Start" to open a shell.'}</p> : termLines.map((l, i) => <span key={i} className="whitespace-pre-wrap break-all">{l}</span>)}
+            {termLines.length === 0 ? <p className="text-foreground-500">Click &quot;Start Shell&quot; to open an interactive terminal in the project directory.</p> : termLines.map((l, i) => <span key={i} className="whitespace-pre-wrap break-all">{l}</span>)}
           </div>
-          {termMode === "shell" && shellActive && (
+          {shellActive && (
             <div className="mt-2 flex gap-2">
               <span className="flex items-center font-mono text-sm text-green-400">$</span>
               <input type="text" value={termInput} onChange={e => setTermInput(e.target.value)} onKeyDown={e => { if (e.key === "Enter") { const cmd = termInput; setTermInput(""); setTermLines(p => [...p, `$ ${cmd}\n`]); fetch(`/api/projects/${projectId}/terminal`, {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({input:cmd+"\n"})}); } }} placeholder="Type a command..." autoFocus className="flex-1 rounded-lg border border-white/[0.07] bg-black/50 backdrop-blur-2xl shadow-[0_8px_32px_rgba(0,0,0,0.3)] px-3 py-2 font-mono text-sm text-green-400/80 outline-none focus:border-primary/50" />
@@ -388,13 +398,13 @@ export default function ProjectDetailPage() {
         </div>
       )}
 
-      {/* ═══ TAB: Settings ═══ */}
+      {/* ═══ TAB: Settings (App/Service settings) ═══ */}
       {activeTab === "settings" && (
         <div className="max-w-2xl space-y-6">
           <Card>
-            <CardHeader><CardTitle>General</CardTitle><CardDescription>Basic project configuration</CardDescription></CardHeader>
+            <CardHeader><CardTitle>App Configuration</CardTitle><CardDescription>Source, runtime and build settings</CardDescription></CardHeader>
             <CardContent className="space-y-4">
-              <TextField value={settName} onChange={setSettName}><Label>Project Name</Label><Input /></TextField>
+              <TextField value={settAppName} onChange={setSettAppName}><Label>App Name</Label><Input placeholder={project.slug} /></TextField>
               <TextField value={settBranch} onChange={setSettBranch}><Label>Branch</Label><Input /></TextField>
               <TextField value={settPort} onChange={setSettPort}><Label>Port</Label><Input type="number" placeholder="3000" /></TextField>
               {project.runtime_type === "node" && (
@@ -402,6 +412,25 @@ export default function ProjectDetailPage() {
                   <label className="block text-sm font-medium text-foreground-400 mb-2">Package Manager</label>
                   <div className="flex gap-2 flex-wrap">
                     {(["auto","npm","bun","pnpm","yarn"] as const).map(pm => <Button key={pm} variant={settPm === pm ? "primary" : "outline"} onPress={() => setSettPm(pm)} size="sm">{pm === "auto" ? "Auto-detect" : pm}</Button>)}
+                  </div>
+                </div>
+              )}
+              {project.runtime_type !== "docker" && (
+                <div className="space-y-3 pt-3 border-t border-white/[0.07]">
+                  <p className="text-xs font-medium text-foreground-400">{project.runtime_type === "custom" ? "Commands" : "Custom Commands (optional overrides)"}</p>
+                  <p className="text-[11px] text-foreground-500">One command per line. They run in order.</p>
+                  <div>
+                    <label className="block text-sm font-medium text-foreground-400 mb-1">Install Commands</label>
+                    <textarea value={settInstallCmd} onChange={(e) => setSettInstallCmd(e.target.value)} rows={2} placeholder={project.runtime_type === "node" ? "auto-detected" : "pip install -r requirements.txt"} className="w-full rounded-lg border border-white/[0.07] bg-black/30 px-3 py-2 font-mono text-sm text-foreground-300 outline-none focus:border-purple-500/30 resize-y" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-foreground-400 mb-1">Build Commands</label>
+                    <textarea value={settBuildCmd} onChange={(e) => setSettBuildCmd(e.target.value)} rows={2} placeholder={project.runtime_type === "node" ? "auto-detected" : "python -m compileall ."} className="w-full rounded-lg border border-white/[0.07] bg-black/30 px-3 py-2 font-mono text-sm text-foreground-300 outline-none focus:border-purple-500/30 resize-y" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-foreground-400 mb-1">Start Command</label>
+                    <textarea value={settStartCmd} onChange={(e) => setSettStartCmd(e.target.value)} rows={1} placeholder={project.runtime_type === "node" ? "auto-detected" : "python app.py"} className="w-full rounded-lg border border-white/[0.07] bg-black/30 px-3 py-2 font-mono text-sm text-foreground-300 outline-none focus:border-purple-500/30 resize-y" />
+                    <p className="text-[11px] text-foreground-500 mt-1">Only the first line is used as the process start command.</p>
                   </div>
                 </div>
               )}
@@ -417,16 +446,67 @@ export default function ProjectDetailPage() {
               </div>
               <div className="rounded-lg border border-white/[0.07] bg-black/40 backdrop-blur-xl p-3 font-mono text-xs break-all">
                 <p className="text-foreground-400 mb-1">Secret:</p>
-                <p>{project.webhook_secret}</p>
+                <p className="cursor-pointer" onClick={(e) => { const el = e.currentTarget; if (el.textContent?.includes("•")) el.textContent = project.webhook_secret; else el.textContent = "••••••••••••••••••••"; }} title="Click to reveal">{"••••••••••••••••••••"}</p>
               </div>
             </CardContent>
           </Card>
           <Card className="border-danger/30">
-            <CardHeader><CardTitle className="text-danger">Danger Zone</CardTitle><CardDescription>Irreversible actions</CardDescription></CardHeader>
+            <CardHeader><CardTitle className="text-danger">Danger Zone</CardTitle><CardDescription>Remove this app from the project</CardDescription></CardHeader>
             <CardContent>
-              <Button variant="danger" isDisabled={settDeleting} onPress={handleDelete}>{settDeleting ? <Spinner /> : <Icon icon="solar:trash-bin-trash-bold-duotone" width={18} />}Delete Project</Button>
+              <p className="text-xs text-foreground-500 mb-3">This will stop the running process, remove source files, and reset the app configuration. The project and other services will remain.</p>
+              <Button variant="danger" onPress={async () => {
+                if (!confirm("Delete this app? The process will be stopped and source files removed.")) return;
+                try {
+                  // Stop process first
+                  await fetch(`/api/projects/${projectId}/control`, { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({action:"stop"}) }).catch(() => {});
+                  // Reset project config
+                  await fetch(`/api/projects/${projectId}`, { method: "PATCH", headers: {"Content-Type":"application/json"}, body: JSON.stringify({ sourceType: "upload", sourceUrl: null, sourceBranch: "main", runtimeType: "node", port: null, appName: null, builderConfig: {} }) });
+                  toast.success("App removed");
+                  router.push("/home");
+                } catch { toast.error("Failed to remove app"); }
+              }}><Icon icon="solar:trash-bin-trash-bold-duotone" width={18} />Delete App</Button>
             </CardContent>
           </Card>
+        </div>
+      )}
+
+      {/* ═══ File Manager ═══ */}
+      <FileManager projectId={projectId} runtimeType={project.runtime_type} />
+
+      {/* ═══ Project Settings Modal ═══ */}
+      {showProjectSettings && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowProjectSettings(false)} />
+          <div className="relative z-10 w-full max-w-md rounded-2xl border border-white/[0.07] bg-[#12102a] p-6 shadow-2xl">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-lg font-bold">Project Settings</h2>
+              <button onClick={() => setShowProjectSettings(false)} className="text-foreground-400 hover:text-foreground transition-colors">
+                <Icon icon="solar:close-circle-bold-duotone" width={22} />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <TextField value={settName} onChange={setSettName}><Label>Project Name</Label><Input /></TextField>
+              <Button variant="primary" className="w-full" isDisabled={settSaving} onPress={async () => {
+                setSettSaving(true);
+                try {
+                  const res = await fetch(`/api/projects/${projectId}`, { method: "PATCH", headers: {"Content-Type":"application/json"}, body: JSON.stringify({ name: settName.trim() }) });
+                  if (res.ok) { toast.success("Project renamed"); const u = await res.json(); setProject((p) => p ? { ...p, name: u.name } : p); setShowProjectSettings(false); }
+                  else { const d = await res.json(); toast.error(d.error || "Failed"); }
+                } catch { toast.error("Failed"); }
+                finally { setSettSaving(false); }
+              }}>{settSaving ? <Spinner /> : "Save"}</Button>
+            </div>
+
+            <div className="mt-8 pt-6 border-t border-white/[0.07]">
+              <p className="text-sm font-semibold text-danger mb-2">Danger Zone</p>
+              <p className="text-xs text-foreground-500 mb-4">Deleting this project will stop all running processes, remove all services, and delete all data permanently.</p>
+              <Button variant="danger" className="w-full" isDisabled={settDeleting} onPress={() => {
+                if (!confirm("Delete this project and ALL its services? This cannot be undone.")) return;
+                handleDelete();
+              }}>{settDeleting ? <Spinner /> : <><Icon icon="solar:trash-bin-trash-bold-duotone" width={18} />Delete Project & All Services</>}</Button>
+            </div>
+          </div>
         </div>
       )}
     </div>
@@ -464,5 +544,209 @@ function DeploymentCard({ deployment: d }: { deployment: Deployment }) {
         {expanded && buildLog && <div className="mt-3 max-h-96 overflow-auto rounded-lg border border-white/[0.07] bg-black/50 backdrop-blur-2xl shadow-[0_8px_32px_rgba(0,0,0,0.3)] p-3"><pre className="whitespace-pre-wrap break-words font-mono text-xs text-foreground-400">{buildLog}</pre></div>}
       </CardContent>
     </Card>
+  );
+}
+
+// ── File Manager ──
+
+interface FileEntry { name: string; type: "file" | "dir"; size: number; }
+
+function FileManager({ projectId, runtimeType }: { projectId: string; runtimeType: string }) {
+  const [currentPath, setCurrentPath] = useState("/");
+  const [entries, setEntries] = useState<FileEntry[]>([]);
+  const [loadingDir, setLoadingDir] = useState(false);
+  const [selectedFile, setSelectedFile] = useState<string | null>(null);
+  const [fileContent, setFileContent] = useState("");
+  const [originalContent, setOriginalContent] = useState("");
+  const [loadingFile, setLoadingFile] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const [dirError, setDirError] = useState<string | null>(null);
+
+  const loadDir = useCallback(async (dirPath: string) => {
+    setLoadingDir(true);
+    setDirError(null);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/files?path=${encodeURIComponent(dirPath)}`);
+      if (res.ok) {
+        const data = await res.json();
+        setEntries(data.entries || []);
+        setCurrentPath(dirPath);
+      } else {
+        const data = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+        setDirError(data.error || `Failed (${res.status})`);
+        setEntries([]);
+      }
+    } catch (err) {
+      setDirError(err instanceof Error ? err.message : "Failed to load files");
+      setEntries([]);
+    }
+    finally { setLoadingDir(false); }
+  }, [projectId]);
+
+  useEffect(() => { loadDir("/"); }, [loadDir]);
+
+  async function openFile(filePath: string) {
+    setLoadingFile(true);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/files/content?path=${encodeURIComponent(filePath)}`);
+      if (res.ok) {
+        const data = await res.json();
+        setFileContent(data.content);
+        setOriginalContent(data.content);
+        setSelectedFile(filePath);
+      } else {
+        const data = await res.json();
+        toast.error(data.error || "Cannot open file");
+      }
+    } catch { toast.error("Failed to open file"); }
+    finally { setLoadingFile(false); }
+  }
+
+  async function saveFile() {
+    if (!selectedFile) return;
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/files/content`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: selectedFile, content: fileContent }),
+      });
+      if (res.ok) { toast.success("File saved"); setOriginalContent(fileContent); }
+      else { const data = await res.json(); toast.error(data.error || "Save failed"); }
+    } catch { toast.error("Save failed"); }
+    finally { setSaving(false); }
+  }
+
+  function navigateUp() {
+    const parent = currentPath.split("/").slice(0, -1).join("/") || "/";
+    loadDir(parent);
+  }
+
+  function navigateTo(entry: FileEntry) {
+    if (entry.type === "dir") {
+      const newPath = currentPath === "/" ? `/${entry.name}` : `${currentPath}/${entry.name}`;
+      loadDir(newPath);
+    } else {
+      const filePath = currentPath === "/" ? `/${entry.name}` : `${currentPath}/${entry.name}`;
+      openFile(filePath);
+    }
+  }
+
+  const breadcrumbs = currentPath.split("/").filter(Boolean);
+  const hasChanges = fileContent !== originalContent;
+
+  return (
+    <div className="mt-6">
+      <div className="flex items-center gap-2 mb-3">
+        <Icon icon="solar:folder-bold-duotone" className="text-purple-400" width={18} />
+        <p className="text-sm font-semibold">Files</p>
+        {runtimeType === "docker" && <span className="text-[10px] text-foreground-500 bg-white/[0.05] px-2 py-0.5 rounded-full">container</span>}
+      </div>
+
+      <div className={`flex rounded-xl border border-white/[0.07] overflow-hidden resize-y ${selectedFile ? "min-h-[300px] h-[450px]" : "min-h-[200px] h-[300px]"} max-h-[80vh]`}>
+        {/* File Tree */}
+        <div className={`flex flex-col border-r border-white/[0.07] bg-black/30 overflow-auto ${selectedFile ? "w-full md:w-[250px] flex-shrink-0" : "flex-1"}`}>
+          {/* Breadcrumb */}
+          <div className="flex items-center gap-1 px-3 py-2 border-b border-white/[0.05] text-xs text-foreground-500 flex-shrink-0">
+            <button onClick={() => loadDir("/")} className="hover:text-foreground-300 transition-colors">/</button>
+            {breadcrumbs.map((crumb, i) => (
+              <span key={i} className="flex items-center gap-1">
+                <span>/</span>
+                <button onClick={() => loadDir("/" + breadcrumbs.slice(0, i + 1).join("/"))} className="hover:text-foreground-300 transition-colors">{crumb}</button>
+              </span>
+            ))}
+          </div>
+
+          {/* Back button */}
+          {currentPath !== "/" && (
+            <button onClick={navigateUp} className="flex items-center gap-2 px-3 py-1.5 text-xs text-foreground-400 hover:bg-white/[0.03] transition-colors">
+              <Icon icon="solar:arrow-left-linear" width={12} />
+              ..
+            </button>
+          )}
+
+          {/* Entries */}
+          {loadingDir ? (
+            <div className="flex justify-center py-8"><Spinner /></div>
+          ) : dirError ? (
+            <p className="text-xs text-danger text-center py-8">{dirError}</p>
+          ) : entries.length === 0 ? (
+            <p className="text-xs text-foreground-500 text-center py-8">Empty directory</p>
+          ) : (
+            entries.map((entry) => (
+              <button
+                key={entry.name}
+                onClick={() => navigateTo(entry)}
+                className={`flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-white/[0.03] transition-colors text-left w-full ${
+                  selectedFile && entry.type === "file" && (currentPath === "/" ? `/${entry.name}` : `${currentPath}/${entry.name}`) === selectedFile
+                    ? "bg-purple-500/10 text-purple-300"
+                    : "text-foreground-300"
+                }`}
+              >
+                <Icon
+                  icon={entry.type === "dir" ? "solar:folder-bold-duotone" : "solar:document-bold-duotone"}
+                  className={entry.type === "dir" ? "text-purple-400" : "text-foreground-500"}
+                  width={14}
+                />
+                <span className="truncate flex-1">{entry.name}</span>
+                {entry.type === "file" && entry.size > 0 && (
+                  <span className="text-[10px] text-foreground-500 flex-shrink-0">{entry.size > 1024 ? `${(entry.size / 1024).toFixed(0)}K` : `${entry.size}B`}</span>
+                )}
+              </button>
+            ))
+          )}
+        </div>
+
+        {/* Editor */}
+        {selectedFile && (
+          <div className="flex-1 flex flex-col bg-black/20">
+            {/* Editor header */}
+            <div className="flex items-center justify-between px-3 py-2 border-b border-white/[0.05] flex-shrink-0">
+              <div className="flex items-center gap-2 min-w-0">
+                <Icon icon="solar:document-bold-duotone" className="text-foreground-500" width={14} />
+                <span className="text-xs text-foreground-400 truncate">{selectedFile}</span>
+                {hasChanges && <span className="text-[10px] text-amber-400">modified</span>}
+              </div>
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <Button variant="ghost" size="sm" onPress={() => { setSelectedFile(null); setFileContent(""); }}>
+                  <Icon icon="solar:close-circle-bold-duotone" width={16} />
+                </Button>
+                <Button variant="primary" size="sm" isDisabled={saving || !hasChanges} onPress={saveFile}>
+                  {saving ? <Spinner /> : "Save"}
+                </Button>
+              </div>
+            </div>
+
+            {/* Editor content */}
+            {loadingFile ? (
+              <div className="flex justify-center items-center flex-1"><Spinner /></div>
+            ) : (
+              <textarea
+                value={fileContent}
+                onChange={(e) => setFileContent(e.target.value)}
+                className="flex-1 w-full resize-none bg-transparent p-4 font-mono text-xs text-foreground-300 outline-none leading-5"
+                spellCheck={false}
+                onKeyDown={(e) => {
+                  // Ctrl+S to save
+                  if ((e.ctrlKey || e.metaKey) && e.key === "s") {
+                    e.preventDefault();
+                    if (hasChanges) saveFile();
+                  }
+                  // Tab to indent
+                  if (e.key === "Tab") {
+                    e.preventDefault();
+                    const start = e.currentTarget.selectionStart;
+                    const end = e.currentTarget.selectionEnd;
+                    setFileContent(fileContent.substring(0, start) + "  " + fileContent.substring(end));
+                    setTimeout(() => { e.currentTarget.selectionStart = e.currentTarget.selectionEnd = start + 2; }, 0);
+                  }
+                }}
+              />
+            )}
+          </div>
+        )}
+      </div>
+    </div>
   );
 }

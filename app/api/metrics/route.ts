@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth-guard";
+import { execSync } from "child_process";
 import os from "os";
 
 export async function GET() {
@@ -20,7 +21,7 @@ export async function GET() {
   // Disk usage (root drive)
   let disk = { total: 0, used: 0, free: 0 };
   try {
-    const { execSync } = require("child_process") as typeof import("child_process");
+    // execSync imported at top level
     if (os.platform() === "win32") {
       const drive = process.cwd().charAt(0);
       const out = execSync(`powershell -Command "Get-PSDrive ${drive} | Select-Object Used,Free | ConvertTo-Json"`, { encoding: "utf-8" });

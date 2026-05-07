@@ -2,10 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Card, CardContent, Button, Spinner } from "@heroui/react";
+import { Button, Spinner, TextField, Label, Input } from "@heroui/react";
 import { Icon } from "@iconify/react";
+import { toast } from "sonner";
 import Link from "next/link";
-import { StatusBadge } from "@/components/StatusBadge";
 
 interface Service {
   id: string;
@@ -20,7 +20,9 @@ interface Project {
   id: string;
   name: string;
   slug: string;
+  app_name: string | null;
   source_type: string;
+  source_url: string | null;
   runtime_type: string;
   status: string;
   port: number | null;
@@ -49,17 +51,11 @@ function formatUptime(seconds: number) {
   return `${m}m`;
 }
 
-const serviceIcons: Record<string, string> = {
-  postgresql: "solar:database-bold-duotone",
-  mysql: "solar:database-bold-duotone",
-  redis: "solar:bolt-bold-duotone",
-  mongodb: "solar:database-bold-duotone",
-};
-
-const runtimeIcons: Record<string, string> = {
-  node: "solar:code-bold-duotone",
-  static: "solar:document-bold-duotone",
-  docker: "solar:box-minimalistic-bold-duotone",
+const statusColors: Record<string, string> = {
+  running: "bg-emerald-400",
+  stopped: "bg-foreground-400",
+  deploying: "bg-amber-400",
+  error: "bg-red-400",
 };
 
 export default function HomePage() {
@@ -73,155 +69,191 @@ export default function HomePage() {
       fetch("/api/projects").then((r) => r.json()),
       fetch("/api/metrics").then((r) => r.json()),
     ])
-      .then(([p, m]) => {
-        setProjects(p);
-        setMetrics(m);
-      })
+      .then(([p, m]) => { setProjects(p); setMetrics(m); })
       .finally(() => setLoading(false));
   }, []);
+
+  // Project settings modal state
+  const [editProject, setEditProject] = useState<Project | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editSaving, setEditSaving] = useState(false);
+  const [editDeleting, setEditDeleting] = useState(false);
+
+  function openProjectSettings(project: Project) {
+    setEditProject(project);
+    setEditName(project.name);
+  }
+
+  async function saveProjectName() {
+    if (!editProject || !editName.trim()) return;
+    setEditSaving(true);
+    try {
+      const res = await fetch(`/api/projects/${editProject.id}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: editName.trim() }),
+      });
+      if (res.ok) {
+        toast.success("Project renamed");
+        setProjects((prev) => prev.map((p) => p.id === editProject.id ? { ...p, name: editName.trim() } : p));
+        setEditProject(null);
+      } else { const d = await res.json(); toast.error(d.error || "Failed"); }
+    } catch { toast.error("Failed"); }
+    finally { setEditSaving(false); }
+  }
+
+  async function deleteProject() {
+    if (!editProject) return;
+    if (!confirm("Delete this project and ALL its services? This cannot be undone.")) return;
+    setEditDeleting(true);
+    try {
+      const res = await fetch(`/api/projects/${editProject.id}`, { method: "DELETE" });
+      if (res.ok) {
+        toast.success("Project deleted");
+        setProjects((prev) => prev.filter((p) => p.id !== editProject.id));
+        setEditProject(null);
+      } else { toast.error("Failed to delete"); }
+    } catch { toast.error("Failed"); }
+    finally { setEditDeleting(false); }
+  }
 
   if (loading) {
     return <div className="flex justify-center py-20"><Spinner /></div>;
   }
 
-  const memPercent = metrics ? Math.round((metrics.memory.used / metrics.memory.total) * 100) : 0;
+  const memPercent = metrics && metrics.memory.total > 0 ? Math.round((metrics.memory.used / metrics.memory.total) * 100) : 0;
+  const diskPercent = metrics?.disk && metrics.disk.total > 0 ? Math.round((metrics.disk.used / metrics.disk.total) * 100) : 0;
+
+  const stats = [
+    { label: "CPU", value: `${metrics?.cpu.usage ?? 0}%`, sub: `${metrics?.cpu.cores ?? 0} cores`, accent: "bg-orange-400" },
+    { label: "Memory", value: `${memPercent}%`, sub: metrics ? `${formatBytes(metrics.memory.used)} / ${formatBytes(metrics.memory.total)}` : "", accent: "bg-blue-400" },
+    { label: "Disk", value: `${diskPercent}%`, sub: metrics?.disk ? `${formatBytes(metrics.disk.used)} / ${formatBytes(metrics.disk.total)}` : "", accent: "bg-emerald-400" },
+    { label: "Uptime", value: metrics ? formatUptime(metrics.uptime) : "—", sub: "server", accent: "bg-purple-400" },
+  ];
 
   return (
     <div>
-      {/* Server Stats */}
-      <div className="flex items-start mb-8 divide-x divide-white/[0.07]">
-        <div className="flex-1 px-4 first:pl-0">
-          <div className="flex items-center gap-2 mb-1">
-            <Icon icon="solar:cpu-bold-duotone" className="text-purple-400" width={16} />
-            <p className="text-xs font-medium text-foreground-500">CPU</p>
+      {/* ── Metrics ── */}
+      <div className="grid grid-cols-1 gap-4 mb-12 sm:grid-cols-2 lg:grid-cols-4">
+        {stats.map((s) => (
+          <div key={s.label} className="rounded-[14px] bg-white/[0.04] p-5 flex flex-col justify-between min-h-[120px]">
+            <p className="text-[13px] font-medium text-foreground-500">{s.label}</p>
+            <div>
+              <p className="text-[34px] font-bold leading-none tracking-tight">{s.value}</p>
+              <p className="text-[12px] text-foreground-500 mt-1">{s.sub}</p>
+            </div>
+            <div className={`h-[3px] w-full rounded-full ${s.accent} opacity-40 mt-3`} />
           </div>
-          <p className="text-2xl font-bold">{metrics?.cpu.usage ?? 0}%</p>
-          <p className="text-xs text-foreground-500 mt-0.5">{metrics?.cpu.cores ?? 0} cores</p>
-        </div>
-        <div className="flex-1 px-4">
-          <div className="flex items-center gap-2 mb-1">
-            <Icon icon="solar:server-bold-duotone" className="text-violet-400" width={16} />
-            <p className="text-xs font-medium text-foreground-500">Memory</p>
-          </div>
-          <p className="text-2xl font-bold">{memPercent}%</p>
-          <p className="text-xs text-foreground-500 mt-0.5">{metrics ? `${formatBytes(metrics.memory.used)} / ${formatBytes(metrics.memory.total)}` : ""}</p>
-        </div>
-        <div className="flex-1 px-4">
-          <div className="flex items-center gap-2 mb-1">
-            <Icon icon="solar:clock-circle-bold-duotone" className="text-emerald-400" width={16} />
-            <p className="text-xs font-medium text-foreground-500">Uptime</p>
-          </div>
-          <p className="text-2xl font-bold">{metrics ? formatUptime(metrics.uptime) : "—"}</p>
-          <p className="text-xs text-foreground-500 mt-0.5">server</p>
-        </div>
-        <div className="flex-1 px-4 last:pr-0">
-          <div className="flex items-center gap-2 mb-1">
-            <Icon icon="solar:ssd-round-bold-duotone" className="text-amber-400" width={16} />
-            <p className="text-xs font-medium text-foreground-500">Disk</p>
-          </div>
-          <p className="text-2xl font-bold">{metrics?.disk ? `${Math.round((metrics.disk.used / metrics.disk.total) * 100)}%` : "—"}</p>
-          <p className="text-xs text-foreground-500 mt-0.5">{metrics?.disk ? `${formatBytes(metrics.disk.used)} / ${formatBytes(metrics.disk.total)}` : ""}</p>
-        </div>
+        ))}
       </div>
 
-      {/* Projects */}
-      <div className="mb-4 flex items-center justify-between">
-        <h2 className="text-lg font-semibold">Projects</h2>
+      {/* ── Projects Header ── */}
+      <div className="flex items-center justify-between mb-8">
+        <h1 className="text-[32px] font-bold tracking-tight">Projects</h1>
         <Link href="/projects/new">
-          <Button variant="primary" size="sm">
-            <Icon icon="solar:add-circle-bold-duotone" width={16} />
-            New Project
+          <Button variant="outline" size="sm" className="rounded-[10px] px-4">
+            <Icon icon="solar:add-circle-linear" width={16} />
+            New
           </Button>
         </Link>
       </div>
 
+      {/* ── Project Groups ── */}
       {projects.length === 0 ? (
-        <Card>
-          <CardContent className="flex flex-col items-center py-12 text-center">
-            <Icon icon="solar:box-bold-duotone" className="mb-3 text-foreground-300" width={40} />
-            <p className="text-foreground-400">No projects yet</p>
-            <p className="text-sm text-foreground-500">Create your first project to get started</p>
-          </CardContent>
-        </Card>
+        <div className="flex flex-col items-center py-20 text-center">
+          <Icon icon="solar:box-bold-duotone" className="mb-3 text-foreground-300" width={40} />
+          <p className="text-foreground-400">No projects yet</p>
+          <p className="text-sm text-foreground-500 mb-4">Create your first project to get started</p>
+          <Link href="/projects/new">
+            <Button variant="primary" size="sm">New Project</Button>
+          </Link>
+        </div>
       ) : (
-        <div className="space-y-6">
+        <div className="space-y-10">
           {projects.map((project) => (
             <div key={project.id}>
               {/* Project Header */}
-              <div
-                className="flex items-center justify-between mb-3 cursor-pointer group"
-                onClick={() => router.push(`/projects/${project.id}`)}
-              >
+              <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-purple-500/15">
-                    <Icon icon="solar:folder-bold-duotone" className="text-purple-400" width={20} />
-                  </div>
-                  <div>
-                    <p className="font-semibold group-hover:text-purple-400 transition-colors">{project.name}</p>
-                    <p className="text-xs text-foreground-500">{project.slug}</p>
-                  </div>
+                  <h2 className="text-[20px] font-bold">{project.name}</h2>
+                  <Button variant="ghost" size="sm" onPress={() => openProjectSettings(project)} aria-label="Project settings">
+                    <Icon icon="solar:settings-bold-duotone" width={16} />
+                  </Button>
                 </div>
-                <Icon icon="solar:arrow-right-linear" className="text-foreground-400 group-hover:text-purple-400 transition-colors" width={16} />
+                <Button variant="ghost" size="sm" onPress={() => router.push(`/services/new?projectId=${project.id}`)}>
+                  <Icon icon="solar:add-circle-linear" width={16} />
+                  Add
+                </Button>
               </div>
 
-              {/* Project Items Grid */}
-              <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-4">
-                {/* App Card */}
-                <Card
-                  className="cursor-pointer transition-all hover:border-primary/30"
-                  onClick={() => router.push(`/projects/${project.id}`)}
-                >
-                  <CardContent className="p-4">
-                    <div className="flex items-center gap-2.5 mb-3">
-                      <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-purple-500/15">
-                        <Icon icon={runtimeIcons[project.runtime_type] || runtimeIcons.node} className="text-purple-400" width={16} />
-                      </div>
-                      <StatusBadge status={project.status} />
-                    </div>
-                    <p className="font-medium text-sm">App</p>
-                    <p className="text-xs text-foreground-500 mt-0.5">
-                      {project.runtime_type}{project.port ? ` · :${project.port}` : ""}
-                    </p>
-                    <p className="text-xs text-foreground-400 mt-2">{project.deploy_count} deploys</p>
-                  </CardContent>
-                </Card>
+              {/* Divider */}
+              <div className="border-b border-white/[0.06] my-5" />
 
-                {/* Service Cards */}
+              {/* Service Cards Grid */}
+              <div className="flex flex-wrap gap-4">
+                {/* App card — only if configured (has source_url, app_name, or been deployed) */}
+                {(project.source_url || project.app_name || project.status !== "stopped" || project.deploy_count > 0) && (
+                  <div
+                    className="flex items-center justify-between w-[260px] rounded-xl bg-white/[0.05] px-4 py-4 cursor-pointer hover:bg-white/[0.07] transition-colors"
+                    onClick={() => router.push(`/projects/${project.id}`)}
+                  >
+                    <div>
+                      <p className="text-[14px] font-semibold">{project.app_name || project.slug}</p>
+                      <p className="text-[13px] text-foreground-500 mt-0.5">app · {project.runtime_type}{project.port ? ` · :${project.port}` : ""}</p>
+                    </div>
+                    <div className={`h-[10px] w-[10px] rounded-full ${statusColors[project.status] || "bg-foreground-400"}`} />
+                  </div>
+                )}
+
+                {/* Service cards */}
                 {project.services.map((service) => (
-                  <Card
+                  <div
                     key={service.id}
-                    className="cursor-pointer transition-all hover:border-secondary/30"
+                    className="flex items-center justify-between w-[260px] rounded-xl bg-white/[0.05] px-4 py-4 cursor-pointer hover:bg-white/[0.07] transition-colors"
                     onClick={() => router.push(`/services/${service.id}`)}
                   >
-                    <CardContent className="p-4">
-                      <div className="flex items-center gap-2.5 mb-3">
-                        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-violet-500/15">
-                          <Icon icon={serviceIcons[service.type] || "solar:database-bold-duotone"} className="text-violet-400" width={16} />
-                        </div>
-                        <StatusBadge status={service.status} />
-                      </div>
-                      <p className="font-medium text-sm">{service.name}</p>
-                      <p className="text-xs text-foreground-500 mt-0.5">
-                        {service.type} {service.version}
-                      </p>
-                      <p className="text-xs text-foreground-400 mt-2">:{service.port}</p>
-                    </CardContent>
-                  </Card>
+                    <div>
+                      <p className="text-[14px] font-semibold">{service.name}</p>
+                      <p className="text-[13px] text-foreground-500 mt-0.5">{service.type} {service.version}</p>
+                    </div>
+                    <div className={`h-[10px] w-[10px] rounded-full ${statusColors[service.status] || "bg-foreground-400"}`} />
+                  </div>
                 ))}
-
-                {/* Add Service Card */}
-                <Card
-                  className="cursor-pointer border-dashed transition-all hover:border-purple-400/20"
-                  onClick={() => router.push(`/services/new?projectId=${project.id}`)}
-                >
-                  <CardContent className="flex flex-col items-center justify-center p-4 text-center min-h-[120px]">
-                    <Icon icon="solar:add-circle-linear" className="text-foreground-400 mb-1" width={20} />
-                    <p className="text-xs text-foreground-400">Add service</p>
-                  </CardContent>
-                </Card>
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Project Settings Modal */}
+      {editProject && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setEditProject(null)} />
+          <div className="relative z-10 w-full max-w-md rounded-2xl border border-white/[0.07] bg-black/80 backdrop-blur-2xl p-6 shadow-2xl">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-lg font-bold">Project Settings</h2>
+              <button onClick={() => setEditProject(null)} className="text-foreground-400 hover:text-foreground transition-colors">
+                <Icon icon="solar:close-circle-bold-duotone" width={22} />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <TextField value={editName} onChange={setEditName}>
+                <Label>Project Name</Label>
+                <Input onKeyDown={(e) => e.key === "Enter" && saveProjectName()} />
+              </TextField>
+              <Button variant="primary" className="w-full" isDisabled={editSaving} onPress={saveProjectName}>
+                {editSaving ? <Spinner /> : "Save"}
+              </Button>
+            </div>
+
+            <div className="mt-8 pt-6 border-t border-white/[0.07]">
+              <p className="text-sm font-semibold text-danger mb-2">Danger Zone</p>
+              <p className="text-xs text-foreground-500 mb-4">This will stop all processes, remove all services, and delete all project data.</p>
+              <Button variant="danger" className="w-full" isDisabled={editDeleting} onPress={deleteProject}>
+                {editDeleting ? <Spinner /> : <><Icon icon="solar:trash-bin-trash-bold-duotone" width={18} />Delete Project</>}
+              </Button>
+            </div>
+          </div>
         </div>
       )}
     </div>

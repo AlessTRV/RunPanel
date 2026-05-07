@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { Icon } from "@iconify/react";
@@ -19,14 +20,22 @@ const navItems: NavItem[] = [
 
 export function AppSidebar() {
   const pathname = usePathname();
+  const [mobileOpen, setMobileOpen] = useState(false);
 
-  return (
-    <aside className="fixed left-0 top-0 z-40 flex h-screen w-64 flex-col border-r border-purple-500/10 backdrop-blur-xl" style={{ background: "linear-gradient(180deg, rgba(18,12,32,0.92) 0%, rgba(11,6,19,0.96) 100%)" }}>
+  const sidebar = (
+    <aside className={clsx(
+      "fixed left-0 top-0 z-40 flex h-screen w-64 flex-col border-r border-purple-500/10 backdrop-blur-xl",
+      "transition-transform duration-200",
+      mobileOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"
+    )} style={{ background: "linear-gradient(180deg, rgba(18,12,32,0.92) 0%, rgba(11,6,19,0.96) 100%)" }}>
       <div className="flex h-16 items-center gap-3 border-b border-purple-500/10 px-6">
         <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-purple-500/15">
           <Icon icon="solar:server-bold-duotone" className="text-purple-400" width={20} />
         </div>
         <span className="text-lg font-bold bg-gradient-to-r from-purple-200 to-purple-400 bg-clip-text text-transparent">RunPanel</span>
+        <button className="ml-auto md:hidden text-foreground-400" onClick={() => setMobileOpen(false)}>
+          <Icon icon="solar:close-circle-bold-duotone" width={22} />
+        </button>
       </div>
 
       <nav className="flex-1 space-y-1 p-3">
@@ -38,6 +47,7 @@ export function AppSidebar() {
             <Link
               key={item.href}
               href={item.href}
+              onClick={() => setMobileOpen(false)}
               className={clsx(
                 "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
                 isActive
@@ -59,5 +69,24 @@ export function AppSidebar() {
         </div>
       </div>
     </aside>
+  );
+
+  return (
+    <>
+      {/* Mobile hamburger */}
+      <button
+        className="fixed top-4 left-4 z-50 flex md:hidden h-10 w-10 items-center justify-center rounded-lg bg-black/50 backdrop-blur-xl border border-white/[0.07]"
+        onClick={() => setMobileOpen(true)}
+      >
+        <Icon icon="solar:hamburger-menu-bold-duotone" width={20} className="text-foreground-300" />
+      </button>
+
+      {/* Backdrop */}
+      {mobileOpen && (
+        <div className="fixed inset-0 z-30 bg-black/50 md:hidden" onClick={() => setMobileOpen(false)} />
+      )}
+
+      {sidebar}
+    </>
   );
 }

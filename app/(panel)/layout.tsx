@@ -14,11 +14,11 @@ export default async function PanelLayout({
   }
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-transparent">
       <AppSidebar />
-      <div className="ml-64">
+      <div className="ml-0 md:ml-64">
         <TopBar />
-        <main className="p-6">{children}</main>
+        <main className="py-8 px-4 sm:px-8 md:px-12">{children}</main>
       </div>
     </div>
   );

@@ -7,19 +7,19 @@ export function Background() {
       {/* Blob glows */}
       <div
         className="absolute -top-[15%] -left-[5%] w-[55%] h-[55%] rounded-full blur-[160px]"
-        style={{ backgroundColor: "rgb(var(--blob-purple) / 0.12)" }}
+        style={{ backgroundColor: "rgb(var(--blob-purple) / var(--blob-opacity-1))" }}
       />
       <div
         className="absolute -bottom-[15%] -right-[5%] w-[60%] h-[55%] rounded-full blur-[160px]"
-        style={{ backgroundColor: "rgb(var(--blob-purple) / 0.08)" }}
+        style={{ backgroundColor: "rgb(var(--blob-purple) / var(--blob-opacity-2))" }}
       />
       <div
         className="absolute top-[5%] left-1/2 -translate-x-1/2 w-[65%] h-[45%] rounded-[100%] blur-[130px]"
-        style={{ backgroundColor: "rgb(var(--blob-purple) / 0.05)" }}
+        style={{ backgroundColor: "rgb(var(--blob-purple) / var(--blob-opacity-3))" }}
       />
       <div
         className="absolute top-[35%] left-[30%] w-[40%] h-[35%] rounded-full blur-[120px]"
-        style={{ backgroundColor: "rgb(var(--blob-violet) / 0.06)" }}
+        style={{ backgroundColor: "rgb(var(--blob-violet) / var(--blob-opacity-4))" }}
       />
 
       {/* Vignette */}
@@ -31,7 +31,7 @@ export function Background() {
       {/* Film grain */}
       <svg
         className="absolute inset-0 w-full h-full"
-        style={{ opacity: 0.04, mixBlendMode: "soft-light" }}
+        style={{ opacity: "var(--grain-opacity)", mixBlendMode: "soft-light" }}
         xmlns="http://www.w3.org/2000/svg"
       >
         <filter id="grain">
