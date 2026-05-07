@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   Card, CardHeader, CardTitle, CardDescription, CardContent,
@@ -28,6 +28,17 @@ export default function NewServicePage() {
 
   const [category, setCategory] = useState<Category | null>(null);
   const [loading, setLoading] = useState(false);
+
+  // GitHub repos (loaded if token exists)
+  const [ghRepos, setGhRepos] = useState<{ name: string; clone_url: string; default_branch: string; description: string | null; language: string | null; private: boolean }[]>([]);
+  const [ghLoaded, setGhLoaded] = useState(false);
+  const [ghSearch, setGhSearch] = useState("");
+
+  useEffect(() => {
+    fetch("/api/github/repos").then(r => r.json()).then(d => {
+      if (d.repos?.length) { setGhRepos(d.repos); setGhLoaded(true); }
+    }).catch(() => {});
+  }, []);
 
   // App state
   const [sourceType, setSourceType] = useState<SourceType>("github");
@@ -326,8 +337,35 @@ export default function NewServicePage() {
               </div>
               {sourceType === "github" ? (
                 <div className="space-y-4">
-                  <TextField value={sourceUrl} onChange={setSourceUrl}><Label>Repository URL</Label><Input placeholder="https://github.com/user/repo" /></TextField>
-                  <TextField value={branch} onChange={setBranch}><Label>Branch</Label><Input placeholder="main" /></TextField>
+                  {ghLoaded && ghRepos.length > 0 ? (
+                    <>
+                      <div>
+                        <label className="block text-sm font-medium text-foreground-400 mb-2">Select Repository</label>
+                        <Input placeholder="Search repos..." value={ghSearch} onChange={(e) => setGhSearch(e.target.value)} className="text-sm mb-2" />
+                        <div className="max-h-48 overflow-auto rounded-lg border border-white/[0.07] divide-y divide-white/[0.04]">
+                          {ghRepos.filter(r => !ghSearch || r.name.toLowerCase().includes(ghSearch.toLowerCase())).map((repo) => (
+                            <button key={repo.clone_url} onClick={() => { setSourceUrl(repo.clone_url); setBranch(repo.default_branch); setGhSearch(""); }}
+                              className={`w-full flex items-center justify-between px-3 py-2 text-left text-xs hover:bg-white/[0.03] transition-colors ${sourceUrl === repo.clone_url ? "bg-purple-500/10 text-purple-300" : "text-foreground-300"}`}>
+                              <div className="flex items-center gap-2 min-w-0">
+                                <span className="font-medium truncate">{repo.name}</span>
+                                {repo.language && <span className="text-foreground-500">{repo.language}</span>}
+                                {repo.private && <span className="text-[9px] text-foreground-500 bg-white/[0.06] px-1 rounded">private</span>}
+                              </div>
+                              <span className="text-foreground-500 flex-shrink-0">{repo.default_branch}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <TextField value={sourceUrl} onChange={setSourceUrl}><Label>Repository URL</Label><Input placeholder="https://github.com/user/repo" className="font-mono text-sm" /></TextField>
+                      <TextField value={branch} onChange={setBranch}><Label>Branch</Label><Input placeholder="main" /></TextField>
+                    </>
+                  ) : (
+                    <>
+                      <TextField value={sourceUrl} onChange={setSourceUrl}><Label>Repository URL</Label><Input placeholder="https://github.com/user/repo" /></TextField>
+                      <TextField value={branch} onChange={setBranch}><Label>Branch</Label><Input placeholder="main" /></TextField>
+                      {!ghLoaded && <p className="text-[11px] text-foreground-500">Connect GitHub in <a href="/github" className="text-purple-400 hover:underline">settings</a> to browse your repos</p>}
+                    </>
+                  )}
                 </div>
               ) : (
                 <div>

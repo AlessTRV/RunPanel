@@ -15,7 +15,9 @@ interface NavItem {
 
 const navItems: NavItem[] = [
   { label: "Home", href: "/home", icon: "solar:home-bold-duotone" },
-  { label: "Settings", href: "/settings", icon: "solar:settings-bold-duotone" },
+  { label: "Monitor", href: "/monitor", icon: "solar:chart-bold-duotone" },
+  { label: "GitHub", href: "/github", icon: "solar:link-bold-duotone" },
+  { label: "Account", href: "/account", icon: "solar:user-bold-duotone" },
 ];
 
 export function AppSidebar() {
@@ -42,7 +44,7 @@ export function AppSidebar() {
         {navItems.map((item) => {
           const isActive = item.href === "/home"
             ? pathname === "/home" || pathname.startsWith("/projects") || pathname.startsWith("/services")
-            : pathname === item.href || pathname.startsWith(item.href + "/");
+            : pathname.startsWith(item.href);
           return (
             <Link
               key={item.href}
