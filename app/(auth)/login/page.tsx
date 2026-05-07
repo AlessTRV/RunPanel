@@ -107,7 +107,7 @@ export default function LoginPage() {
               : "Enter your password to continue"}
           </CardDescription>
         </CardHeader>
-        <CardContent className="flex flex-col gap-4 px-8 pb-8 pt-6">
+        <CardContent className="flex flex-col gap-4 px-5 sm:px-8 pb-6 sm:pb-8 pt-4 sm:pt-6">
           <TextField
             type="password"
             value={password}

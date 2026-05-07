@@ -335,7 +335,7 @@ export default function ProjectDetailPage() {
 
       {/* ═══ TAB: Logs ═══ */}
       {activeTab === "logs" && (
-        <div ref={logsRef} className="h-[400px] overflow-auto rounded-xl border border-white/[0.07] bg-black/50 backdrop-blur-2xl shadow-[0_8px_32px_rgba(0,0,0,0.3)] p-4 font-mono text-xs text-green-400/80">
+        <div ref={logsRef} className="h-[280px] sm:h-[400px] overflow-auto rounded-xl border border-white/[0.07] bg-black/50 backdrop-blur-2xl shadow-[0_8px_32px_rgba(0,0,0,0.3)] p-4 font-mono text-xs text-green-400/80">
           {logs.length === 0 ? <p className="text-foreground-500">Waiting for process logs...</p> : logs.map((l, i) => <div key={i} className="whitespace-pre-wrap break-all leading-5">{l}</div>)}
         </div>
       )}
@@ -386,7 +386,7 @@ export default function ProjectDetailPage() {
             {!shellActive && <Button variant="primary" size="sm" isDisabled={shellStarting} onPress={startShell}>{shellStarting ? <Spinner /> : <Icon icon="solar:play-bold-duotone" width={16} />}Start Shell</Button>}
             {shellActive && <Button variant="danger" size="sm" onPress={stopShell}><Icon icon="solar:stop-bold-duotone" width={16} />Stop Shell</Button>}
           </div>
-          <div ref={termRef} className="h-[400px] overflow-auto rounded-xl border border-white/[0.07] bg-black/50 backdrop-blur-2xl shadow-[0_8px_32px_rgba(0,0,0,0.3)] p-4 font-mono text-sm text-green-400/80">
+          <div ref={termRef} className="h-[280px] sm:h-[400px] overflow-auto rounded-xl border border-white/[0.07] bg-black/50 backdrop-blur-2xl shadow-[0_8px_32px_rgba(0,0,0,0.3)] p-4 font-mono text-sm text-green-400/80">
             {termLines.length === 0 ? <p className="text-foreground-500">Click &quot;Start Shell&quot; to open an interactive terminal in the project directory.</p> : termLines.map((l, i) => <span key={i} className="whitespace-pre-wrap break-all">{l}</span>)}
           </div>
           {shellActive && (
@@ -641,9 +641,9 @@ function FileManager({ projectId, runtimeType }: { projectId: string; runtimeTyp
         {runtimeType === "docker" && <span className="text-[10px] text-foreground-500 bg-white/[0.05] px-2 py-0.5 rounded-full">container</span>}
       </div>
 
-      <div className={`flex rounded-xl border border-white/[0.07] overflow-hidden resize-y ${selectedFile ? "min-h-[300px] h-[450px]" : "min-h-[200px] h-[300px]"} max-h-[80vh]`}>
+      <div className={`flex flex-col sm:flex-row rounded-xl border border-white/[0.07] overflow-hidden resize-y ${selectedFile ? "min-h-[400px] sm:min-h-[300px] h-[500px] sm:h-[450px]" : "min-h-[200px] h-[300px]"} max-h-[80vh]`}>
         {/* File Tree */}
-        <div className={`flex flex-col border-r border-white/[0.07] bg-black/30 overflow-auto ${selectedFile ? "w-full md:w-[250px] flex-shrink-0" : "flex-1"}`}>
+        <div className={`flex flex-col border-b sm:border-b-0 sm:border-r border-white/[0.07] bg-black/30 overflow-auto ${selectedFile ? "h-[150px] sm:h-auto w-full sm:w-[250px] flex-shrink-0" : "flex-1"}`}>
           {/* Breadcrumb */}
           <div className="flex items-center gap-1 px-3 py-2 border-b border-white/[0.05] text-xs text-foreground-500 flex-shrink-0">
             <button onClick={() => loadDir("/")} className="hover:text-foreground-300 transition-colors">/</button>

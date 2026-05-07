@@ -152,10 +152,10 @@ export default function HomePage() {
       {/* ── Metrics ── */}
       <div className="grid grid-cols-1 gap-4 mb-12 sm:grid-cols-2 lg:grid-cols-4">
         {stats.map((s) => (
-          <div key={s.label} className="rounded-[14px] bg-white/[0.04] p-5 flex flex-col justify-between min-h-[120px]">
+          <div key={s.label} className="rounded-[14px] bg-white/[0.04] p-4 sm:p-5 flex flex-col justify-between min-h-[100px] sm:min-h-[120px]">
             <p className="text-[13px] font-medium text-foreground-500">{s.label}</p>
             <div>
-              <p className="text-[34px] font-bold leading-none tracking-tight">{s.value}</p>
+              <p className="text-[26px] sm:text-[34px] font-bold leading-none tracking-tight">{s.value}</p>
               <p className="text-[12px] text-foreground-500 mt-1">{s.sub}</p>
             </div>
             <div className={`h-[3px] w-full rounded-full ${s.accent} opacity-40 mt-3`} />
@@ -165,7 +165,7 @@ export default function HomePage() {
 
       {/* ── Projects Header ── */}
       <div className="flex items-center justify-between mb-8">
-        <h1 className="text-[32px] font-bold tracking-tight">Projects</h1>
+        <h1 className="text-[24px] sm:text-[32px] font-bold tracking-tight">Projects</h1>
         <Link href="/projects/new">
           <Button variant="outline" size="sm" className="rounded-[10px] px-4">
             <Icon icon="solar:add-circle-linear" width={16} />
@@ -210,7 +210,7 @@ export default function HomePage() {
                 {/* App card — only if configured (has source_url, app_name, or been deployed) */}
                 {(project.source_url || project.app_name || project.status !== "stopped" || project.deploy_count > 0) && (
                   <div
-                    className="flex items-center justify-between w-[260px] rounded-xl bg-white/[0.05] px-4 py-4 cursor-pointer hover:bg-white/[0.07] transition-colors"
+                    className="flex items-center justify-between w-full sm:w-[260px] rounded-xl bg-white/[0.05] px-4 py-4 cursor-pointer hover:bg-white/[0.07] transition-colors"
                     onClick={() => router.push(`/projects/${project.id}`)}
                   >
                     <div>
@@ -225,7 +225,7 @@ export default function HomePage() {
                 {project.services.map((service) => (
                   <div
                     key={service.id}
-                    className="flex items-center justify-between w-[260px] rounded-xl bg-white/[0.05] px-4 py-4 cursor-pointer hover:bg-white/[0.07] transition-colors"
+                    className="flex items-center justify-between w-full sm:w-[260px] rounded-xl bg-white/[0.05] px-4 py-4 cursor-pointer hover:bg-white/[0.07] transition-colors"
                     onClick={() => router.push(`/services/${service.id}`)}
                   >
                     <div>
