@@ -12,6 +12,25 @@ export interface CommitInfo {
   message: string;
 }
 
+/** Inject GitHub token into HTTPS URL for private repo access */
+function injectToken(repoUrl: string, token: string | null): string {
+  if (!token || !repoUrl.startsWith("https://")) return repoUrl;
+  // https://github.com/user/repo → https://{token}@github.com/user/repo
+  return repoUrl.replace("https://", `https://${token}@`);
+}
+
+/** Load GitHub token from DB settings (if configured) */
+function getGitHubToken(): string | null {
+  try {
+    const { getDb } = require("@/lib/db");
+    const { decrypt } = require("@/lib/auth");
+    const db = getDb();
+    const row = db.prepare("SELECT value FROM settings WHERE key = 'github_token'").get() as { value: string } | undefined;
+    if (row?.value) return decrypt(row.value);
+  } catch { /* ignore */ }
+  return null;
+}
+
 export async function gitClone(
   repoUrl: string,
   branch: string,
@@ -23,8 +42,12 @@ export async function gitClone(
     fs.rmSync(destDir, { recursive: true, force: true });
   }
 
-  await exec("git", ["clone", "--depth", "1", "--branch", branch, repoUrl, destDir], {
+  const token = getGitHubToken();
+  const authUrl = injectToken(repoUrl, token);
+
+  await exec("git", ["clone", "--depth", "1", "--branch", branch, authUrl, destDir], {
     timeout: 120_000,
+    env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
   });
 }
 
@@ -34,9 +57,20 @@ export async function gitPull(
 ): Promise<CommitInfo> {
   const repoDir = path.join(config.reposDir, projectSlug);
 
+  // Update remote URL with token (in case it was cloned without one)
+  const token = getGitHubToken();
+  if (token) {
+    try {
+      const { stdout: remoteUrl } = await exec("git", ["remote", "get-url", "origin"], { cwd: repoDir });
+      const authUrl = injectToken(remoteUrl.trim(), token);
+      await exec("git", ["remote", "set-url", "origin", authUrl], { cwd: repoDir });
+    } catch { /* ignore */ }
+  }
+
   await exec("git", ["fetch", "origin", branch], {
     cwd: repoDir,
     timeout: 60_000,
+    env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
   });
 
   await exec("git", ["reset", "--hard", `origin/${branch}`], {
