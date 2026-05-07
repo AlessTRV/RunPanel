@@ -87,10 +87,19 @@ export async function DELETE(_request: NextRequest, { params }: Params) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
 
-  // Stop running process
+  // Stop running process + remove Docker container/image if applicable
   try {
     await processManager.stop(project.slug as string, project.runtime_type as string);
   } catch { /* ignore */ }
+
+  // Remove Docker image built for this project (if docker runtime)
+  if (project.runtime_type === "docker") {
+    const { execFile: execF } = await import("child_process");
+    const { promisify: prom } = await import("util");
+    const ex = prom(execF);
+    const imageName = `runpanel-${project.slug}`;
+    try { await ex("docker", ["rmi", "-f", imageName], { timeout: 15_000 }); } catch { /* ignore */ }
+  }
 
   // Stop and remove all services linked to this project
   const services = db.prepare("SELECT * FROM services WHERE project_id = ?").all(projectId) as Record<string, unknown>[];

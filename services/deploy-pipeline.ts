@@ -117,8 +117,10 @@ export async function executeDeploy(
       envVars[row.key] = decrypt(row.value);
     }
 
-    const port = project.port || 3000;
-    envVars.PORT = port.toString();
+    const port = project.port || (project.runtime_type === "docker" ? 0 : 3000);
+    if (port > 0) {
+      envVars.PORT = port.toString();
+    }
     if (!envVars.NODE_ENV) {
       envVars.NODE_ENV = "production";
     }
@@ -176,6 +178,13 @@ export async function executeDeploy(
       if (!info.running) {
         if (i % 3 === 2) appendLog(`Process not yet running (attempt ${i + 1}/15)...`);
         continue;
+      }
+
+      // Docker without explicit port — just check container is running
+      if (port === 0) {
+        healthy = true;
+        appendLog(`Container running (${info.containerId || "N/A"}).`);
+        break;
       }
 
       try {

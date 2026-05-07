@@ -455,14 +455,11 @@ export default function ProjectDetailPage() {
             <CardContent>
               <p className="text-xs text-foreground-500 mb-3">This will stop the running process, remove source files, and reset the app configuration. The project and other services will remain.</p>
               <Button variant="danger" onPress={async () => {
-                if (!confirm("Delete this app? The process will be stopped and source files removed.")) return;
+                if (!confirm("Delete this app? Process, files, Docker images and deployments will be removed.")) return;
                 try {
-                  // Stop process first
-                  await fetch(`/api/projects/${projectId}/control`, { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({action:"stop"}) }).catch(() => {});
-                  // Reset project config
-                  await fetch(`/api/projects/${projectId}`, { method: "PATCH", headers: {"Content-Type":"application/json"}, body: JSON.stringify({ sourceType: "upload", sourceUrl: null, sourceBranch: "main", runtimeType: "node", port: null, appName: null, builderConfig: {} }) });
-                  toast.success("App removed");
-                  router.push("/home");
+                  const res = await fetch(`/api/projects/${projectId}/app`, { method: "DELETE" });
+                  if (res.ok) { toast.success("App removed"); router.push("/home"); }
+                  else { const d = await res.json(); toast.error(d.error || "Failed"); }
                 } catch { toast.error("Failed to remove app"); }
               }}><Icon icon="solar:trash-bin-trash-bold-duotone" width={18} />Delete App</Button>
             </CardContent>

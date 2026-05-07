@@ -22,13 +22,19 @@ export const dockerDriver: IProcessDriver = {
     for (const [key, value] of Object.entries(opts.env)) {
       envArgs.push("-e", `${key}=${value}`);
     }
-    envArgs.push("-e", `PORT=${opts.port}`);
+
+    // Port mapping — only if explicitly set by user (not the default fallback)
+    const portArgs: string[] = [];
+    if (opts.port && opts.port !== 3000) {
+      portArgs.push("-p", `${opts.port}:${opts.port}`);
+      envArgs.push("-e", `PORT=${opts.port}`);
+    }
 
     // Run container
     await exec("docker", [
       "run", "-d",
       "--name", name,
-      "-p", `${opts.port}:${opts.port}`,
+      ...portArgs,
       ...envArgs,
       imageName,
     ], { timeout: 60_000 });
@@ -89,10 +95,11 @@ export const dockerDriver: IProcessDriver = {
   async logs(slug: string, lines: number): Promise<string[]> {
     const name = containerName(slug);
     try {
-      const { stdout } = await exec("docker", ["logs", name, "--tail", lines.toString()], {
+      const { stdout, stderr } = await exec("docker", ["logs", name, "--tail", lines.toString()], {
         timeout: 10_000,
       });
-      return stdout.split("\n").filter(Boolean);
+      const combined = (stdout + "\n" + stderr).split("\n").filter(Boolean);
+      return combined;
     } catch {
       return [];
     }
