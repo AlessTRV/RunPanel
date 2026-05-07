@@ -64,6 +64,7 @@ export default function HomePage() {
   const [metrics, setMetrics] = useState<Metrics | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // Initial load
   useEffect(() => {
     Promise.all([
       fetch("/api/projects").then((r) => r.json()),
@@ -71,6 +72,22 @@ export default function HomePage() {
     ])
       .then(([p, m]) => { setProjects(p); setMetrics(m); })
       .finally(() => setLoading(false));
+  }, []);
+
+  // Poll metrics + project status every 5s
+  useEffect(() => {
+    const controller = new AbortController();
+    const interval = setInterval(async () => {
+      try {
+        const [m, p] = await Promise.all([
+          fetch("/api/metrics", { signal: controller.signal }).then((r) => r.ok ? r.json() : null),
+          fetch("/api/projects", { signal: controller.signal }).then((r) => r.ok ? r.json() : null),
+        ]);
+        if (m) setMetrics(m);
+        if (p) setProjects(p);
+      } catch (e) { if (e instanceof Error && e.name === "AbortError") return; }
+    }, 5000);
+    return () => { controller.abort(); clearInterval(interval); };
   }, []);
 
   // Project settings modal state

@@ -16,5 +16,16 @@ export function getDb(): Database.Database {
 
   runMigrations(_db);
 
+  // Recover from crash: reset stuck deployments and projects
+  const stuckDeploys = _db.prepare(
+    "UPDATE deployments SET status = 'failed', error_message = 'Server crashed during deploy' WHERE status IN ('pending', 'building')"
+  ).run();
+  const stuckProjects = _db.prepare(
+    "UPDATE projects SET status = 'stopped', updated_at = datetime('now') WHERE status = 'deploying'"
+  ).run();
+  if (stuckDeploys.changes > 0 || stuckProjects.changes > 0) {
+    console.log(`[RunPanel] Recovered ${stuckDeploys.changes} stuck deployments, ${stuckProjects.changes} stuck projects from crash`);
+  }
+
   return _db;
 }

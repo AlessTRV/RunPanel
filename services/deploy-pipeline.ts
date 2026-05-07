@@ -77,7 +77,7 @@ export async function executeDeploy(
 
       appendLog("\n--- Cleaning build artifacts ---");
       const cleanDir = getRepoPath(project.slug);
-      const dirsToClean = [".next", "node_modules", "dist", "build", ".turbo"];
+      const dirsToClean = [".next", "node_modules", "dist", "build", ".turbo", "venv", "__pycache__"];
       for (const dir of dirsToClean) {
         const fullPath = path.join(cleanDir, dir);
         if (fs.existsSync(fullPath)) {
@@ -87,10 +87,10 @@ export async function executeDeploy(
       }
     }
 
-    // Source acquisition (git pull only — no install yet)
+    // Source acquisition — deploy pulls from git, rebuild keeps local files
     const projectDir = getRepoPath(project.slug);
 
-    if (project.source_type === "github" && project.source_url) {
+    if (mode === "deploy" && project.source_type === "github" && project.source_url) {
       appendLog("\n--- Fetching source ---");
       if (repoExists(project.slug)) {
         appendLog(`Pulling latest from ${project.source_branch}...`);

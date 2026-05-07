@@ -22,23 +22,22 @@ export const customBuilder: IBuilder = {
     }
 
     try {
-      // Install — run each line as a separate command
+      // Install — join all lines with && so they run in the same shell session
+      // (needed for venv activation to persist across commands)
       if (installCmd) {
         const cmds = installCmd.split("\n").map(c => c.trim()).filter(Boolean);
-        for (const cmd of cmds) {
-          onLog(`> ${cmd}`);
-          await runCommand(cmd, { cwd: projectDir, env: envVars, onLog });
-        }
+        const joined = cmds.join(" && ");
+        onLog(cmds.map(c => `> ${c}`).join("\n"));
+        await runCommand(joined, { cwd: projectDir, env: envVars, onLog });
         onLog("Install completed.");
       }
 
-      // Build — run each line as a separate command
+      // Build — same: single shell session
       if (buildCmd) {
         const cmds = buildCmd.split("\n").map(c => c.trim()).filter(Boolean);
-        for (const cmd of cmds) {
-          onLog(`> ${cmd}`);
-          await runCommand(cmd, { cwd: projectDir, env: envVars, onLog });
-        }
+        const joined = cmds.join(" && ");
+        onLog(cmds.map(c => `> ${c}`).join("\n"));
+        await runCommand(joined, { cwd: projectDir, env: envVars, onLog });
         onLog("Build completed.");
       }
 

@@ -33,10 +33,9 @@ export const nodeBuilder: IBuilder = {
       // Install dependencies — multi-line custom or auto-detected
       if (installCmd) {
         const cmds = installCmd.split("\n").map(c => c.trim()).filter(Boolean);
-        for (const cmd of cmds) {
-          onLog(`> ${cmd}`);
-          await runCommand(cmd, { cwd: projectDir, env: envVars, onLog });
-        }
+        const joined = cmds.join(" && ");
+        onLog(cmds.map(c => `> ${c}`).join("\n"));
+        await runCommand(joined, { cwd: projectDir, env: envVars, onLog });
       } else {
         onLog(`> ${pm.install}`);
         await runCommand(pm.install, { cwd: projectDir, env: envVars, onLog });
@@ -49,10 +48,9 @@ export const nodeBuilder: IBuilder = {
 
       if (buildCmd) {
         const cmds = buildCmd.split("\n").map(c => c.trim()).filter(Boolean);
-        for (const cmd of cmds) {
-          onLog(`> ${cmd}`);
-          await runCommand(cmd, { cwd: projectDir, env: envVars, onLog });
-        }
+        const joined = cmds.join(" && ");
+        onLog(cmds.map(c => `> ${c}`).join("\n"));
+        await runCommand(joined, { cwd: projectDir, env: envVars, onLog });
         onLog("Build completed.");
       } else if (hasBuildScript) {
         const cmd = `${pm.cmd} run build`;
