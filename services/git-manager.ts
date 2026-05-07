@@ -15,8 +15,10 @@ export interface CommitInfo {
 /** Inject GitHub token into HTTPS URL for private repo access */
 function injectToken(repoUrl: string, token: string | null): string {
   if (!token || !repoUrl.startsWith("https://")) return repoUrl;
-  // https://github.com/user/repo → https://{token}@github.com/user/repo
-  return repoUrl.replace("https://", `https://${token}@`);
+  // Strip any existing token/credentials first
+  // https://oldtoken@github.com/user/repo → https://github.com/user/repo
+  const cleanUrl = repoUrl.replace(/https:\/\/[^@]+@/, "https://");
+  return cleanUrl.replace("https://", `https://${token}@`);
 }
 
 /** Load GitHub token from DB settings (if configured) */
