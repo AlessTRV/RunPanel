@@ -9,30 +9,39 @@ export async function GET() {
   const denied = await requireAuth();
   if (denied) return denied;
 
-  const db = getDb();
-  const projects = db.prepare(`
-    SELECT p.*,
-      (SELECT COUNT(*) FROM deployments WHERE project_id = p.id) as deploy_count,
-      (SELECT started_at FROM deployments WHERE project_id = p.id ORDER BY started_at DESC LIMIT 1) as last_deploy_at
-    FROM projects p
-    ORDER BY p.created_at DESC
-  `).all() as Record<string, unknown>[];
+  try {
+    const db = getDb();
+    const projects = db.prepare(`
+      SELECT p.*,
+        (SELECT COUNT(*) FROM deployments WHERE project_id = p.id) as deploy_count,
+        (SELECT started_at FROM deployments WHERE project_id = p.id ORDER BY started_at DESC LIMIT 1) as last_deploy_at
+      FROM projects p
+      ORDER BY p.created_at DESC
+    `).all() as Record<string, unknown>[];
 
-  // Batch load all services (avoids N+1 query)
-  const allServices = db.prepare("SELECT * FROM services WHERE project_id IS NOT NULL").all() as Record<string, unknown>[];
-  const servicesByProject = new Map<string, Record<string, unknown>[]>();
-  for (const svc of allServices) {
-    const pid = svc.project_id as string;
-    if (!servicesByProject.has(pid)) servicesByProject.set(pid, []);
-    servicesByProject.get(pid)!.push(svc);
+    // Batch load all services (avoids N+1 query)
+    let allServices: Record<string, unknown>[] = [];
+    try {
+      allServices = db.prepare("SELECT * FROM services WHERE project_id IS NOT NULL").all() as Record<string, unknown>[];
+    } catch { /* services table might not have project_id column yet */ }
+
+    const servicesByProject = new Map<string, Record<string, unknown>[]>();
+    for (const svc of allServices) {
+      const pid = svc.project_id as string;
+      if (!servicesByProject.has(pid)) servicesByProject.set(pid, []);
+      servicesByProject.get(pid)!.push(svc);
+    }
+
+    const result = projects.map((p) => ({
+      ...p,
+      services: servicesByProject.get(p.id as string) || [],
+    }));
+
+    return NextResponse.json(result);
+  } catch (err: unknown) {
+    console.error("[api/projects] Error:", err instanceof Error ? err.message : err);
+    return NextResponse.json({ error: "Failed to load projects" }, { status: 500 });
   }
-
-  const result = projects.map((p) => ({
-    ...p,
-    services: servicesByProject.get(p.id as string) || [],
-  }));
-
-  return NextResponse.json(result);
 }
 
 export async function POST(request: NextRequest) {

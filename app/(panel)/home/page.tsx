@@ -64,33 +64,37 @@ export default function HomePage() {
   const [metrics, setMetrics] = useState<Metrics | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Initial load
-  useEffect(() => {
-    Promise.all([
-      fetch("/api/projects").then((r) => r.ok ? r.json() : []),
-      fetch("/api/metrics").then((r) => r.ok ? r.json() : null),
-    ])
-      .then(([p, m]) => {
-        if (Array.isArray(p)) setProjects(p);
-        if (m) setMetrics(m);
-      })
-      .finally(() => setLoading(false));
-  }, []);
+  // Fetch helper that handles redirects and auth failures
+  async function fetchJSON<T>(url: string, signal?: AbortSignal): Promise<T | null> {
+    try {
+      const res = await fetch(url, { credentials: "same-origin", signal });
+      if (!res.ok) return null;
+      const contentType = res.headers.get("content-type");
+      if (!contentType?.includes("application/json")) return null;
+      return await res.json();
+    } catch { return null; }
+  }
 
-  // Poll metrics + project status every 5s
+  // Initial load + polling combined
   useEffect(() => {
     const controller = new AbortController();
-    const interval = setInterval(async () => {
-      try {
-        const [m, p] = await Promise.all([
-          fetch("/api/metrics", { signal: controller.signal }).then((r) => r.ok ? r.json() : null),
-          fetch("/api/projects", { signal: controller.signal }).then((r) => r.ok ? r.json() : null),
-        ]);
-        if (m) setMetrics(m);
-        if (p && Array.isArray(p)) setProjects(p);
-      } catch (e) { if (e instanceof Error && e.name === "AbortError") return; }
-    }, 5000);
-    return () => { controller.abort(); clearInterval(interval); };
+    let mounted = true;
+
+    async function loadData() {
+      const [p, m] = await Promise.all([
+        fetchJSON<Project[]>("/api/projects", controller.signal),
+        fetchJSON<Metrics>("/api/metrics", controller.signal),
+      ]);
+      if (!mounted) return;
+      if (Array.isArray(p)) setProjects(p);
+      if (m) setMetrics(m);
+      setLoading(false);
+    }
+
+    loadData();
+    const interval = setInterval(loadData, 5000);
+
+    return () => { mounted = false; controller.abort(); clearInterval(interval); };
   }, []);
 
   // Project settings modal state
