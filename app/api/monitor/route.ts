@@ -2,7 +2,52 @@ import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth-guard";
 import { getDb } from "@/lib/db";
 import { processManager } from "@/services/process-manager";
+import { execFile } from "child_process";
+import { promisify } from "util";
 import os from "os";
+
+const exec = promisify(execFile);
+
+/** Get uptime (seconds) and stats for a Docker service container */
+async function getServiceStats(containerName: string): Promise<{
+  uptime?: number;
+  memory?: number;
+  cpu?: number;
+} | null> {
+  try {
+    const { stdout } = await exec("docker", [
+      "inspect", containerName,
+      "--format", "{{.State.Running}}|{{.State.StartedAt}}",
+    ], { timeout: 5_000 });
+
+    const [running, startedAt] = stdout.trim().split("|");
+    if (running !== "true") return null;
+
+    let uptime: number | undefined;
+    if (startedAt) {
+      const started = new Date(startedAt).getTime();
+      if (!isNaN(started)) uptime = Math.floor((Date.now() - started) / 1000);
+    }
+
+    // Try to get memory/cpu stats
+    try {
+      const { stdout: stats } = await exec("docker", [
+        "stats", containerName, "--no-stream", "--format", "{{.MemUsage}}|{{.CPUPerc}}",
+      ], { timeout: 5_000 });
+      const [memStr, cpuStr] = stats.trim().split("|");
+      const memMatch = memStr?.match(/([\d.]+)([MG]iB)/);
+      const memory = memMatch
+        ? parseFloat(memMatch[1]) * (memMatch[2] === "GiB" ? 1024 * 1024 * 1024 : 1024 * 1024)
+        : undefined;
+      const cpu = cpuStr ? parseFloat(cpuStr) : undefined;
+      return { uptime, memory, cpu };
+    } catch {
+      return { uptime };
+    }
+  } catch {
+    return null;
+  }
+}
 
 export async function GET() {
   const denied = await requireAuth();
@@ -30,7 +75,7 @@ export async function GET() {
     id: string; name: string; type: string; status: string; port: number; project_id: string;
   }[];
 
-  // Gather process stats for each project's app
+  // Gather process stats for projects and services in parallel
   const projectStats = await Promise.all(projects.map(async (p) => {
     let processInfo = null;
     if (p.status === "running" || p.status === "deploying") {
@@ -41,6 +86,22 @@ export async function GET() {
 
     const projectServices = services.filter(s => s.project_id === p.id);
 
+    // Fetch stats for each service container in parallel
+    const enrichedServices = await Promise.all(projectServices.map(async (s) => {
+      const containerName = `runpanel-svc-${s.name}`;
+      const stats = s.status === "running" ? await getServiceStats(containerName) : null;
+      return {
+        id: s.id,
+        name: s.name,
+        type: s.type,
+        status: s.status,
+        port: s.port,
+        uptime: stats?.uptime,
+        memory: stats?.memory,
+        cpu: stats?.cpu,
+      };
+    }));
+
     return {
       id: p.id,
       name: p.name,
@@ -49,13 +110,7 @@ export async function GET() {
       status: p.status,
       port: p.port,
       process: processInfo,
-      services: projectServices.map(s => ({
-        id: s.id,
-        name: s.name,
-        type: s.type,
-        status: s.status,
-        port: s.port,
-      })),
+      services: enrichedServices,
     };
   }));
 

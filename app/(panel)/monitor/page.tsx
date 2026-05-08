@@ -9,6 +9,7 @@ interface ProcessInfo {
   pid?: number;
   memory?: number;
   cpu?: number;
+  uptime?: number;
 }
 
 interface ServiceInfo {
@@ -17,6 +18,9 @@ interface ServiceInfo {
   type: string;
   status: string;
   port: number;
+  uptime?: number;
+  memory?: number;
+  cpu?: number;
 }
 
 interface ProjectInfo {
@@ -38,6 +42,15 @@ interface MonitorData {
 function fmtMem(bytes: number): string {
   const mb = bytes / (1024 * 1024);
   return mb >= 1024 ? `${(mb / 1024).toFixed(1)}G` : `${mb.toFixed(0)}M`;
+}
+
+function fmtUptime(seconds: number): string {
+  const d = Math.floor(seconds / 86400);
+  const h = Math.floor((seconds % 86400) / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  if (d > 0) return `${d}d ${h}h`;
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m`;
 }
 
 const STATUS_DOT: Record<string, string> = {
@@ -101,11 +114,12 @@ export default function MonitorPage() {
         </div>
 
         {/* Column headers */}
-        <div className="grid grid-cols-[1fr_60px_50px] sm:grid-cols-[1fr_80px_70px_80px_60px] gap-1 sm:gap-2 px-4 py-2 border-b border-white/[0.05] text-foreground-500 text-[10px] uppercase tracking-wider">
+        <div className="grid grid-cols-[1fr_60px_50px] sm:grid-cols-[1fr_80px_70px_70px_70px_60px] gap-1 sm:gap-2 px-4 py-2 border-b border-white/[0.05] text-foreground-500 text-[10px] uppercase tracking-wider">
           <span>Name</span>
           <span className="text-right">Status</span>
           <span className="text-right">CPU</span>
           <span className="hidden sm:block text-right">Memory</span>
+          <span className="hidden sm:block text-right">Uptime</span>
           <span className="hidden sm:block text-right">PID</span>
         </div>
 
@@ -116,24 +130,17 @@ export default function MonitorPage() {
           ) : (
             data.projects.map((project) => {
               const isCollapsed = collapsed.has(project.id);
-              const hasChildren = project.services.length > 0;
 
               return (
                 <div key={project.id}>
-                  {/* Project row (app) */}
+                  {/* Project header row */}
                   <div
-                    className="grid grid-cols-[1fr_60px_50px] sm:grid-cols-[1fr_80px_70px_80px_60px] gap-1 sm:gap-2 px-4 py-2 hover:bg-white/[0.02] cursor-pointer transition-colors"
-                    onClick={() => hasChildren && toggleCollapse(project.id)}
+                    className="grid grid-cols-[1fr_60px_50px] sm:grid-cols-[1fr_80px_70px_70px_70px_60px] gap-1 sm:gap-2 px-4 py-2 hover:bg-white/[0.02] cursor-pointer transition-colors"
+                    onClick={() => toggleCollapse(project.id)}
                   >
                     <span className="flex items-center gap-2">
-                      {hasChildren ? (
-                        <Icon icon={isCollapsed ? "solar:alt-arrow-right-bold" : "solar:alt-arrow-down-bold"} width={10} className="text-foreground-500" />
-                      ) : (
-                        <span className="w-[10px]" />
-                      )}
-                      <Icon icon={`solar:${isCollapsed ? "alt-arrow-right" : "alt-arrow-down"}-bold`} width={0} className="hidden" />
-                      <span className="text-foreground-300 font-medium">{project.name}</span>
-                      <span className="text-foreground-500">({project.runtimeType})</span>
+                      <Icon icon={isCollapsed ? "solar:alt-arrow-right-bold" : "solar:alt-arrow-down-bold"} width={10} className="text-foreground-500" />
+                      <span className="text-foreground-200 font-semibold">{project.name}</span>
                     </span>
                     <span className={`text-right ${STATUS_DOT[project.status] || "text-foreground-500"}`}>
                       {project.status}
@@ -144,27 +151,73 @@ export default function MonitorPage() {
                     <span className="hidden sm:block text-right text-foreground-300">
                       {project.process?.memory ? fmtMem(project.process.memory) : "—"}
                     </span>
+                    <span className="hidden sm:block text-right text-foreground-300">
+                      {project.process?.uptime != null ? fmtUptime(project.process.uptime) : "—"}
+                    </span>
                     <span className="hidden sm:block text-right text-foreground-500">
                       {project.process?.pid || "—"}
                     </span>
                   </div>
 
-                  {/* Service children */}
-                  {!isCollapsed && project.services.map((svc) => (
-                    <div key={svc.id} className="grid grid-cols-[1fr_60px_50px] sm:grid-cols-[1fr_80px_70px_80px_60px] gap-1 sm:gap-2 px-4 py-1.5 pl-10 text-foreground-400 hover:bg-white/[0.02] transition-colors">
-                      <span className="flex items-center gap-2">
-                        <span className="text-foreground-500">└─</span>
-                        <span>{svc.name}</span>
-                        <span className="text-foreground-500">({svc.type})</span>
-                      </span>
-                      <span className={`text-right ${STATUS_DOT[svc.status] || "text-foreground-500"}`}>
-                        {svc.status}
-                      </span>
-                      <span className="text-right">—</span>
-                      <span className="hidden sm:block text-right">—</span>
-                      <span className="hidden sm:block text-right text-foreground-500">:{svc.port}</span>
-                    </div>
-                  ))}
+                  {/* Expanded: app process + services */}
+                  {!isCollapsed && (
+                    <>
+                      {/* App process row */}
+                      <div className="grid grid-cols-[1fr_60px_50px] sm:grid-cols-[1fr_80px_70px_70px_70px_60px] gap-1 sm:gap-2 px-4 py-1.5 pl-8 text-foreground-400 hover:bg-white/[0.02] transition-colors">
+                        <span className="flex items-center gap-2">
+                          <span className="text-foreground-500">{project.services.length > 0 ? "├─" : "└─"}</span>
+                          <Icon icon="solar:server-square-bold" width={12} className="text-purple-400/70" />
+                          <span>app</span>
+                          <span className="text-foreground-500">({project.runtimeType})</span>
+                          {project.port && <span className="text-foreground-500">:{project.port}</span>}
+                        </span>
+                        <span className={`text-right ${STATUS_DOT[project.status] || "text-foreground-500"}`}>
+                          {project.status}
+                        </span>
+                        <span className="text-right">
+                          {project.process?.cpu != null ? `${project.process.cpu}%` : "—"}
+                        </span>
+                        <span className="hidden sm:block text-right">
+                          {project.process?.memory ? fmtMem(project.process.memory) : "—"}
+                        </span>
+                        <span className="hidden sm:block text-right">
+                          {project.process?.uptime != null ? fmtUptime(project.process.uptime) : "—"}
+                        </span>
+                        <span className="hidden sm:block text-right text-foreground-500">
+                          {project.process?.pid || "—"}
+                        </span>
+                      </div>
+
+                      {/* Service rows */}
+                      {project.services.map((svc, i) => {
+                        const isLast = i === project.services.length - 1;
+                        return (
+                          <div key={svc.id} className="grid grid-cols-[1fr_60px_50px] sm:grid-cols-[1fr_80px_70px_70px_70px_60px] gap-1 sm:gap-2 px-4 py-1.5 pl-8 text-foreground-400 hover:bg-white/[0.02] transition-colors">
+                            <span className="flex items-center gap-2">
+                              <span className="text-foreground-500">{isLast ? "└─" : "├─"}</span>
+                              <Icon icon={svc.type === "redis" ? "solar:database-bold" : svc.type === "mongodb" ? "solar:database-bold" : "solar:server-square-bold"} width={12} className="text-cyan-400/70" />
+                              <span>{svc.name}</span>
+                              <span className="text-foreground-500">({svc.type})</span>
+                              <span className="text-foreground-500">:{svc.port}</span>
+                            </span>
+                            <span className={`text-right ${STATUS_DOT[svc.status] || "text-foreground-500"}`}>
+                              {svc.status}
+                            </span>
+                            <span className="text-right">
+                              {svc.cpu != null ? `${svc.cpu}%` : "—"}
+                            </span>
+                            <span className="hidden sm:block text-right">
+                              {svc.memory ? fmtMem(svc.memory) : "—"}
+                            </span>
+                            <span className="hidden sm:block text-right">
+                              {svc.uptime != null ? fmtUptime(svc.uptime) : "—"}
+                            </span>
+                            <span className="hidden sm:block text-right text-foreground-500">—</span>
+                          </div>
+                        );
+                      })}
+                    </>
+                  )}
                 </div>
               );
             })
@@ -173,7 +226,7 @@ export default function MonitorPage() {
 
         {/* Footer */}
         <div className="px-4 py-2 border-t border-white/[0.07] bg-white/[0.02] text-foreground-500 text-[10px] flex items-center justify-between">
-          <span>{data.projects.length} projects</span>
+          <span>{data.projects.length} projects · {data.projects.reduce((n, p) => n + p.services.length, 0)} services</span>
           <span className="flex items-center gap-1">
             <div className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
             live · 2s
