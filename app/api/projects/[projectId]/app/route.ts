@@ -60,7 +60,8 @@ export async function DELETE(_request: NextRequest, { params }: Params) {
     WHERE id = ?
   `).run(projectId);
 
-  // 6. Delete deployments for this project
+  // 6. Delete webhook deliveries then deployments (webhook_deliveries.deployment_id references deployments.id)
+  db.prepare("DELETE FROM webhook_deliveries WHERE project_id = ?").run(projectId);
   db.prepare("DELETE FROM deployments WHERE project_id = ?").run(projectId);
 
   return NextResponse.json({ success: true });
