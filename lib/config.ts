@@ -1,7 +1,9 @@
 import path from "path";
 import fs from "fs";
 
-const DATA_DIR = process.env.RUNPANEL_DATA_DIR || path.join(/* turbopackIgnore: true */ process.cwd(), "data");
+// Template literal instead of path.join to prevent Turbopack from creating a DirAssetReference
+// that would traverse data/repos/ and choke on venv symlinks pointing outside the project.
+const DATA_DIR = process.env.RUNPANEL_DATA_DIR || `${process.cwd()}/data`;
 
 export const config = {
   dataDir: DATA_DIR,
