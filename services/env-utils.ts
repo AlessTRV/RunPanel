@@ -30,7 +30,7 @@ export function buildEnv(extra?: Record<string, string>): NodeJS.ProcessEnv {
 /**
  * Get the absolute path to the system shell.
  * On Windows: C:\WINDOWS\system32\cmd.exe (resolved via SystemRoot)
- * On Linux/Mac: /bin/sh
+ * On Linux/Mac: /bin/bash (needed for `source`, venv activation, etc.)
  */
 export function getShellPath(): string {
   if (os.platform() === "win32") {
@@ -40,7 +40,7 @@ export function getShellPath(): string {
       "cmd.exe"
     );
   }
-  return "/bin/sh";
+  return "/bin/bash";
 }
 
 /** Whether the current platform is Windows */

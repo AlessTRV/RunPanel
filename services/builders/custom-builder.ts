@@ -1,5 +1,7 @@
 import { IBuilder, BuildContext, BuildResult } from "./types";
 import { runCommand } from "./run-command";
+import fs from "fs";
+import path from "path";
 
 export const customBuilder: IBuilder = {
   name: "custom",
@@ -42,7 +44,26 @@ export const customBuilder: IBuilder = {
       }
 
       // Start — only the first non-empty line is the start command
-      const resolvedStart = startCmd.split("\n").map(c => c.trim()).filter(Boolean)[0];
+      let resolvedStart = startCmd.split("\n").map(c => c.trim()).filter(Boolean)[0];
+
+      // If a venv exists, check if the start command's binary (python3, gunicorn, uvicorn, etc.)
+      // is available in venv/bin/ and resolve to its absolute path.
+      // PM2 uses execFile which doesn't activate the venv, so the binary must be explicit.
+      const venvBin = path.join(projectDir, "venv", "bin");
+      if (fs.existsSync(venvBin)) {
+        const parts = resolvedStart.split(/\s+/);
+        const binary = parts[0];
+        // Only resolve bare command names (not absolute/relative paths)
+        if (binary && !binary.includes("/")) {
+          const venvBinary = path.join(venvBin, binary);
+          if (fs.existsSync(venvBinary)) {
+            parts[0] = venvBinary;
+            resolvedStart = parts.join(" ");
+            onLog(`Resolved "${binary}" to venv: ${venvBinary}`);
+          }
+        }
+      }
+
       onLog(`Start command: ${resolvedStart}`);
 
       return {
