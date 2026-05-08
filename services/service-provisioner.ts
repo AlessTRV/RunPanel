@@ -46,7 +46,7 @@ export async function provisionService(config: ServiceConfig, projectSlug?: stri
     await exec("docker", ["rm", "-f", containerName], { timeout: 15_000 });
   } catch { /* ignore */ }
 
-  // Build docker run args
+  // Build docker run args — use default bridge network for internet access
   const args: string[] = [
     "run", "-d",
     "--name", containerName,
@@ -54,11 +54,6 @@ export async function provisionService(config: ServiceConfig, projectSlug?: stri
     "-p", `${config.port}:${dockerConfig.port}`,
     "--restart", "unless-stopped",
   ];
-
-  // Connect to project network
-  if (projectSlug) {
-    args.push("--network", `runpanel-net-${projectSlug}`);
-  }
 
   // Add environment vars — values passed as separate args to execFile (no shell injection risk)
   for (const [key, value] of Object.entries(dockerConfig.env)) {
@@ -81,6 +76,15 @@ export async function provisionService(config: ServiceConfig, projectSlug?: stri
   }
 
   const { stdout } = await exec("docker", args, { timeout: 120_000 });
+
+  // Connect to project network after run (keeps default bridge for internet + host access)
+  if (projectSlug) {
+    try {
+      const { connectToNetwork } = await import("./docker-network");
+      await connectToNetwork(containerName, projectSlug);
+    } catch { /* ignore */ }
+  }
+
   return stdout.trim().slice(0, 12); // container ID
 }
 

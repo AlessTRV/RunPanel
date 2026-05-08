@@ -30,24 +30,22 @@ export const dockerDriver: IProcessDriver = {
       envArgs.push("-e", `PORT=${opts.port}`);
     }
 
-    // Check if project has a network (connect after run)
-    const { ensureProjectNetwork } = await import("../docker-network");
-    let networkArgs: string[] = [];
-    try {
-      const netName = await ensureProjectNetwork(slug);
-      networkArgs = ["--network", netName];
-    } catch { /* no network */ }
-
-    // Run container
+    // Run container on default bridge network (for internet + host.docker.internal access)
     await exec("docker", [
       "run", "-d",
       "--name", name,
       "--add-host=host.docker.internal:host-gateway",
-      ...networkArgs,
       ...portArgs,
       ...envArgs,
       imageName,
     ], { timeout: 60_000 });
+
+    // Also connect to project network (for container-to-container communication)
+    try {
+      const { ensureProjectNetwork, connectToNetwork } = await import("../docker-network");
+      await ensureProjectNetwork(slug);
+      await connectToNetwork(name, slug);
+    } catch { /* no project network needed */ }
   },
 
   async stop(slug: string): Promise<void> {
@@ -67,11 +65,20 @@ export const dockerDriver: IProcessDriver = {
     try {
       const { stdout } = await exec("docker", [
         "inspect", name,
-        "--format", "{{.State.Running}}|{{.State.Pid}}|{{.Id}}",
+        "--format", "{{.State.Running}}|{{.State.Pid}}|{{.Id}}|{{.State.StartedAt}}",
       ]);
-      const [running, pid, containerId] = stdout.trim().split("|");
+      const [running, pid, containerId, startedAt] = stdout.trim().split("|");
 
       if (running === "true") {
+        // Calculate uptime from StartedAt
+        let uptime: number | undefined;
+        if (startedAt) {
+          const started = new Date(startedAt).getTime();
+          if (!isNaN(started)) {
+            uptime = Math.floor((Date.now() - started) / 1000);
+          }
+        }
+
         // Get stats
         try {
           const { stdout: stats } = await exec("docker", [
@@ -90,9 +97,10 @@ export const dockerDriver: IProcessDriver = {
             containerId: containerId.slice(0, 12),
             memory,
             cpu,
+            uptime,
           };
         } catch {
-          return { running: true, pid: parseInt(pid), containerId: containerId.slice(0, 12) };
+          return { running: true, pid: parseInt(pid), containerId: containerId.slice(0, 12), uptime };
         }
       }
 
@@ -107,10 +115,29 @@ export const dockerDriver: IProcessDriver = {
     try {
       const { stdout, stderr } = await exec("docker", ["logs", name, "--tail", lines.toString()], {
         timeout: 10_000,
+        maxBuffer: 10 * 1024 * 1024,
       });
-      const combined = (stdout + "\n" + stderr).split("\n").filter(Boolean);
+      // Docker sends container output to both stdout and stderr
+      const combined = (stdout.toString() + "\n" + stderr.toString()).split("\n").filter(Boolean);
+
+      // If no logs, check if container is actually running
+      if (combined.length === 0) {
+        try {
+          const { stdout: inspectOut } = await exec("docker", ["inspect", name, "--format", "{{.State.Status}} {{.State.ExitCode}}"], { timeout: 5_000 });
+          const state = inspectOut.toString().trim();
+          if (state && state !== "running 0") {
+            return [`[container state: ${state}]`];
+          }
+        } catch { /* ignore */ }
+      }
+
       return combined;
-    } catch {
+    } catch (err) {
+      // If container doesn't exist, return empty. Otherwise log the error.
+      const msg = err instanceof Error ? err.message : "";
+      if (!msg.includes("No such container")) {
+        console.error(`[docker-logs] Error fetching logs for ${name}:`, msg);
+      }
       return [];
     }
   },
