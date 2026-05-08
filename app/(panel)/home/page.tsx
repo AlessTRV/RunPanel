@@ -103,6 +103,13 @@ export default function HomePage() {
   const [editSaving, setEditSaving] = useState(false);
   const [editDeleting, setEditDeleting] = useState(false);
 
+  useEffect(() => {
+    if (!editProject) return;
+    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") setEditProject(null); };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [editProject]);
+
   function openProjectSettings(project: Project) {
     setEditProject(project);
     setEditName(project.name);

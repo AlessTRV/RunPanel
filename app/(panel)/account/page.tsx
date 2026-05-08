@@ -17,10 +17,14 @@ export default function AccountPage() {
   const [prefsSaving, setPrefsSaving] = useState(false);
 
   useEffect(() => {
-    fetch("/api/settings").then(r => r.json()).then((data) => {
-      if (data.polling_interval) setPollingInterval(data.polling_interval);
-      if (data.timezone) setTimezone(data.timezone);
-    }).catch(() => {});
+    const controller = new AbortController();
+    fetch("/api/settings", { signal: controller.signal })
+      .then(r => r.json())
+      .then((data) => {
+        if (data.polling_interval) setPollingInterval(data.polling_interval);
+        if (data.timezone) setTimezone(data.timezone);
+      }).catch(() => {});
+    return () => controller.abort();
   }, []);
 
   async function handleChangePassword() {

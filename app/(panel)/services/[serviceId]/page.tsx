@@ -31,10 +31,17 @@ export default function ServiceDetailPage() {
   const [showCreds, setShowCreds] = useState(false);
 
   useEffect(() => {
-    fetch(`/api/services/${serviceId}`)
-      .then((r) => r.ok ? r.json() : null)
-      .then(setService)
-      .finally(() => setLoading(false));
+    const controller = new AbortController();
+    async function loadService() {
+      try {
+        const res = await fetch(`/api/services/${serviceId}`, { signal: controller.signal });
+        if (res.ok) setService(await res.json());
+      } catch (e) { if (e instanceof Error && e.name === "AbortError") return; }
+      finally { setLoading(false); }
+    }
+    loadService();
+    const interval = setInterval(loadService, 5000);
+    return () => { controller.abort(); clearInterval(interval); };
   }, [serviceId]);
 
   async function revealCredentials() {
@@ -44,6 +51,21 @@ export default function ServiceDetailPage() {
       setCreds(JSON.parse(data.credentials));
       setShowCreds(true);
     }
+  }
+
+  async function handleControl(action: "start" | "stop" | "restart") {
+    try {
+      const res = await fetch(`/api/services/${serviceId}/control`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action }),
+      });
+      if (res.ok) {
+        toast.success(`Service ${action}ed`);
+        const updated = await fetch(`/api/services/${serviceId}`);
+        if (updated.ok) setService(await updated.json());
+      } else { toast.error(`Failed to ${action}`); }
+    } catch { toast.error(`Failed to ${action}`); }
   }
 
   async function handleDelete() {
@@ -63,7 +85,7 @@ export default function ServiceDetailPage() {
 
   return (
     <div>
-      <div className="mb-6 flex items-center justify-between">
+      <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-4">
           <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10">
             <Icon icon="solar:database-bold-duotone" className="text-primary" width={28} />
@@ -77,6 +99,22 @@ export default function ServiceDetailPage() {
               {service.type} v{service.version} · Port {service.port}
             </p>
           </div>
+        </div>
+        <div className="flex gap-2 flex-wrap">
+          {service.status === "running" ? (
+            <>
+              <Button variant="outline" size="sm" onPress={() => handleControl("restart")}>
+                <Icon icon="solar:refresh-bold-duotone" width={14} />Restart
+              </Button>
+              <Button variant="danger" size="sm" onPress={() => handleControl("stop")}>
+                <Icon icon="solar:stop-bold-duotone" width={14} />Stop
+              </Button>
+            </>
+          ) : (
+            <Button variant="secondary" size="sm" onPress={() => handleControl("start")}>
+              <Icon icon="solar:play-bold-duotone" width={14} />Start
+            </Button>
+          )}
         </div>
       </div>
 

@@ -49,8 +49,9 @@ export default function ProjectDetailPage() {
   const [processInfo, setProcessInfo] = useState<ProcessInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [deploying, setDeploying] = useState(false);
-  const [activeTab, setActiveTab] = useState<TabId>("logs");
-  const [showProjectSettings, setShowProjectSettings] = useState(searchParams.get("tab") === "settings");
+  const tabParam = searchParams.get("tab") as TabId | null;
+  const [activeTab, setActiveTab] = useState<TabId>(tabParam && ["logs", "deployments", "env", "terminal", "settings"].includes(tabParam) ? tabParam : "logs");
+  const [showProjectSettings, setShowProjectSettings] = useState(tabParam === "settings");
 
   // Logs state
   const [logs, setLogs] = useState<string[]>([]);
@@ -87,17 +88,38 @@ export default function ProjectDetailPage() {
   const [settSaving, setSettSaving] = useState(false);
   const [settDeleting, setSettDeleting] = useState(false);
 
-  // ── Load project ──
   useEffect(() => {
-    fetch(`/api/projects/${projectId}`)
-      .then((r) => { if (!r.ok) throw new Error(); return r.json(); })
-      .then((p) => {
+    if (!showProjectSettings) return;
+    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") setShowProjectSettings(false); };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [showProjectSettings]);
+
+  // ── Load project + status simultaneously ──
+  useEffect(() => {
+    const controller = new AbortController();
+    async function load() {
+      try {
+        const [prRes, stRes] = await Promise.all([
+          fetch(`/api/projects/${projectId}`, { signal: controller.signal }),
+          fetch(`/api/projects/${projectId}/status`, { signal: controller.signal }),
+        ]);
+        if (!prRes.ok) throw new Error();
+        const p = await prRes.json();
         setProject(p);
         setSettName(p.name); setSettAppName(p.app_name || ""); setSettBranch(p.source_branch); setSettPort(p.port?.toString() || "");
         try { const bc = JSON.parse(p.builder_config || "{}"); setSettPm(bc.packageManager || "auto"); setSettInstallCmd(bc.installCmd || ""); setSettBuildCmd(bc.buildCmd || ""); setSettStartCmd(bc.startCmd || ""); } catch {}
-      })
-      .catch(() => router.push("/home"))
-      .finally(() => setLoading(false));
+        const st = stRes.ok ? await stRes.json() : null;
+        if (st?.process) setProcessInfo(st.process);
+      } catch (e) {
+        if (e instanceof Error && e.name === "AbortError") return;
+        router.push("/home");
+      } finally {
+        setLoading(false);
+      }
+    }
+    load();
+    return () => controller.abort();
   }, [projectId, router]);
 
   // ── Poll status (always running, ref tracks previous for toasts) ──
@@ -304,7 +326,7 @@ export default function ProjectDetailPage() {
           </div>
           <p className="text-xs text-foreground-400">{project.runtime_type} · :{project.port || "auto"} · {project.source_branch}</p>
         </div>
-        <div className="flex gap-2 flex-shrink-0 flex-wrap">
+        <div className="flex gap-2 flex-shrink-0 flex-wrap w-full md:w-auto">
           <Button variant="primary" size="sm" isDisabled={deploying || project.status === "deploying"} onPress={() => handleDeploy("deploy")}>{deploying ? <Spinner /> : <Icon icon="solar:upload-bold-duotone" width={16} />}Deploy</Button>
           <Button variant="outline" size="sm" isDisabled={deploying || project.status === "deploying"} onPress={() => handleDeploy("rebuild")}><Icon icon="solar:refresh-circle-bold-duotone" width={16} />Re-Build</Button>
           {(project.status === "running" || project.status === "error") && (<><Button variant="outline" size="sm" onPress={() => handleControl("restart")}><Icon icon="solar:refresh-bold-duotone" width={16} />Restart</Button><Button variant="danger" size="sm" onPress={() => handleControl("stop")}><Icon icon="solar:stop-bold-duotone" width={16} />Stop</Button></>)}
@@ -332,9 +354,9 @@ export default function ProjectDetailPage() {
       </div>
 
       {/* Tabs */}
-      <div className="mb-4 flex gap-1 border-b border-white/[0.07]">
+      <div className="mb-4 flex gap-1 border-b border-white/[0.07] overflow-x-auto">
         {tabs.map((tab) => (
-          <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`flex items-center gap-1.5 px-3 py-2.5 text-sm font-medium border-b-2 transition-colors ${activeTab === tab.id ? "border-primary text-primary" : "border-transparent text-foreground-400 hover:text-foreground hover:bg-white/5 rounded-t-lg"}`}>
+          <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`flex items-center gap-1.5 px-3 py-2.5 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${activeTab === tab.id ? "border-primary text-primary" : "border-transparent text-foreground-400 hover:text-foreground hover:bg-white/5 rounded-t-lg"}`}>
             <Icon icon={tab.icon} width={15} />{tab.label}
           </button>
         ))}
@@ -381,10 +403,10 @@ export default function ProjectDetailPage() {
             <Card>
               <CardContent className="space-y-3 py-4">
                 {envVars.map((v, i) => (
-                  <div key={i} className="flex items-end gap-2">
-                    <div className="flex-1"><TextField value={v.key} onChange={(val) => { const u = [...envVars]; u[i] = {...u[i], key: val}; setEnvVars(u); }}><Label className="text-xs">Key</Label><Input placeholder="VARIABLE_NAME" className="font-mono text-sm" /></TextField></div>
-                    <div className="flex-[2]"><TextField value={v.value} onChange={(val) => { const u = [...envVars]; u[i] = {...u[i], value: val}; setEnvVars(u); }}><Label className="text-xs">Value</Label><Input placeholder="value" className="font-mono text-sm" /></TextField></div>
-                    <Button variant="ghost" size="sm" isIconOnly onPress={() => setEnvVars(envVars.filter((_,j)=>j!==i))} className="mb-0.5"><Icon icon="solar:trash-bin-trash-bold-duotone" width={18} className="text-danger" /></Button>
+                  <div key={i} className="flex flex-col sm:flex-row items-stretch sm:items-end gap-2">
+                    <div className="w-full sm:flex-1"><TextField value={v.key} onChange={(val) => { const u = [...envVars]; u[i] = {...u[i], key: val}; setEnvVars(u); }}><Label className="text-xs">Key</Label><Input placeholder="VARIABLE_NAME" className="font-mono text-sm" /></TextField></div>
+                    <div className="w-full sm:flex-[2]"><TextField value={v.value} onChange={(val) => { const u = [...envVars]; u[i] = {...u[i], value: val}; setEnvVars(u); }}><Label className="text-xs">Value</Label><Input placeholder="value" className="font-mono text-sm" /></TextField></div>
+                    <Button variant="ghost" size="sm" isIconOnly onPress={() => setEnvVars(envVars.filter((_,j)=>j!==i))} className="mb-0.5 self-end"><Icon icon="solar:trash-bin-trash-bold-duotone" width={18} className="text-danger" /></Button>
                   </div>
                 ))}
               </CardContent>
@@ -454,7 +476,32 @@ export default function ProjectDetailPage() {
           </Card>
           <Card>
             <CardHeader><CardTitle>Webhook</CardTitle><CardDescription>Auto-deploy on GitHub push</CardDescription></CardHeader>
-            <CardContent className="space-y-3">
+            <CardContent className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium">Auto-deploy</p>
+                  <p className="text-xs text-foreground-500">Automatically deploy when a push is received on the configured branch</p>
+                </div>
+                <button
+                  onClick={async () => {
+                    const newVal = !project.auto_deploy;
+                    try {
+                      const res = await fetch(`/api/projects/${projectId}`, {
+                        method: "PATCH",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ autoDeploy: newVal }),
+                      });
+                      if (res.ok) {
+                        setProject(p => p ? { ...p, auto_deploy: newVal ? 1 : 0 } : p);
+                        toast.success(newVal ? "Auto-deploy enabled" : "Auto-deploy disabled");
+                      } else { toast.error("Failed to update"); }
+                    } catch { toast.error("Failed to update"); }
+                  }}
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${project.auto_deploy ? "bg-purple-500" : "bg-white/[0.1]"}`}
+                >
+                  <span className={`inline-block h-4 w-4 rounded-full bg-white transition-transform ${project.auto_deploy ? "translate-x-6" : "translate-x-1"}`} />
+                </button>
+              </div>
               <div className="rounded-lg border border-white/[0.07] bg-black/40 backdrop-blur-xl p-3 font-mono text-xs break-all">
                 <p className="text-foreground-400 mb-1">URL:</p>
                 <p>{typeof window !== "undefined" ? window.location.origin : ""}/api/webhooks/github/{projectId}</p>
@@ -658,7 +705,7 @@ function FileManager({ projectId, runtimeType }: { projectId: string; runtimeTyp
 
       <div className={`flex flex-col sm:flex-row rounded-xl border border-white/[0.07] overflow-hidden resize-y ${selectedFile ? "min-h-[400px] sm:min-h-[300px] h-[500px] sm:h-[450px]" : "min-h-[200px] h-[300px]"} max-h-[80vh]`}>
         {/* File Tree */}
-        <div className={`flex flex-col border-b sm:border-b-0 sm:border-r border-white/[0.07] bg-black/30 overflow-auto ${selectedFile ? "h-[150px] sm:h-auto w-full sm:w-[250px] flex-shrink-0" : "flex-1"}`}>
+        <div className={`flex flex-col border-b sm:border-b-0 sm:border-r border-white/[0.07] bg-black/30 overflow-auto ${selectedFile ? "h-[220px] sm:h-auto w-full sm:w-[250px] flex-shrink-0" : "flex-1"}`}>
           {/* Breadcrumb */}
           <div className="flex items-center gap-1 px-3 py-2 border-b border-white/[0.05] text-xs text-foreground-500 flex-shrink-0">
             <button onClick={() => loadDir("/")} className="hover:text-foreground-300 transition-colors">/</button>

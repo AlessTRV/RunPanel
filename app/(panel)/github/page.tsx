@@ -27,12 +27,16 @@ export default function GitHubPage() {
   const [search, setSearch] = useState("");
 
   useEffect(() => {
-    fetch("/api/settings").then(r => r.json()).then((data) => {
-      if (data.github_token === "configured") {
-        setHasToken(true);
-        loadRepos();
-      }
-    }).catch(() => {});
+    const controller = new AbortController();
+    fetch("/api/settings", { signal: controller.signal })
+      .then(r => r.json())
+      .then((data) => {
+        if (data.github_token === "configured") {
+          setHasToken(true);
+          loadRepos();
+        }
+      }).catch(() => {});
+    return () => controller.abort();
   }, []);
 
   async function loadRepos() {

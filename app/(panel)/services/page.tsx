@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Button, Card, CardContent, CardHeader, CardTitle, CardDescription, Spinner } from "@heroui/react";
+import { Button, Card, CardContent, CardHeader, CardTitle, CardDescription, Input, Spinner } from "@heroui/react";
 import { Icon } from "@iconify/react";
 import Link from "next/link";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -26,12 +26,20 @@ const typeIcons: Record<string, string> = {
 export default function ServicesPage() {
   const [services, setServices] = useState<Service[]>([]);
   const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
 
   useEffect(() => {
-    fetch("/api/services")
-      .then((r) => r.json())
-      .then(setServices)
-      .finally(() => setLoading(false));
+    const controller = new AbortController();
+    async function loadServices() {
+      try {
+        const res = await fetch("/api/services", { signal: controller.signal });
+        if (res.ok) setServices(await res.json());
+      } catch (e) { if (e instanceof Error && e.name === "AbortError") return; }
+      finally { setLoading(false); }
+    }
+    loadServices();
+    const interval = setInterval(loadServices, 5000);
+    return () => { controller.abort(); clearInterval(interval); };
   }, []);
 
   async function handleControl(serviceId: string, action: "start" | "stop" | "restart") {
@@ -71,6 +79,12 @@ export default function ServicesPage() {
         </Link>
       </div>
 
+      {services.length > 0 && (
+        <div className="mb-4">
+          <Input placeholder="Search services..." value={search} onChange={(e) => setSearch(e.target.value)} className="text-sm max-w-xs" />
+        </div>
+      )}
+
       {services.length === 0 ? (
         <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-white/[0.07] py-20">
           <Icon icon="solar:database-bold-duotone" className="mb-4 text-foreground-300" width={48} />
@@ -79,7 +93,7 @@ export default function ServicesPage() {
         </div>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {services.map((svc) => (
+          {services.filter(svc => !search || svc.name.toLowerCase().includes(search.toLowerCase()) || svc.type.toLowerCase().includes(search.toLowerCase())).map((svc) => (
             <Card key={svc.id}>
               <CardHeader>
                 <div className="flex items-center justify-between w-full">
