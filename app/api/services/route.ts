@@ -8,6 +8,7 @@ import {
   generateCredentials,
   provisionService,
   getConnectionString,
+  serviceContainerName,
 } from "@/services/service-provisioner";
 
 export async function GET() {
@@ -51,9 +52,10 @@ export async function POST(request: NextRequest) {
       projectSlug = proj?.slug;
     }
 
-    const config = { name, type: type as "postgresql" | "mysql" | "redis" | "mongodb", version, port, credentials };
+    const config = { name, type: type as "postgresql" | "mysql" | "redis" | "mongodb", version, port, credentials, projectSlug };
     const containerId = await provisionService(config, projectSlug);
     const connString = getConnectionString(config);
+    const containerName = serviceContainerName(name, projectSlug);
 
     db.prepare(`
       INSERT INTO services (id, name, type, version, status, container_id, port, credentials, config, project_id)
@@ -66,7 +68,7 @@ export async function POST(request: NextRequest) {
       containerId,
       port,
       encrypt(JSON.stringify({ ...credentials, connectionString: connString })),
-      JSON.stringify({}),
+      JSON.stringify({ containerName }),
       projectId || null
     );
 

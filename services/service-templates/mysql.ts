@@ -14,7 +14,7 @@ export const mysqlTemplate: IServiceTemplate = {
         MYSQL_USER: config.credentials.user,
         MYSQL_PASSWORD: config.credentials.password,
       },
-      volumes: [`runpanel-mysql-${config.name}:/var/lib/mysql`],
+      volumes: [`runpanel-mysql-${config.projectSlug ? config.projectSlug + "-" : ""}${config.name}:/var/lib/mysql`],
       port: 3306,
     };
   },

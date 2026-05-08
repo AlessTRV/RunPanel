@@ -13,7 +13,7 @@ export const mongodbTemplate: IServiceTemplate = {
         MONGO_INITDB_ROOT_PASSWORD: config.credentials.password,
         MONGO_INITDB_DATABASE: config.credentials.database,
       },
-      volumes: [`runpanel-mongo-${config.name}:/data/db`],
+      volumes: [`runpanel-mongo-${config.projectSlug ? config.projectSlug + "-" : ""}${config.name}:/data/db`],
       port: 27017,
     };
   },

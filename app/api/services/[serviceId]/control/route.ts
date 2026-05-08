@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth-guard";
 import { getDb } from "@/lib/db";
 import { controlActionSchema } from "@/lib/validation";
-import { startService, stopService, restartService } from "@/services/service-provisioner";
+import { startService, stopService, restartService, serviceContainerName } from "@/services/service-provisioner";
 
 type Params = { params: Promise<{ serviceId: string }> };
 
@@ -24,20 +24,30 @@ export async function POST(request: NextRequest, { params }: Params) {
   }
 
   const { action } = parsed.data;
-  const name = service.name as string;
+
+  // Resolve full container name: from config JSON (new services) or legacy unscoped pattern
+  let containerName: string;
+  try {
+    const cfg = JSON.parse((service.config as string) || "{}");
+    containerName = cfg.containerName;
+  } catch { containerName = ""; }
+  if (!containerName) {
+    // Legacy services don't have containerName in config — use old unscoped pattern
+    containerName = serviceContainerName(service.name as string);
+  }
 
   try {
     switch (action) {
       case "start":
-        await startService(name);
+        await startService(containerName);
         db.prepare("UPDATE services SET status = 'running', updated_at = datetime('now') WHERE id = ?").run(serviceId);
         break;
       case "stop":
-        await stopService(name);
+        await stopService(containerName);
         db.prepare("UPDATE services SET status = 'stopped', updated_at = datetime('now') WHERE id = ?").run(serviceId);
         break;
       case "restart":
-        await restartService(name);
+        await restartService(containerName);
         db.prepare("UPDATE services SET status = 'running', updated_at = datetime('now') WHERE id = ?").run(serviceId);
         break;
     }

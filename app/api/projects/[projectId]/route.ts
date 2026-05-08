@@ -3,7 +3,7 @@ import { requireAuth } from "@/lib/auth-guard";
 import { getDb } from "@/lib/db";
 import { updateProjectSchema } from "@/lib/validation";
 import { processManager } from "@/services/process-manager";
-import { removeService } from "@/services/service-provisioner";
+import { removeService, serviceContainerName } from "@/services/service-provisioner";
 import fs from "fs";
 import path from "path";
 import { config } from "@/lib/config";
@@ -104,7 +104,10 @@ export async function DELETE(_request: NextRequest, { params }: Params) {
   // Stop and remove all services linked to this project
   const services = db.prepare("SELECT * FROM services WHERE project_id = ?").all(projectId) as Record<string, unknown>[];
   for (const svc of services) {
-    try { await removeService(svc.name as string); } catch { /* ignore */ }
+    let cn: string;
+    try { const cfg = JSON.parse((svc.config as string) || "{}"); cn = cfg.containerName; } catch { cn = ""; }
+    if (!cn) cn = serviceContainerName(svc.name as string);
+    try { await removeService(cn); } catch { /* ignore */ }
   }
   db.prepare("DELETE FROM services WHERE project_id = ?").run(projectId);
 

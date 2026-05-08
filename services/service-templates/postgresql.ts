@@ -13,7 +13,7 @@ export const postgresqlTemplate: IServiceTemplate = {
         POSTGRES_PASSWORD: config.credentials.password,
         POSTGRES_DB: config.credentials.database,
       },
-      volumes: [`runpanel-pg-${config.name}:/var/lib/postgresql/data`],
+      volumes: [`runpanel-pg-${config.projectSlug ? config.projectSlug + "-" : ""}${config.name}:/var/lib/postgresql/data`],
       port: 5432,
     };
   },

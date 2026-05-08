@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth-guard";
 import { getDb } from "@/lib/db";
 import { decrypt } from "@/lib/auth";
-import { removeService } from "@/services/service-provisioner";
+import { removeService, serviceContainerName } from "@/services/service-provisioner";
 
 type Params = { params: Promise<{ serviceId: string }> };
 
@@ -41,8 +41,18 @@ export async function DELETE(_request: NextRequest, { params }: Params) {
     return NextResponse.json({ error: "Service not found" }, { status: 404 });
   }
 
+  // Resolve container name from config or legacy unscoped fallback
+  let containerName: string;
   try {
-    await removeService(service.name as string);
+    const cfg = JSON.parse((service.config as string) || "{}");
+    containerName = cfg.containerName;
+  } catch { containerName = ""; }
+  if (!containerName) {
+    containerName = serviceContainerName(service.name as string);
+  }
+
+  try {
+    await removeService(containerName);
   } catch { /* ignore */ }
 
   db.prepare("DELETE FROM services WHERE id = ?").run(serviceId);

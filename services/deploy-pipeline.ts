@@ -4,6 +4,7 @@ import { config } from "@/lib/config";
 import { gitPull, gitClone, repoExists, getRepoPath } from "./git-manager";
 import { buildProject } from "./builder-registry";
 import { processManager } from "./process-manager";
+import { serviceContainerName } from "./service-provisioner";
 import type { BuildContext } from "./builders/types";
 import path from "path";
 import fs from "fs";
@@ -129,13 +130,15 @@ export async function executeDeploy(
 
     // Auto-inject service connection URLs (DB, Redis, etc.)
     const linkedServices = db.prepare(
-      "SELECT name, type, port, credentials FROM services WHERE project_id = ?"
-    ).all(project.id) as { name: string; type: string; port: number; credentials: string }[];
+      "SELECT name, type, port, credentials, config FROM services WHERE project_id = ?"
+    ).all(project.id) as { name: string; type: string; port: number; credentials: string; config: string }[];
 
     const isDockerApp = project.runtime_type === "docker";
     for (const svc of linkedServices) {
-      const containerName = `runpanel-svc-${svc.name}`;
-      const host = isDockerApp ? containerName : "localhost";
+      let cn: string;
+      try { const cfg = JSON.parse(svc.config || "{}"); cn = cfg.containerName; } catch { cn = ""; }
+      if (!cn) cn = serviceContainerName(svc.name);
+      const host = isDockerApp ? cn : "localhost";
       let creds: { user?: string; password?: string; database?: string; connectionString?: string } = {};
       try { creds = JSON.parse(decrypt(svc.credentials)); } catch {}
 

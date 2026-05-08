@@ -9,6 +9,12 @@ import { mongodbTemplate } from "./service-templates/mongodb";
 
 const exec = promisify(execFile);
 
+/** Build a project-scoped container name for a service */
+export function serviceContainerName(serviceName: string, projectSlug?: string | null): string {
+  if (projectSlug) return `runpanel-svc-${projectSlug}-${serviceName}`;
+  return `runpanel-svc-${serviceName}`;
+}
+
 const templates: Record<string, IServiceTemplate> = {
   postgresql: postgresqlTemplate,
   mysql: mysqlTemplate,
@@ -33,7 +39,7 @@ export async function provisionService(config: ServiceConfig, projectSlug?: stri
   if (!template) throw new Error(`Unknown service type: ${config.type}`);
 
   const dockerConfig = template.getDockerConfig(config);
-  const containerName = `runpanel-svc-${config.name}`;
+  const containerName = serviceContainerName(config.name, projectSlug);
 
   // Ensure project network exists if project is linked
   if (projectSlug) {
@@ -88,21 +94,21 @@ export async function provisionService(config: ServiceConfig, projectSlug?: stri
   return stdout.trim().slice(0, 12); // container ID
 }
 
-export async function startService(containerName: string): Promise<void> {
-  await exec("docker", ["start", `runpanel-svc-${containerName}`], { timeout: 15_000 });
+export async function startService(fullContainerName: string): Promise<void> {
+  await exec("docker", ["start", fullContainerName], { timeout: 15_000 });
 }
 
-export async function stopService(containerName: string): Promise<void> {
-  await exec("docker", ["stop", `runpanel-svc-${containerName}`], { timeout: 15_000 });
+export async function stopService(fullContainerName: string): Promise<void> {
+  await exec("docker", ["stop", fullContainerName], { timeout: 15_000 });
 }
 
-export async function restartService(containerName: string): Promise<void> {
-  await exec("docker", ["restart", `runpanel-svc-${containerName}`], { timeout: 15_000 });
+export async function restartService(fullContainerName: string): Promise<void> {
+  await exec("docker", ["restart", fullContainerName], { timeout: 15_000 });
 }
 
-export async function removeService(containerName: string): Promise<void> {
+export async function removeService(fullContainerName: string): Promise<void> {
   try {
-    await exec("docker", ["rm", "-f", `runpanel-svc-${containerName}`], { timeout: 15_000 });
+    await exec("docker", ["rm", "-f", fullContainerName], { timeout: 15_000 });
   } catch { /* ignore */ }
 }
 

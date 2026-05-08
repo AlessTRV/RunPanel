@@ -9,7 +9,7 @@ export const redisTemplate: IServiceTemplate = {
     return {
       image: `redis:${config.version}`,
       env: {},
-      volumes: [`runpanel-redis-${config.name}:/data`],
+      volumes: [`runpanel-redis-${config.projectSlug ? config.projectSlug + "-" : ""}${config.name}:/data`],
       port: 6379,
     };
   },

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth-guard";
 import { getDb } from "@/lib/db";
 import { processManager } from "@/services/process-manager";
+import { serviceContainerName } from "@/services/service-provisioner";
 import { execFile } from "child_process";
 import { promisify } from "util";
 import os from "os";
@@ -72,7 +73,7 @@ export async function GET() {
   `).all() as { id: string; name: string; slug: string; runtime_type: string; status: string; port: number | null }[];
 
   const services = db.prepare("SELECT * FROM services WHERE project_id IS NOT NULL").all() as {
-    id: string; name: string; type: string; status: string; port: number; project_id: string;
+    id: string; name: string; type: string; status: string; port: number; project_id: string; config: string;
   }[];
 
   // Gather process stats for projects and services in parallel
@@ -88,8 +89,10 @@ export async function GET() {
 
     // Fetch stats for each service container in parallel
     const enrichedServices = await Promise.all(projectServices.map(async (s) => {
-      const containerName = `runpanel-svc-${s.name}`;
-      const stats = s.status === "running" ? await getServiceStats(containerName) : null;
+      let cn: string;
+      try { const cfg = JSON.parse(s.config || "{}"); cn = cfg.containerName; } catch { cn = ""; }
+      if (!cn) cn = serviceContainerName(s.name);
+      const stats = s.status === "running" ? await getServiceStats(cn) : null;
       return {
         id: s.id,
         name: s.name,

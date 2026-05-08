@@ -4,6 +4,7 @@ export interface ServiceConfig {
   version: string;
   port: number;
   credentials: { user: string; password: string; database: string };
+  projectSlug?: string;
 }
 
 export interface DockerRunConfig {
