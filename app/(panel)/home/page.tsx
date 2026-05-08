@@ -164,7 +164,7 @@ export default function HomePage() {
   return (
     <div>
       {/* ── Metrics ── */}
-      <div className="grid grid-cols-1 gap-4 mb-12 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-4 mb-12 lg:grid-cols-4">
         {stats.map((s) => (
           <div key={s.label} className="rounded-[14px] bg-white/[0.04] p-4 sm:p-5 flex flex-col justify-between min-h-[100px] sm:min-h-[120px]">
             <p className="text-[13px] font-medium text-foreground-500">{s.label}</p>
