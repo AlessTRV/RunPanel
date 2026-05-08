@@ -363,6 +363,14 @@ export default function ProjectDetailPage() {
       {/* ═══ TAB: Env ═══ */}
       {activeTab === "env" && (
         <div>
+          {project.runtime_type === "docker" && (
+            <div className="mb-4 flex items-start gap-3 rounded-xl bg-purple-500/10 border border-purple-500/15 px-4 py-3">
+              <Icon icon="solar:info-circle-bold-duotone" className="text-purple-400 flex-shrink-0 mt-0.5" width={18} />
+              <p className="text-xs text-foreground-300">
+                This service runs in a Docker container. Use <code className="bg-white/[0.08] px-1.5 py-0.5 rounded text-purple-300 font-mono">host.docker.internal</code> instead of <code className="bg-white/[0.08] px-1.5 py-0.5 rounded font-mono">localhost</code> to reach services on the host machine (e.g. databases).
+              </p>
+            </div>
+          )}
           <div className="mb-4 flex gap-2 justify-end">
             <Button variant="outline" size="sm" onPress={handleImportEnv}><Icon icon="solar:import-bold-duotone" width={16} />Import .env</Button>
             <Button variant="outline" size="sm" onPress={() => setEnvVars(p => [...p, {key:"",value:""}])}><Icon icon="solar:add-circle-bold-duotone" width={16} />Add</Button>

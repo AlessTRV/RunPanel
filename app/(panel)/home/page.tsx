@@ -67,10 +67,13 @@ export default function HomePage() {
   // Initial load
   useEffect(() => {
     Promise.all([
-      fetch("/api/projects").then((r) => r.json()),
-      fetch("/api/metrics").then((r) => r.json()),
+      fetch("/api/projects").then((r) => r.ok ? r.json() : []),
+      fetch("/api/metrics").then((r) => r.ok ? r.json() : null),
     ])
-      .then(([p, m]) => { setProjects(p); setMetrics(m); })
+      .then(([p, m]) => {
+        if (Array.isArray(p)) setProjects(p);
+        if (m) setMetrics(m);
+      })
       .finally(() => setLoading(false));
   }, []);
 
@@ -84,7 +87,7 @@ export default function HomePage() {
           fetch("/api/projects", { signal: controller.signal }).then((r) => r.ok ? r.json() : null),
         ]);
         if (m) setMetrics(m);
-        if (p) setProjects(p);
+        if (p && Array.isArray(p)) setProjects(p);
       } catch (e) { if (e instanceof Error && e.name === "AbortError") return; }
     }, 5000);
     return () => { controller.abort(); clearInterval(interval); };
