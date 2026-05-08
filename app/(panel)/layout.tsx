@@ -18,7 +18,7 @@ export default async function PanelLayout({
       <AppSidebar />
       <div className="ml-0 md:ml-64">
         <TopBar />
-        <main className="py-8 px-4 sm:px-8 md:px-12">{children}</main>
+        <main className="pt-4 md:pt-8 pb-8 px-4 sm:px-8 md:px-12">{children}</main>
       </div>
     </div>
   );

@@ -60,6 +60,13 @@ const STATUS_DOT: Record<string, string> = {
   error: "text-red-400",
 };
 
+const STATUS_BG: Record<string, string> = {
+  running: "bg-emerald-400",
+  stopped: "bg-foreground-500",
+  deploying: "bg-amber-400",
+  error: "bg-red-400",
+};
+
 export default function MonitorPage() {
   const [data, setData] = useState<MonitorData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -78,7 +85,7 @@ export default function MonitorPage() {
       } catch (e) { if (e instanceof Error && e.name === "AbortError") return; }
     };
     poll();
-    const interval = setInterval(poll, 2000);
+    const interval = setInterval(poll, 3000);
     return () => { controller.abort(); clearInterval(interval); };
   }, []);
 
@@ -113,92 +120,158 @@ export default function MonitorPage() {
           <span>UP <span className="text-emerald-400">{Math.floor(data.server.uptime / 3600)}h {Math.floor((data.server.uptime % 3600) / 60)}m</span></span>
         </div>
 
-        {/* Column headers */}
-        <div className="grid grid-cols-[1fr_60px_50px] sm:grid-cols-[1fr_80px_70px_70px_70px_60px] gap-1 sm:gap-2 px-4 py-2 border-b border-white/[0.05] text-foreground-500 text-[10px] uppercase tracking-wider">
-          <span>Name</span>
-          <span className="text-right">Status</span>
-          <span className="text-right">CPU</span>
-          <span className="hidden sm:block text-right">Memory</span>
-          <span className="hidden sm:block text-right">Uptime</span>
-          <span className="hidden sm:block text-right">PID</span>
+        {/* Desktop: Table layout (sm and up) */}
+        <div className="hidden sm:block">
+          {/* Column headers */}
+          <div className="grid grid-cols-[1fr_80px_70px_70px_70px_60px] gap-2 px-4 py-2 border-b border-white/[0.05] text-foreground-500 text-[10px] uppercase tracking-wider">
+            <span>Name</span>
+            <span className="text-right">Status</span>
+            <span className="text-right">CPU</span>
+            <span className="text-right">Memory</span>
+            <span className="text-right">Uptime</span>
+            <span className="text-right">PID</span>
+          </div>
+
+          {/* Process rows */}
+          <div className="divide-y divide-white/[0.03]">
+            {data.projects.length === 0 ? (
+              <div className="px-4 py-6 text-center text-foreground-500">No projects</div>
+            ) : (
+              data.projects.map((project) => {
+                const isCollapsed = collapsed.has(project.id);
+                return (
+                  <div key={project.id}>
+                    <div
+                      className="flex items-center gap-2 px-4 py-2 hover:bg-white/[0.02] cursor-pointer transition-colors"
+                      onClick={() => toggleCollapse(project.id)}
+                    >
+                      <Icon icon={isCollapsed ? "solar:alt-arrow-right-bold" : "solar:alt-arrow-down-bold"} width={10} className="text-foreground-500" />
+                      <span className="text-foreground-200 font-semibold">{project.name}</span>
+                    </div>
+
+                    {!isCollapsed && (
+                      <>
+                        <div className="grid grid-cols-[1fr_80px_70px_70px_70px_60px] gap-2 px-4 py-1.5 pl-8 text-foreground-400 hover:bg-white/[0.02] transition-colors">
+                          <span className="flex items-center gap-2">
+                            <span className="text-foreground-500">{project.services.length > 0 ? "\u251C\u2500" : "\u2514\u2500"}</span>
+                            <Icon icon="solar:server-square-bold" width={12} className="text-purple-400/70" />
+                            <span>app</span>
+                            <span className="text-foreground-500">({project.runtimeType})</span>
+                            {project.port && <span className="text-foreground-500">:{project.port}</span>}
+                          </span>
+                          <span className={`text-right ${STATUS_DOT[project.status] || "text-foreground-500"}`}>{project.status}</span>
+                          <span className="text-right">{project.process?.cpu != null ? `${project.process.cpu}%` : "\u2014"}</span>
+                          <span className="text-right">{project.process?.memory ? fmtMem(project.process.memory) : "\u2014"}</span>
+                          <span className="text-right">{project.process?.uptime != null ? fmtUptime(project.process.uptime) : "\u2014"}</span>
+                          <span className="text-right text-foreground-500">{project.process?.pid || "\u2014"}</span>
+                        </div>
+
+                        {project.services.map((svc, i) => {
+                          const isLast = i === project.services.length - 1;
+                          return (
+                            <div key={svc.id} className="grid grid-cols-[1fr_80px_70px_70px_70px_60px] gap-2 px-4 py-1.5 pl-8 text-foreground-400 hover:bg-white/[0.02] transition-colors">
+                              <span className="flex items-center gap-2">
+                                <span className="text-foreground-500">{isLast ? "\u2514\u2500" : "\u251C\u2500"}</span>
+                                <Icon icon="solar:database-bold" width={12} className="text-cyan-400/70" />
+                                <span>{svc.name}</span>
+                                <span className="text-foreground-500">({svc.type})</span>
+                                <span className="text-foreground-500">:{svc.port}</span>
+                              </span>
+                              <span className={`text-right ${STATUS_DOT[svc.status] || "text-foreground-500"}`}>{svc.status}</span>
+                              <span className="text-right">{svc.cpu != null ? `${svc.cpu}%` : "\u2014"}</span>
+                              <span className="text-right">{svc.memory ? fmtMem(svc.memory) : "\u2014"}</span>
+                              <span className="text-right">{svc.uptime != null ? fmtUptime(svc.uptime) : "\u2014"}</span>
+                              <span className="text-right text-foreground-500">{"\u2014"}</span>
+                            </div>
+                          );
+                        })}
+                      </>
+                    )}
+                  </div>
+                );
+              })
+            )}
+          </div>
         </div>
 
-        {/* Process rows */}
-        <div className="divide-y divide-white/[0.03]">
+        {/* Mobile: Card layout (below sm) */}
+        <div className="sm:hidden divide-y divide-white/[0.03]">
           {data.projects.length === 0 ? (
             <div className="px-4 py-6 text-center text-foreground-500">No projects</div>
           ) : (
             data.projects.map((project) => {
               const isCollapsed = collapsed.has(project.id);
-
               return (
                 <div key={project.id}>
-                  {/* Project header row — name only, stats live on child rows */}
                   <div
-                    className="flex items-center gap-2 px-4 py-2 hover:bg-white/[0.02] cursor-pointer transition-colors"
+                    className="flex items-center gap-2 px-3 py-2.5 hover:bg-white/[0.02] cursor-pointer transition-colors"
                     onClick={() => toggleCollapse(project.id)}
                   >
                     <Icon icon={isCollapsed ? "solar:alt-arrow-right-bold" : "solar:alt-arrow-down-bold"} width={10} className="text-foreground-500" />
-                    <span className="text-foreground-200 font-semibold">{project.name}</span>
+                    <span className="text-foreground-200 font-semibold flex-1 truncate">{project.name}</span>
                   </div>
 
-                  {/* Expanded: app process + services */}
                   {!isCollapsed && (
                     <>
-                      {/* App process row */}
-                      <div className="grid grid-cols-[1fr_60px_50px] sm:grid-cols-[1fr_80px_70px_70px_70px_60px] gap-1 sm:gap-2 px-4 py-1.5 pl-8 text-foreground-400 hover:bg-white/[0.02] transition-colors">
-                        <span className="flex items-center gap-2">
-                          <span className="text-foreground-500">{project.services.length > 0 ? "├─" : "└─"}</span>
-                          <Icon icon="solar:server-square-bold" width={12} className="text-purple-400/70" />
-                          <span>app</span>
-                          <span className="text-foreground-500">({project.runtimeType})</span>
-                          {project.port && <span className="text-foreground-500">:{project.port}</span>}
-                        </span>
-                        <span className={`text-right ${STATUS_DOT[project.status] || "text-foreground-500"}`}>
-                          {project.status}
-                        </span>
-                        <span className="text-right">
-                          {project.process?.cpu != null ? `${project.process.cpu}%` : "—"}
-                        </span>
-                        <span className="hidden sm:block text-right">
-                          {project.process?.memory ? fmtMem(project.process.memory) : "—"}
-                        </span>
-                        <span className="hidden sm:block text-right">
-                          {project.process?.uptime != null ? fmtUptime(project.process.uptime) : "—"}
-                        </span>
-                        <span className="hidden sm:block text-right text-foreground-500">
-                          {project.process?.pid || "—"}
-                        </span>
+                      {/* App process card */}
+                      <div className="mx-3 mb-2 rounded-lg bg-white/[0.02] px-3 py-2.5">
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center gap-2">
+                            <Icon icon="solar:server-square-bold" width={12} className="text-purple-400/70" />
+                            <span className="text-foreground-300 text-[11px] font-medium">app</span>
+                            <span className="text-foreground-500 text-[10px]">({project.runtimeType})</span>
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <div className={`h-1.5 w-1.5 rounded-full ${STATUS_BG[project.status] || "bg-foreground-500"}`} />
+                            <span className={`text-[10px] ${STATUS_DOT[project.status] || "text-foreground-500"}`}>{project.status}</span>
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-3 gap-2 text-[10px]">
+                          <div>
+                            <span className="text-foreground-500">CPU</span>
+                            <p className="text-foreground-300">{project.process?.cpu != null ? `${project.process.cpu}%` : "\u2014"}</p>
+                          </div>
+                          <div>
+                            <span className="text-foreground-500">MEM</span>
+                            <p className="text-foreground-300">{project.process?.memory ? fmtMem(project.process.memory) : "\u2014"}</p>
+                          </div>
+                          <div>
+                            <span className="text-foreground-500">UP</span>
+                            <p className="text-foreground-300">{project.process?.uptime != null ? fmtUptime(project.process.uptime) : "\u2014"}</p>
+                          </div>
+                        </div>
                       </div>
 
-                      {/* Service rows */}
-                      {project.services.map((svc, i) => {
-                        const isLast = i === project.services.length - 1;
-                        return (
-                          <div key={svc.id} className="grid grid-cols-[1fr_60px_50px] sm:grid-cols-[1fr_80px_70px_70px_70px_60px] gap-1 sm:gap-2 px-4 py-1.5 pl-8 text-foreground-400 hover:bg-white/[0.02] transition-colors">
-                            <span className="flex items-center gap-2">
-                              <span className="text-foreground-500">{isLast ? "└─" : "├─"}</span>
-                              <Icon icon={svc.type === "redis" ? "solar:database-bold" : svc.type === "mongodb" ? "solar:database-bold" : "solar:server-square-bold"} width={12} className="text-cyan-400/70" />
-                              <span>{svc.name}</span>
-                              <span className="text-foreground-500">({svc.type})</span>
-                              <span className="text-foreground-500">:{svc.port}</span>
-                            </span>
-                            <span className={`text-right ${STATUS_DOT[svc.status] || "text-foreground-500"}`}>
-                              {svc.status}
-                            </span>
-                            <span className="text-right">
-                              {svc.cpu != null ? `${svc.cpu}%` : "—"}
-                            </span>
-                            <span className="hidden sm:block text-right">
-                              {svc.memory ? fmtMem(svc.memory) : "—"}
-                            </span>
-                            <span className="hidden sm:block text-right">
-                              {svc.uptime != null ? fmtUptime(svc.uptime) : "—"}
-                            </span>
-                            <span className="hidden sm:block text-right text-foreground-500">—</span>
+                      {/* Service cards */}
+                      {project.services.map((svc) => (
+                        <div key={svc.id} className="mx-3 mb-2 rounded-lg bg-white/[0.02] px-3 py-2.5">
+                          <div className="flex items-center justify-between mb-2">
+                            <div className="flex items-center gap-2">
+                              <Icon icon="solar:database-bold" width={12} className="text-cyan-400/70" />
+                              <span className="text-foreground-300 text-[11px] font-medium">{svc.name}</span>
+                              <span className="text-foreground-500 text-[10px]">({svc.type})</span>
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              <div className={`h-1.5 w-1.5 rounded-full ${STATUS_BG[svc.status] || "bg-foreground-500"}`} />
+                              <span className={`text-[10px] ${STATUS_DOT[svc.status] || "text-foreground-500"}`}>{svc.status}</span>
+                            </div>
                           </div>
-                        );
-                      })}
+                          <div className="grid grid-cols-3 gap-2 text-[10px]">
+                            <div>
+                              <span className="text-foreground-500">CPU</span>
+                              <p className="text-foreground-300">{svc.cpu != null ? `${svc.cpu}%` : "\u2014"}</p>
+                            </div>
+                            <div>
+                              <span className="text-foreground-500">MEM</span>
+                              <p className="text-foreground-300">{svc.memory ? fmtMem(svc.memory) : "\u2014"}</p>
+                            </div>
+                            <div>
+                              <span className="text-foreground-500">UP</span>
+                              <p className="text-foreground-300">{svc.uptime != null ? fmtUptime(svc.uptime) : "\u2014"}</p>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
                     </>
                   )}
                 </div>
@@ -212,7 +285,7 @@ export default function MonitorPage() {
           <span>{data.projects.length} projects · {data.projects.reduce((n, p) => n + p.services.length, 0)} services</span>
           <span className="flex items-center gap-1">
             <div className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
-            live · 2s
+            live · 3s
           </span>
         </div>
       </div>
