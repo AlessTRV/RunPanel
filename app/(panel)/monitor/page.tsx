@@ -133,30 +133,13 @@ export default function MonitorPage() {
 
               return (
                 <div key={project.id}>
-                  {/* Project header row */}
+                  {/* Project header row — name only, stats live on child rows */}
                   <div
-                    className="grid grid-cols-[1fr_60px_50px] sm:grid-cols-[1fr_80px_70px_70px_70px_60px] gap-1 sm:gap-2 px-4 py-2 hover:bg-white/[0.02] cursor-pointer transition-colors"
+                    className="flex items-center gap-2 px-4 py-2 hover:bg-white/[0.02] cursor-pointer transition-colors"
                     onClick={() => toggleCollapse(project.id)}
                   >
-                    <span className="flex items-center gap-2">
-                      <Icon icon={isCollapsed ? "solar:alt-arrow-right-bold" : "solar:alt-arrow-down-bold"} width={10} className="text-foreground-500" />
-                      <span className="text-foreground-200 font-semibold">{project.name}</span>
-                    </span>
-                    <span className={`text-right ${STATUS_DOT[project.status] || "text-foreground-500"}`}>
-                      {project.status}
-                    </span>
-                    <span className="text-right text-foreground-300">
-                      {project.process?.cpu != null ? `${project.process.cpu}%` : "—"}
-                    </span>
-                    <span className="hidden sm:block text-right text-foreground-300">
-                      {project.process?.memory ? fmtMem(project.process.memory) : "—"}
-                    </span>
-                    <span className="hidden sm:block text-right text-foreground-300">
-                      {project.process?.uptime != null ? fmtUptime(project.process.uptime) : "—"}
-                    </span>
-                    <span className="hidden sm:block text-right text-foreground-500">
-                      {project.process?.pid || "—"}
-                    </span>
+                    <Icon icon={isCollapsed ? "solar:alt-arrow-right-bold" : "solar:alt-arrow-down-bold"} width={10} className="text-foreground-500" />
+                    <span className="text-foreground-200 font-semibold">{project.name}</span>
                   </div>
 
                   {/* Expanded: app process + services */}
