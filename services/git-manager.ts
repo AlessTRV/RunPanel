@@ -12,13 +12,16 @@ export interface CommitInfo {
   message: string;
 }
 
-/** Inject GitHub token into HTTPS URL for private repo access */
-function injectToken(repoUrl: string, token: string | null): string {
-  if (!token || !repoUrl.startsWith("https://")) return repoUrl;
-  // Strip any existing token/credentials first
-  // https://oldtoken@github.com/user/repo → https://github.com/user/repo
-  const cleanUrl = repoUrl.replace(/https:\/\/[^@]+@/, "https://");
-  return cleanUrl.replace("https://", `https://${token}@`);
+/** Strip any embedded credentials from a git HTTPS URL */
+function cleanRepoUrl(repoUrl: string): string {
+  return repoUrl.replace(/https:\/\/[^@]+@/, "https://");
+}
+
+/** Build git -c args to pass GitHub token via Authorization header (avoids URL-embedded creds rejected by newer git/curl) */
+function authArgs(token: string | null): string[] {
+  if (!token) return [];
+  const encoded = Buffer.from(`x-access-token:${token}`).toString("base64");
+  return ["-c", `http.extraheader=Authorization: basic ${encoded}`];
 }
 
 /** Load GitHub token from DB settings (if configured) */
@@ -45,9 +48,9 @@ export async function gitClone(
   }
 
   const token = getGitHubToken();
-  const authUrl = injectToken(repoUrl, token);
+  const url = cleanRepoUrl(repoUrl);
 
-  await exec("git", ["clone", "--depth", "1", "--branch", branch, authUrl, destDir], {
+  await exec("git", [...authArgs(token), "clone", "--depth", "1", "--branch", branch, url, destDir], {
     timeout: 120_000,
     env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
   });
@@ -58,18 +61,18 @@ export async function gitPull(
   branch: string
 ): Promise<CommitInfo> {
   const repoDir = path.join(config.reposDir, projectSlug);
-
-  // Update remote URL with token (in case it was cloned without one)
   const token = getGitHubToken();
-  if (token) {
-    try {
-      const { stdout: remoteUrl } = await exec("git", ["remote", "get-url", "origin"], { cwd: repoDir });
-      const authUrl = injectToken(remoteUrl.trim(), token);
-      await exec("git", ["remote", "set-url", "origin", authUrl], { cwd: repoDir });
-    } catch { /* ignore */ }
-  }
 
-  await exec("git", ["fetch", "origin", branch], {
+  // Clean any old embedded-token URL from the remote (legacy repos)
+  try {
+    const { stdout: remoteUrl } = await exec("git", ["remote", "get-url", "origin"], { cwd: repoDir });
+    const cleaned = cleanRepoUrl(remoteUrl.trim());
+    if (cleaned !== remoteUrl.trim()) {
+      await exec("git", ["remote", "set-url", "origin", cleaned], { cwd: repoDir });
+    }
+  } catch { /* ignore */ }
+
+  await exec("git", [...authArgs(token), "fetch", "origin", branch], {
     cwd: repoDir,
     timeout: 60_000,
     env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
