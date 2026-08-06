@@ -43,6 +43,25 @@ export async function run({ base }) {
     JSON.stringify(res.body).slice(0, 160)
   );
 
+  // --- github source picker ------------------------------------------------
+  // With no account connected the picker must render a "connect" prompt, so
+  // "not connected" is reported as a normal 200 rather than an error status
+  // the UI would have to special-case.
+  res = await api.call("/api/github/repos");
+  r.check("repos endpoint answers 200 with no token", res.status === 200, `${res.status}`);
+  r.check("it reports the account as not connected", res.body.connected === false, JSON.stringify(res.body));
+  r.check("repos is always an array", Array.isArray(res.body.repos), JSON.stringify(res.body.repos));
+
+  // `repo` reaches a GitHub API path, so anything but owner/name is refused
+  // before it can walk to a different endpoint.
+  for (const bad of ["", "../../user", "owner", "owner/name/extra", "owner/../..%2fuser"]) {
+    const bad_res = await api.call(`/api/github/branches?repo=${encodeURIComponent(bad)}`);
+    r.check(`branches rejects "${bad || "(empty)"}"`, bad_res.status === 400, `${bad_res.status}`);
+  }
+
+  const unauth = await fetch(`${base}/api/github/repos`);
+  r.check("repos endpoint requires auth", unauth.status === 401, `${unauth.status}`);
+
   // --- projects ------------------------------------------------------------
   res = await api.call("/api/projects", {
     method: "POST",

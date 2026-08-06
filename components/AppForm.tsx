@@ -2,6 +2,7 @@
 
 import { useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { Button, Input, Label, TextField } from "@heroui/react";
 import { Icon } from "@iconify/react";
 import { toast } from "sonner";
@@ -13,12 +14,25 @@ type SourceType = "github" | "upload";
 type RuntimeType = "node" | "docker" | "compose" | "custom";
 
 interface GhRepo {
+  id: number;
   name: string;
+  full_name: string;
   clone_url: string;
   default_branch: string;
   description: string | null;
   language: string | null;
   private: boolean;
+  updated_at: string;
+}
+
+function relativeTime(iso: string): string {
+  const days = Math.floor((Date.now() - Date.parse(iso)) / 86_400_000);
+  if (!Number.isFinite(days)) return "";
+  if (days <= 0) return "oggi";
+  if (days === 1) return "ieri";
+  if (days < 30) return `${days}g fa`;
+  if (days < 365) return `${Math.floor(days / 30)}m fa`;
+  return `${Math.floor(days / 365)}a fa`;
 }
 
 const RUNTIMES: { id: RuntimeType; label: string; hint: string; icon: string }[] = [
@@ -51,15 +65,36 @@ export function AppForm({
   const [startCmd, setStartCmd] = useState("");
   const [zipFile, setZipFile] = useState<File | null>(null);
   const [repoSearch, setRepoSearch] = useState("");
+  const [selectedRepo, setSelectedRepo] = useState<GhRepo | null>(null);
+  const [manualUrl, setManualUrl] = useState(false);
   const zipInputRef = useRef<HTMLInputElement>(null);
 
-  // Loaded only if a GitHub token is configured; a 400 here just means "no
-  // token", which is a normal state rather than an error worth reporting.
-  const { data: repoData } = useResource<{ repos?: GhRepo[] }>("/api/github/repos");
+  const { data: repoData, loading: reposLoading } = useResource<{
+    connected?: boolean;
+    repos?: GhRepo[];
+  }>("/api/github/repos");
+
+  const connected = repoData?.connected ?? false;
   const repos = repoData?.repos ?? [];
-  const filteredRepos = repoSearch
-    ? repos.filter((r) => r.name.toLowerCase().includes(repoSearch.toLowerCase()))
-    : repos.slice(0, 8);
+
+  const query = repoSearch.trim().toLowerCase();
+  const filteredRepos = query
+    ? repos.filter((r) => r.full_name.toLowerCase().includes(query))
+    : repos;
+
+  // Branches are fetched only once a repository is picked; a null url keeps the
+  // hook idle until then.
+  const { data: branchData, loading: branchesLoading } = useResource<{ branches?: { name: string }[] }>(
+    selectedRepo ? `/api/github/branches?repo=${encodeURIComponent(selectedRepo.full_name)}` : null
+  );
+  const branches = branchData?.branches ?? [];
+
+  function pickRepo(repo: GhRepo) {
+    setSelectedRepo(repo);
+    setSourceUrl(repo.clone_url);
+    setBranch(repo.default_branch);
+    setManualUrl(false);
+  }
 
   async function create() {
     if (sourceType === "github" && !sourceUrl.trim()) {
@@ -145,15 +180,32 @@ export function AppForm({
 
         {sourceType === "github" ? (
           <>
-            <TextField value={sourceUrl} onChange={setSourceUrl}>
-              <Label>URL del repository</Label>
-              <Input placeholder="https://github.com/utente/repo.git" className="font-mono text-sm" />
-            </TextField>
-
-            {repos.length > 0 && (
+            {selectedRepo ? (
+              <div className="border-border bg-surface-secondary flex items-center gap-3 rounded-[var(--radius)] border px-3 py-2.5">
+                <Icon icon="solar:folder-with-files-linear" width={18} className="text-accent shrink-0" aria-hidden />
+                <div className="min-w-0 flex-1">
+                  <p className="text-foreground truncate text-sm">{selectedRepo.full_name}</p>
+                  {selectedRepo.description && (
+                    <p className="text-muted truncate text-xs">{selectedRepo.description}</p>
+                  )}
+                </div>
+                {selectedRepo.private && (
+                  <Icon icon="solar:lock-linear" width={14} className="text-muted shrink-0" aria-label="privato" />
+                )}
+                <button
+                  type="button"
+                  onClick={() => setSelectedRepo(null)}
+                  className="text-muted hover:text-foreground shrink-0 text-sm transition-colors"
+                >
+                  Cambia
+                </button>
+              </div>
+            ) : connected ? (
               <div>
                 <div className="mb-2 flex items-center justify-between gap-2">
-                  <span className="text-muted text-sm font-medium">I tuoi repository</span>
+                  <span className="text-muted text-sm font-medium">
+                    I tuoi repository{repos.length > 0 ? ` (${filteredRepos.length})` : ""}
+                  </span>
                   <Input
                     value={repoSearch}
                     onChange={(e) => setRepoSearch(e.target.value)}
@@ -162,38 +214,100 @@ export function AppForm({
                     className="max-w-[180px]"
                   />
                 </div>
-                <ul className="border-border max-h-52 divide-y divide-[var(--border)] overflow-auto rounded-[var(--radius)] border">
-                  {filteredRepos.map((repo) => (
-                    <li key={repo.clone_url}>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSourceUrl(repo.clone_url);
-                          setBranch(repo.default_branch);
-                        }}
-                        className={cn(
-                          "hover:bg-surface-hover flex w-full items-center gap-2 px-3 py-2 text-left transition-colors",
-                          sourceUrl === repo.clone_url && "bg-surface-secondary"
-                        )}
-                      >
-                        <span className="text-foreground min-w-0 flex-1 truncate text-sm">{repo.name}</span>
-                        {repo.private && (
-                          <Icon icon="solar:lock-linear" width={13} className="text-muted shrink-0" aria-label="privato" />
-                        )}
-                        {repo.language && (
-                          <span className="text-muted shrink-0 font-mono text-[11px]">{repo.language}</span>
-                        )}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
+
+                {reposLoading ? (
+                  <p className="text-muted px-3 py-6 text-center text-sm">Carico i repository…</p>
+                ) : filteredRepos.length === 0 ? (
+                  <p className="text-muted px-3 py-6 text-center text-sm">
+                    {repos.length === 0 ? "Nessun repository accessibile" : "Nessun risultato"}
+                  </p>
+                ) : (
+                  <ul className="border-border max-h-72 divide-y divide-[var(--border)] overflow-auto rounded-[var(--radius)] border">
+                    {filteredRepos.map((repo) => (
+                      <li key={repo.id}>
+                        <button
+                          type="button"
+                          onClick={() => pickRepo(repo)}
+                          className="hover:bg-surface-hover flex w-full items-center gap-2 px-3 py-2 text-left transition-colors"
+                        >
+                          <span className="min-w-0 flex-1">
+                            <span className="text-foreground block truncate text-sm">{repo.full_name}</span>
+                            {repo.description && (
+                              <span className="text-muted block truncate text-xs">{repo.description}</span>
+                            )}
+                          </span>
+                          {repo.private && (
+                            <Icon icon="solar:lock-linear" width={13} className="text-muted shrink-0" aria-label="privato" />
+                          )}
+                          {repo.language && (
+                            <span className="text-muted shrink-0 font-mono text-[11px]">{repo.language}</span>
+                          )}
+                          <span className="text-muted shrink-0 text-[11px] tabular-nums">
+                            {relativeTime(repo.updated_at)}
+                          </span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => setManualUrl((v) => !v)}
+                  className="text-muted hover:text-foreground mt-2 text-xs transition-colors"
+                >
+                  {manualUrl ? "Nascondi" : "Oppure incolla un URL"}
+                </button>
+              </div>
+            ) : (
+              <div className="border-border rounded-[var(--radius)] border border-dashed px-3 py-4">
+                <p className="text-foreground text-sm">Nessun account GitHub collegato</p>
+                <p className="text-muted mt-1 text-xs">
+                  Collega un token per scegliere da un elenco e per clonare i repository privati.{" "}
+                  <Link href="/github" className="text-accent hover:underline">
+                    Collega ora
+                  </Link>
+                </p>
               </div>
             )}
 
-            <TextField value={branch} onChange={setBranch}>
-              <Label>Branch</Label>
-              <Input className="font-mono text-sm" />
-            </TextField>
+            {(manualUrl || (!connected && !selectedRepo)) && (
+              <TextField value={sourceUrl} onChange={setSourceUrl}>
+                <Label>URL del repository</Label>
+                <Input placeholder="https://github.com/utente/repo.git" className="font-mono text-sm" />
+              </TextField>
+            )}
+
+            {/* A native select rather than a listbox: the branch list is plain
+                data, and this is keyboard- and screen-reader-correct for free. */}
+            {selectedRepo && branches.length > 0 ? (
+              <div>
+                <label htmlFor="branch-select" className="text-muted mb-1 block text-sm font-medium">
+                  Branch
+                </label>
+                <select
+                  id="branch-select"
+                  value={branch}
+                  onChange={(e) => setBranch(e.target.value)}
+                  className="border-border bg-background text-foreground focus:border-accent/60 w-full rounded-[var(--radius)] border px-3 py-2 font-mono text-sm outline-none"
+                >
+                  {branches.map((b) => (
+                    <option key={b.name} value={b.name}>
+                      {b.name}
+                      {b.name === selectedRepo.default_branch ? "  (default)" : ""}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : (
+              <TextField value={branch} onChange={setBranch}>
+                <Label>Branch</Label>
+                <Input
+                  className="font-mono text-sm"
+                  placeholder={branchesLoading ? "Carico i branch…" : "main"}
+                />
+              </TextField>
+            )}
           </>
         ) : (
           <div>
