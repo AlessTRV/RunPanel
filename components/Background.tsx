@@ -1,44 +1,41 @@
+/**
+ * The page backdrop.
+ *
+ * The previous version stacked four 120–160px blurred blobs, a radial vignette
+ * and a full-viewport SVG `feTurbulence` grain in `mix-blend-mode: soft-light`,
+ * underneath a dozen `backdrop-blur` surfaces. That is a permanent compositing
+ * cost on every scroll and every re-render, and it was the single most expensive
+ * visual choice in the app.
+ *
+ * This does the same job — stop the page reading as a flat slab — with two
+ * static gradients and a 1px grid. No filters, no blend modes, nothing that
+ * forces a repaint. It is a plain server component with no client JS.
+ */
 export function Background() {
   return (
-    <div
-      className="fixed inset-0 z-[-1] pointer-events-none overflow-hidden"
-      style={{ background: "linear-gradient(to bottom, var(--page-bg-from), var(--page-bg-to))" }}
-    >
-      {/* Blob glows */}
+    <div aria-hidden className="pointer-events-none fixed inset-0 z-[-1] overflow-hidden">
+      {/* Very slight lift towards the top, so the sidebar and topbar have
+          something to sit against without a visible seam. */}
       <div
-        className="absolute -top-[15%] -left-[5%] w-[55%] h-[55%] rounded-full blur-[160px]"
-        style={{ backgroundColor: "rgb(var(--blob-purple) / var(--blob-opacity-1))" }}
+        className="absolute inset-0"
+        style={{
+          background:
+            "radial-gradient(120% 80% at 50% -20%, oklch(100% 0 0 / 4%) 0%, transparent 60%)",
+        }}
       />
+      {/* Grid, fading out before it reaches the edges so it never draws
+          attention to itself. */}
       <div
-        className="absolute -bottom-[15%] -right-[5%] w-[60%] h-[55%] rounded-full blur-[160px]"
-        style={{ backgroundColor: "rgb(var(--blob-purple) / var(--blob-opacity-2))" }}
+        className="absolute inset-0 opacity-[0.35]"
+        style={{
+          backgroundImage:
+            "linear-gradient(to right, oklch(100% 0 0 / 2.5%) 1px, transparent 1px)," +
+            "linear-gradient(to bottom, oklch(100% 0 0 / 2.5%) 1px, transparent 1px)",
+          backgroundSize: "56px 56px",
+          maskImage: "radial-gradient(100% 70% at 50% 0%, black 0%, transparent 75%)",
+          WebkitMaskImage: "radial-gradient(100% 70% at 50% 0%, black 0%, transparent 75%)",
+        }}
       />
-      <div
-        className="absolute top-[5%] left-1/2 -translate-x-1/2 w-[65%] h-[45%] rounded-[100%] blur-[130px]"
-        style={{ backgroundColor: "rgb(var(--blob-purple) / var(--blob-opacity-3))" }}
-      />
-      <div
-        className="absolute top-[35%] left-[30%] w-[40%] h-[35%] rounded-full blur-[120px]"
-        style={{ backgroundColor: "rgb(var(--blob-violet) / var(--blob-opacity-4))" }}
-      />
-
-      {/* Vignette */}
-      <div
-        className="absolute inset-0 opacity-80"
-        style={{ background: "radial-gradient(ellipse at center, transparent 20%, var(--vignette-color) 80%)" }}
-      />
-
-      {/* Film grain */}
-      <svg
-        className="absolute inset-0 w-full h-full"
-        style={{ opacity: "var(--grain-opacity)", mixBlendMode: "soft-light" }}
-        xmlns="http://www.w3.org/2000/svg"
-      >
-        <filter id="grain">
-          <feTurbulence type="fractalNoise" baseFrequency="0.75" numOctaves="4" stitchTiles="stitch" />
-        </filter>
-        <rect width="100%" height="100%" filter="url(#grain)" />
-      </svg>
     </div>
   );
 }

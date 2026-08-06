@@ -14,11 +14,15 @@ export default async function PanelLayout({
   }
 
   return (
-    <div className="min-h-screen bg-transparent">
+    <div className="min-h-dvh">
       <AppSidebar />
-      <div className="ml-0 md:ml-64">
+      <div className="md:ml-64">
         <TopBar />
-        <main className="pt-4 md:pt-8 pb-8 px-4 sm:px-8 md:px-12">{children}</main>
+        {/* Capped so tables and lists do not stretch to absurd line lengths on
+            a wide monitor, which is most of what makes a panel feel unplanned. */}
+        <main className="mx-auto w-full max-w-[1400px] px-4 py-6 sm:px-6 lg:px-8">
+          {children}
+        </main>
       </div>
     </div>
   );
