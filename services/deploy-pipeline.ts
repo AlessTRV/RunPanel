@@ -6,10 +6,11 @@ import { buildProject } from "./builder-registry";
 import { processManager } from "./process-manager";
 import { runReleaseCommand, waitForHealthy } from "./deploy-steps";
 import { writeEnvFile, writeEnvFileInto } from "./env-file";
-import { readRepoContract, RUNPANEL_CONFIG_FILE } from "./deploy-presets";
+import { detectPreset, readRepoContract, RUNPANEL_CONFIG_FILE } from "./deploy-presets";
 import {
   parseContractJson,
   preflight,
+  resolveContract,
   resolveContractJson,
   selectBuildEnv,
 } from "@/lib/deploy-contract";
@@ -37,6 +38,7 @@ const REBUILD_CLEAN_DIRS: Record<string, string[]> = {
   static: ["dist", "build"],
   custom: ["venv", "__pycache__", "dist", "build"],
   docker: [],
+  compose: [],
 };
 
 /**
@@ -144,12 +146,28 @@ async function runDeploy(
       }
     }
 
-    // A repository can declare its own deploy contract. Panel settings win —
-    // the operator can see the target machine, the repository cannot.
+    // Now that the source is on disk, work out the rest of the contract.
+    //
+    // Precedence, lowest first: a preset detected from the repository's shape,
+    // then the repository's own runpanel.json, then whatever the operator set.
+    // The detected preset is what lets a project with no configuration at all
+    // deploy anyway.
     const repoContract = readRepoContract(projectDir);
-    if (repoContract) {
-      contract = resolveContractJson(project.builder_config, repoContract);
-      appendLog(`Found ${RUNPANEL_CONFIG_FILE} in the repository — merged under the panel settings.`);
+    const preset = detectPreset(projectDir);
+
+    if (preset) {
+      appendLog(`Detected project shape: ${preset.label}`);
+    }
+
+    if (preset || repoContract) {
+      const layers = [preset?.contract, repoContract].filter(Boolean);
+      let base: unknown = {};
+      for (const layer of layers) base = resolveContract(layer as object, base);
+      contract = resolveContractJson(project.builder_config, base);
+
+      if (repoContract) {
+        appendLog(`Found ${RUNPANEL_CONFIG_FILE} in the repository — merged under the panel settings.`);
+      }
     }
 
     // Load env vars
@@ -166,7 +184,10 @@ async function runDeploy(
       envVars[row.key] = decrypt(row.value);
     }
 
-    const port = project.port ?? (project.runtime_type === "docker" ? 0 : 3000);
+    // Container runtimes publish whatever their own definition says, so an
+    // unset port means "no HTTP probe" rather than "assume 3000".
+    const isContainerRuntime = project.runtime_type === "docker" || project.runtime_type === "compose";
+    const port = project.port ?? (isContainerRuntime ? 0 : 3000);
     if (port > 0) {
       envVars.PORT = port.toString();
     }

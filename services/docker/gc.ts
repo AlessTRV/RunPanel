@@ -1,6 +1,6 @@
 import { getDb } from "@/lib/db";
 import { dockerTry, isDockerAvailable, lines } from "./cli";
-import { LABEL_PROJECT, ownedFilters } from "./labels";
+import { LABEL_PROJECT, ownedFilters, parseLabels } from "./labels";
 import {
   listOwnedImages,
   pruneBuildCache,
@@ -8,7 +8,7 @@ import {
   pruneProjectImages,
   removeImages,
 } from "./images";
-import { listOwnedVolumes, removeVolumes } from "./volumes";
+import { removeVolumes } from "./volumes";
 import { pruneBuildLogs } from "../build-logs";
 
 /**
@@ -68,18 +68,25 @@ export async function findOrphans(): Promise<OrphanReport> {
   const slugs = await knownSlugs();
   const orphaned = (slug: string | null) => slug !== null && !slugs.has(slug);
 
-  const containersOut = await dockerTry([
-    "ps", "-a", ...ownedFilters(), "--format", "{{.Names}}\t{{.Label \"runpanel.project\"}}",
+  // Every docker CLI call costs hundreds of milliseconds, so these run
+  // concurrently and each resource type is listed exactly once — labels come
+  // from the listing itself rather than an inspect per object.
+  const [containersOut, ownedImages, volumesOut, networksOut] = await Promise.all([
+    dockerTry(["ps", "-a", ...ownedFilters(), "--format", "{{.Names}}\t{{.Labels}}"]),
+    listOwnedImages(),
+    dockerTry(["volume", "ls", ...ownedFilters(), "--format", "{{.Name}}\t{{.Labels}}"]),
+    dockerTry(["network", "ls", ...ownedFilters(), "--format", "{{.Name}}"]),
   ]);
+
   const containers = lines(containersOut?.stdout ?? "")
     .map((line) => {
-      const [name, project] = line.split("\t");
-      return { name, project: project || null };
+      const [name, labels] = line.split("\t");
+      return { name, project: parseLabels(labels)[LABEL_PROJECT] ?? null };
     })
     .filter((c) => orphaned(c.project))
     .map((c) => c.name);
 
-  const images = (await listOwnedImages())
+  const images = ownedImages
     .filter((image) => {
       const slug = image.repository.startsWith("runpanel/")
         ? image.repository.slice("runpanel/".length)
@@ -88,21 +95,14 @@ export async function findOrphans(): Promise<OrphanReport> {
     })
     .map((image) => (image.tag === "<none>" ? image.id : `${image.repository}:${image.tag}`));
 
-  // `docker volume ls --format {{.Labels}}` flattens labels into one string
-  // that cannot be parsed back reliably, so ask inspect for the one label we
-  // care about. Only RunPanel-owned volumes reach this loop, so it stays short.
-  const volumes: string[] = [];
-  for (const volume of await listOwnedVolumes()) {
-    const inspect = await dockerTry([
-      "volume", "inspect", volume.name, "--format", `{{index .Labels "${LABEL_PROJECT}"}}`,
-    ]);
-    const slug = inspect?.stdout.trim() || null;
-    if (orphaned(slug)) volumes.push(volume.name);
-  }
+  const volumes = lines(volumesOut?.stdout ?? "")
+    .map((line) => {
+      const [name, labels] = line.split("\t");
+      return { name, project: parseLabels(labels)[LABEL_PROJECT] ?? null };
+    })
+    .filter((v) => orphaned(v.project))
+    .map((v) => v.name);
 
-  const networksOut = await dockerTry([
-    "network", "ls", ...ownedFilters(), "--format", "{{.Name}}",
-  ]);
   const networks = lines(networksOut?.stdout ?? "").filter((name) => {
     const slug = name.startsWith("runpanel-net-") ? name.slice("runpanel-net-".length) : null;
     return orphaned(slug);
@@ -171,6 +171,46 @@ export async function sweep(
   }
 
   return result;
+}
+
+/**
+ * Periodic housekeeping.
+ *
+ * The per-project sweep after a successful deploy covers the common case, but
+ * not a project deleted while Docker was unreachable, or build cache that ages
+ * out with no deploy to trigger a pass. Retention only — orphans still need a
+ * human, because removing them destroys data.
+ */
+const GC_INTERVAL_MS = 6 * 60 * 60 * 1000;
+
+const globalRef = globalThis as typeof globalThis & { __runpanelGcTimer?: NodeJS.Timeout };
+
+export function startGcScheduler(): void {
+  if (globalRef.__runpanelGcTimer) return;
+
+  const tick = async () => {
+    try {
+      const result = await sweep({ removeOrphans: false });
+      if (result.reclaimedBytes > 0 || result.prunedImageTags.length > 0) {
+        console.log(
+          `[gc] Reclaimed ${(result.reclaimedBytes / 1024 ** 2).toFixed(0)} MB, ` +
+            `retired ${result.prunedImageTags.length} image(s)`
+        );
+      }
+    } catch (err) {
+      console.error("[gc] Scheduled sweep failed:", err);
+    }
+  };
+
+  globalRef.__runpanelGcTimer = setInterval(tick, GC_INTERVAL_MS);
+  // Never hold the process open for a housekeeping timer.
+  globalRef.__runpanelGcTimer.unref?.();
+}
+
+export function stopGcScheduler(): void {
+  if (!globalRef.__runpanelGcTimer) return;
+  clearInterval(globalRef.__runpanelGcTimer);
+  globalRef.__runpanelGcTimer = undefined;
 }
 
 export interface DiskUsageEntry {
