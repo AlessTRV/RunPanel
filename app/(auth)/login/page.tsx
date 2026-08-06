@@ -97,9 +97,9 @@ export default function LoginPage() {
 
   return (
     <div className="flex min-h-screen items-center justify-center p-4">
-      <Card className="w-full max-w-md border border-purple-500/10 shadow-2xl shadow-purple-500/10">
+      <Card className="w-full max-w-md border border-border shadow-2xl ">
         <CardHeader className="flex flex-col items-center gap-2 pb-0 pt-8">
-          <Icon icon="solar:server-bold-duotone" className="text-primary" width={48} />
+          <Icon icon="solar:server-bold-duotone" className="text-accent" width={48} />
           <CardTitle className="text-2xl">RunPanel</CardTitle>
           <CardDescription>
             {isFirstRun
