@@ -2,7 +2,6 @@
 
 import { memo } from "react";
 import Link from "next/link";
-import { Button } from "@heroui/react";
 import { Icon } from "@iconify/react";
 import { useResource } from "@/lib/hooks/useResource";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -125,10 +124,16 @@ export default function HomePage() {
         title="Overview"
         description="Progetti e stato della macchina"
         actions={
-          <Button variant="primary" size="sm" onPress={() => { window.location.href = "/projects/new"; }}>
+          // A Link, not window.location: the latter is a full page reload —
+          // re-downloading and re-hydrating the whole app — where client-side
+          // navigation is instant.
+          <Link
+            href="/projects/new"
+            className="border-border bg-surface hover:bg-surface-hover text-foreground flex items-center gap-1.5 rounded-[var(--radius)] border px-3 py-1.5 text-sm transition-colors"
+          >
             <Icon icon="solar:add-circle-linear" width={16} aria-hidden />
             Nuovo progetto
-          </Button>
+          </Link>
         }
       />
 

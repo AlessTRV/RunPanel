@@ -1,4 +1,4 @@
-import { client, createReporter, docker, waitForDeploy } from "../harness.mjs";
+import { client, createReporter, docker, sleep, waitForDeploy } from "../harness.mjs";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -55,12 +55,23 @@ CMD ["sh","-c","while true; do sleep 1; done"]
   r.check("three consecutive deploys all reached running",
     outcomes.every((o) => o === "running"), outcomes.join(","));
 
-  const tags = docker("images", "--filter", `label=runpanel.project=${slug}`, "--format", "{{.Repository}}:{{.Tag}}")
-    .split("\n").filter(Boolean);
+  // Retention runs after the project is reported as running, so the panel shows
+  // "running" as soon as it is rather than waiting on housekeeping. The
+  // guarantee is therefore that it converges, not that it has already finished
+  // the instant the deploy ends — asserting the latter is a race.
+  const listTags = () =>
+    docker("images", "--filter", `label=runpanel.project=${slug}`, "--format", "{{.Repository}}:{{.Tag}}")
+      .split("\n").filter(Boolean);
+
+  let tags = listTags();
+  for (let i = 0; i < 30 && tags.filter((t) => !t.endsWith(":current")).length > 2; i++) {
+    await sleep(1000);
+    tags = listTags();
+  }
   r.note(`images: ${tags.join(", ") || "(none)"}`);
 
   const versioned = tags.filter((t) => !t.endsWith(":current"));
-  r.check("retention keeps at most 2 versioned images", versioned.length <= 2, `${versioned.length}`);
+  r.check("retention converges to at most 2 versioned images", versioned.length <= 2, `${versioned.length}`);
   r.check("a :current alias exists", tags.some((t) => t.endsWith(":current")), tags.join(","));
 
   const dangling = docker("images", "--filter", "label=runpanel.managed=true", "--filter", "dangling=true", "--format", "{{.ID}}")
