@@ -10,14 +10,17 @@ export async function GET(request: NextRequest, { params }: Params) {
   if (denied) return denied;
 
   const { projectId } = await params;
-  const db = getDb();
+  const db = await getDb();
 
   const source = request.nextUrl.searchParams.get("source");
 
   // Process logs (PM2/Docker live output)
   if (source === "process") {
-    const project = db.prepare("SELECT slug, runtime_type FROM projects WHERE id = ?")
-      .get(projectId) as { slug: string; runtime_type: string } | undefined;
+    const project = await db
+      .selectFrom("projects")
+      .select(["slug", "runtime_type"])
+      .where("id", "=", projectId)
+      .executeTakeFirst();
 
     if (!project) {
       return NextResponse.json({ error: "Project not found" }, { status: 404 });
@@ -32,11 +35,22 @@ export async function GET(request: NextRequest, { params }: Params) {
   }
 
   // Default: deployment history
-  const deployments = db.prepare(`
-    SELECT id, trigger_type, commit_sha, commit_message, status, started_at, finished_at, error_message
-    FROM deployments WHERE project_id = ?
-    ORDER BY started_at DESC LIMIT 50
-  `).all(projectId);
+  const deployments = await db
+    .selectFrom("deployments")
+    .select([
+      "id",
+      "trigger_type",
+      "commit_sha",
+      "commit_message",
+      "status",
+      "started_at",
+      "finished_at",
+      "error_message",
+    ])
+    .where("project_id", "=", projectId)
+    .orderBy("started_at", "desc")
+    .limit(50)
+    .execute();
 
   return NextResponse.json(deployments);
 }

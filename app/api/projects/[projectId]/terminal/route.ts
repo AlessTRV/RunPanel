@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth-guard";
 import { getDb } from "@/lib/db";
 import { spawn, type ChildProcess } from "child_process";
+import { projectEvents } from "@/services/events";
 
 // Store active shell sessions with last activity timestamp
 const sessions = new Map<string, { proc: ChildProcess; buffer: string[]; lastActivity: number }>();
@@ -29,8 +30,13 @@ export async function POST(request: NextRequest, { params }: Params) {
   const body = await request.json();
   const { action, input } = body as { action?: string; input?: string };
 
-  const db = getDb();
-  const project = db.prepare("SELECT slug, runtime_type FROM projects WHERE id = ?").get(projectId) as { slug: string; runtime_type: string } | undefined;
+  const db = await getDb();
+  const project = await db
+    .selectFrom("projects")
+    .select(["slug", "runtime_type"])
+    .where("id", "=", projectId)
+    .executeTakeFirst();
+
   if (!project) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
@@ -60,6 +66,9 @@ export async function POST(request: NextRequest, { params }: Params) {
     const session = { proc, buffer: [] as string[], lastActivity: Date.now() };
     sessions.set(sessionKey, session);
 
+    // Output is published on the project's event stream as it arrives. The
+    // buffer is kept only so a client that connects slightly late still sees
+    // what it missed — it is no longer polled once per second.
     const pushLine = (data: Buffer) => {
       const text = data.toString();
       session.buffer.push(text);
@@ -67,12 +76,16 @@ export async function POST(request: NextRequest, { params }: Params) {
       if (session.buffer.length > 500) {
         session.buffer = session.buffer.slice(-250);
       }
+      projectEvents.emit(projectId, { type: "terminal:output", text });
     };
 
     proc.stdout?.on("data", pushLine);
     proc.stderr?.on("data", pushLine);
     proc.on("close", (code) => {
-      session.buffer.push(`\r\n[Container shell exited with code ${code}]\r\n`);
+      const notice = `\r\n[Container shell exited with code ${code}]\r\n`;
+      session.buffer.push(notice);
+      projectEvents.emit(projectId, { type: "terminal:output", text: notice });
+      projectEvents.emit(projectId, { type: "terminal:closed", code });
     });
 
     return NextResponse.json({ status: "started", container: containerName });
