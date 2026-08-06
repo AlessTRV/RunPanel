@@ -6,10 +6,33 @@ import { diskUsage, findOrphans, sweep, DEFAULT_RETENTION } from "@/services/doc
 import { listOwnedImages } from "@/services/docker/images";
 import { listOwnedVolumes } from "@/services/docker/volumes";
 
+/**
+ * Snapshot cache.
+ *
+ * Building this answer costs several docker CLI invocations, and each one is
+ * hundreds of milliseconds — on the machine this was measured on, the endpoint
+ * took 1.3s. Disk usage does not change second to second, so serving a recent
+ * snapshot is both faster and no less accurate in practice. A sweep clears it,
+ * so the numbers move as soon as something actually happens.
+ */
+let snapshot: { at: number; payload: unknown } | null = null;
+const SNAPSHOT_TTL_MS = 20_000;
+
+// Not exported: a Next route module may only export request handlers.
+function invalidateStorageSnapshot() {
+  snapshot = null;
+}
+
 /** What Docker is holding on RunPanel's behalf, and what can be reclaimed. */
 export async function GET() {
   const denied = await requireAuth();
   if (denied) return denied;
+
+  if (snapshot && Date.now() - snapshot.at < SNAPSHOT_TTL_MS) {
+    return NextResponse.json(snapshot.payload, {
+      headers: { "Cache-Control": "no-store", "X-Snapshot-Age": String(Date.now() - snapshot.at) },
+    });
+  }
 
   if (!(await isDockerAvailable())) {
     return NextResponse.json({
@@ -29,10 +52,10 @@ export async function GET() {
     findOrphans(),
   ]);
 
-  return NextResponse.json(
-    { dockerAvailable: true, usage, images, volumes, orphans, retention: DEFAULT_RETENTION },
-    { headers: { "Cache-Control": "no-store" } }
-  );
+  const payload = { dockerAvailable: true, usage, images, volumes, orphans, retention: DEFAULT_RETENTION };
+  snapshot = { at: Date.now(), payload };
+
+  return NextResponse.json(payload, { headers: { "Cache-Control": "no-store" } });
 }
 
 const sweepSchema = z.object({
@@ -68,6 +91,8 @@ export async function POST(request: NextRequest) {
       { status: 400 }
     );
   }
+
+  invalidateStorageSnapshot();
 
   const result = await sweep({
     removeOrphans: parsed.data.removeOrphans ?? false,

@@ -47,6 +47,30 @@ export function ownedFilters(labels: OwnershipLabels = {}): string[] {
   return filters.flatMap((f) => ["--filter", `label=${f}`]);
 }
 
+/**
+ * Parse the label string `docker ... ls --format "{{.Labels}}"` prints:
+ * `key=value,key=value`.
+ *
+ * Using this instead of `docker inspect` per object matters more than it looks:
+ * every docker CLI invocation costs several hundred milliseconds, so an inspect
+ * per volume turned one listing into a second of latency.
+ *
+ * A label value containing a comma would split wrongly — none of RunPanel's own
+ * labels can, since they are slugs and fixed strings, and only RunPanel's labels
+ * are ever read here.
+ */
+export function parseLabels(labels: string | undefined): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (!labels) return out;
+
+  for (const pair of labels.split(",")) {
+    const eq = pair.indexOf("=");
+    if (eq <= 0) continue;
+    out[pair.slice(0, eq).trim()] = pair.slice(eq + 1).trim();
+  }
+  return out;
+}
+
 // --- Naming -----------------------------------------------------------------
 // Kept in one place so the GC and the drivers cannot drift apart on what a
 // RunPanel-owned name looks like.

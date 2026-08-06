@@ -1,13 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Button, Spinner } from "@heroui/react";
+import { Button } from "@heroui/react";
 import { Icon } from "@iconify/react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { SkeletonBlock } from "@/components/ui/Skeletons";
 
 interface UsageEntry {
   type: string;
@@ -59,6 +60,7 @@ export default function StoragePage() {
   const [loading, setLoading] = useState(true);
   const [cleaning, setCleaning] = useState(false);
   const [confirmOrphans, setConfirmOrphans] = useState(false);
+  const [keepImages, setKeepImages] = useState<number | null>(null);
 
   const load = useCallback((signal?: AbortSignal) => {
     // State is set from the promise callbacks, never synchronously in the
@@ -91,7 +93,12 @@ export default function StoragePage() {
       const res = await fetch("/api/storage", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ removeOrphans }),
+        body: JSON.stringify({
+          removeOrphans,
+          ...(keepImages != null && data
+            ? { retention: { imagesPerProject: keepImages, buildCacheHours: data.retention.buildCacheHours } }
+            : {}),
+        }),
       });
       if (!res.ok) throw new Error();
 
@@ -118,11 +125,22 @@ export default function StoragePage() {
     // Nothing after this point — `load` already refreshed the view.
   }
 
-  if (loading) {
+  // Render the page shell straight away and let the panels fill in. Blocking
+  // the whole route on a fetch is what makes navigation feel slow even when the
+  // request itself is quick.
+  if (loading && !data) {
     return (
-      <div className="flex justify-center py-20">
-        <Spinner />
-      </div>
+      <>
+        <PageHeader title="Storage" description="Immagini, volumi e cache che RunPanel possiede su questo host" />
+        <div className="space-y-4">
+          <SkeletonBlock className="h-40" />
+          <SkeletonBlock className="h-28" />
+          <div className="grid gap-4 lg:grid-cols-2">
+            <SkeletonBlock className="h-40" />
+            <SkeletonBlock className="h-40" />
+          </div>
+        </div>
+      </>
     );
   }
 
@@ -245,7 +263,30 @@ export default function StoragePage() {
           <Panel>
             <PanelHeader
               title="Immagini"
-              description={`Retention: ultime ${data.retention.imagesPerProject} per progetto`}
+              description="Quante versioni tenere per progetto"
+              actions={
+                <div className="flex items-center gap-1">
+                  {[1, 2, 3, 5].map((n) => {
+                    const active = (keepImages ?? data.retention.imagesPerProject) === n;
+                    return (
+                      <button
+                        key={n}
+                        type="button"
+                        onClick={() => setKeepImages(n)}
+                        aria-pressed={active}
+                        className={
+                          "rounded-[var(--radius)] border px-2 py-1 text-xs transition-colors " +
+                          (active
+                            ? "border-accent bg-surface-secondary text-foreground"
+                            : "border-border text-muted hover:bg-surface-hover")
+                        }
+                      >
+                        {n}
+                      </button>
+                    );
+                  })}
+                </div>
+              }
             />
             {data.images.length === 0 ? (
               <p className="text-muted mt-3 text-sm">Nessuna immagine di RunPanel.</p>

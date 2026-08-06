@@ -39,22 +39,33 @@ function sampleCpu(): CpuSample {
 
 let previous: CpuSample | null = null;
 
+/** Shortest gap that yields a meaningful delta rather than counter noise. */
+const MIN_SAMPLE_GAP_MS = 200;
+let lastUsage = 0;
+
 async function cpuUsage(): Promise<number> {
   const now = sampleCpu();
 
-  // Too close to the last sample to be meaningful — take a short one instead of
-  // reporting noise.
-  if (!previous || now.at - previous.at < 200) {
-    const first = previous ?? now;
-    await new Promise((r) => setTimeout(r, 200));
-    const second = sampleCpu();
-    previous = second;
-    return percentBetween(first, second);
+  if (previous && now.at - previous.at >= MIN_SAMPLE_GAP_MS) {
+    lastUsage = percentBetween(previous, now);
+    previous = now;
+    return lastUsage;
   }
 
-  const usage = percentBetween(previous, now);
-  previous = now;
-  return usage;
+  // Two requests closer together than a useful sampling window — /api/metrics
+  // and /api/monitor arrive together on every dashboard load. Returning the
+  // last computed figure is both correct (nothing measurable changed in a few
+  // milliseconds) and free; sleeping here put 200ms on the critical path of
+  // every page.
+  if (previous) return lastUsage;
+
+  // First call of the process: there is no earlier sample to diff against, so
+  // this one has to take a short reading itself.
+  await new Promise((r) => setTimeout(r, MIN_SAMPLE_GAP_MS));
+  const second = sampleCpu();
+  previous = second;
+  lastUsage = percentBetween(now, second);
+  return lastUsage;
 }
 
 function percentBetween(a: CpuSample, b: CpuSample): number {
@@ -72,18 +83,36 @@ interface DiskUsage {
 }
 
 let diskCache: { value: DiskUsage; at: number } | null = null;
-const DISK_TTL_MS = 15_000;
+let diskRefresh: Promise<DiskUsage> | null = null;
+const DISK_TTL_MS = 30_000;
 
 /**
  * Disk usage for the volume RunPanel lives on.
  *
- * Async, and cached: the previous implementation used `execSync`, which blocks
- * the Node event loop for the whole duration of a `df` or a PowerShell start-up
- * on every poll — with the dashboard polling every 5 seconds.
+ * Served stale-while-revalidate. The previous implementation used `execSync`,
+ * blocking the event loop on every poll; even async, spawning PowerShell costs
+ * hundreds of milliseconds on Windows, which is a lot to put on the critical
+ * path of a dashboard request for a number that changes by the minute. After
+ * the first reading the caller never waits.
  */
 async function diskUsage(): Promise<DiskUsage> {
-  if (diskCache && Date.now() - diskCache.at < DISK_TTL_MS) return diskCache.value;
+  const fresh = diskCache && Date.now() - diskCache.at < DISK_TTL_MS;
+  if (fresh) return diskCache!.value;
 
+  if (!diskRefresh) {
+    diskRefresh = measureDisk().finally(() => {
+      diskRefresh = null;
+    });
+  }
+
+  // Nothing cached yet — the very first caller has to wait for a real reading.
+  if (!diskCache) return diskRefresh;
+
+  // Otherwise hand back what we have and let the refresh land in the background.
+  return diskCache.value;
+}
+
+async function measureDisk(): Promise<DiskUsage> {
   const empty: DiskUsage = { total: 0, used: 0, free: 0 };
   let value = empty;
 
