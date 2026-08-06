@@ -1,5 +1,7 @@
 import { execFile, spawn } from "child_process";
 import { promisify } from "util";
+import { sanitizedProcessEnv } from "@/lib/env";
+import { dockerConfigEnv } from "./registry";
 
 const exec = promisify(execFile);
 
@@ -27,6 +29,12 @@ export interface DockerOptions {
   timeout?: number;
   cwd?: string;
   maxBuffer?: number;
+  /**
+   * Extra environment for the docker process itself. Compose needs it: a
+   * compose file interpolates `${VAR}` from the ambient environment, and
+   * `args:` entries declared without a value are filled from it too.
+   */
+  env?: Record<string, string>;
 }
 
 const DEFAULT_TIMEOUT = 30_000;
@@ -39,6 +47,11 @@ export async function docker(args: string[], opts: DockerOptions = {}) {
       cwd: opts.cwd,
       maxBuffer: opts.maxBuffer ?? DEFAULT_MAX_BUFFER,
       windowsHide: true,
+      // Built on a sanitised base, so a compose file can never interpolate
+      // RunPanel's own secrets into a user's stack. DOCKER_CONFIG points at the
+      // panel's own auth file when a private registry is configured, so pulls
+      // authenticate without touching the host user's ~/.docker.
+      env: { ...sanitizedProcessEnv(), ...(dockerConfigEnv() ?? {}), ...(opts.env ?? {}) },
     });
     return { stdout: stdout.toString(), stderr: stderr.toString() };
   } catch (err: unknown) {
@@ -99,7 +112,10 @@ export function dockerStream(
   onLine: (line: string) => void,
   onExit?: (code: number | null) => void
 ): () => void {
-  const child = spawn("docker", args, { windowsHide: true });
+  const child = spawn("docker", args, {
+    windowsHide: true,
+    env: { ...sanitizedProcessEnv(), ...(dockerConfigEnv() ?? {}) },
+  });
   let stopped = false;
   let buffer = "";
 

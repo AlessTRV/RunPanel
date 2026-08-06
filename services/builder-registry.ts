@@ -1,17 +1,20 @@
 import { IBuilder, BuildContext, BuildResult } from "./builders/types";
+import { composeBuilder } from "./builders/compose-builder";
 import { dockerBuilder } from "./builders/docker-builder";
 import { nodeBuilder } from "./builders/node-builder";
 import { staticBuilder } from "./builders/static-builder";
 import { customBuilder } from "./builders/custom-builder";
 
-// Detection order: Docker first, then Node, then Static (fallback)
-const builders: IBuilder[] = [dockerBuilder, nodeBuilder, staticBuilder];
+/**
+ * Detection order matters: a repository that ships both a compose file and a
+ * Dockerfile means the compose file, since it is what describes how the pieces
+ * fit together. Static is the fallback.
+ */
+const builders: IBuilder[] = [composeBuilder, dockerBuilder, nodeBuilder, staticBuilder];
 
 export async function detectBuilder(projectDir: string): Promise<IBuilder | null> {
   for (const builder of builders) {
-    if (await builder.detect(projectDir)) {
-      return builder;
-    }
+    if (await builder.detect(projectDir)) return builder;
   }
   return null;
 }
@@ -25,20 +28,21 @@ export async function buildProject(
     node: nodeBuilder,
     static: staticBuilder, // kept for backward compatibility
     docker: dockerBuilder,
+    compose: composeBuilder,
     custom: customBuilder,
   };
 
   let builder = builderMap[runtimeType];
 
-  // If node builder but no package.json, auto-detect (might be Docker or other)
+  // A "node" project with no package.json is almost always mislabelled — look
+  // at what is actually in the checkout.
   if (builder && runtimeType === "node" && !(await builder.detect(projectDir))) {
     const detected = await detectBuilder(projectDir);
     if (detected) builder = detected;
   }
 
-  // If not found by type, auto-detect
   if (!builder) {
-    builder = (await detectBuilder(projectDir)) || customBuilder;
+    builder = (await detectBuilder(projectDir)) ?? customBuilder;
   }
 
   return builder.build({ projectDir, ...ctx });

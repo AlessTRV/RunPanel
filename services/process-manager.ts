@@ -1,10 +1,12 @@
 import { IProcessDriver, ProcessInfo, StartOpts, OutputCallback } from "./process-drivers/types";
 import { pm2Driver } from "./process-drivers/pm2-driver";
 import { dockerDriver } from "./process-drivers/docker-driver";
+import { composeDriver } from "./process-drivers/compose-driver";
 
 function getDriver(runtimeType: string): IProcessDriver {
+  if (runtimeType === "compose") return composeDriver;
   if (runtimeType === "docker") return dockerDriver;
-  return pm2Driver; // node and static use PM2
+  return pm2Driver; // node, static and custom run under PM2
 }
 
 export const processManager = {

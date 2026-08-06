@@ -10,7 +10,7 @@ import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { cn } from "@/lib/utils";
 
 type SourceType = "github" | "upload";
-type RuntimeType = "node" | "docker" | "custom";
+type RuntimeType = "node" | "docker" | "compose" | "custom";
 
 interface GhRepo {
   name: string;
@@ -24,6 +24,7 @@ interface GhRepo {
 const RUNTIMES: { id: RuntimeType; label: string; hint: string; icon: string }[] = [
   { id: "node", label: "Node.js", hint: "Rileva il package manager e lo script di build", icon: "solar:code-linear" },
   { id: "docker", label: "Docker", hint: "Costruisce il Dockerfile del repository", icon: "solar:box-linear" },
+  { id: "compose", label: "Compose", hint: "Avvia lo stack descritto dal compose file", icon: "solar:layers-linear" },
   { id: "custom", label: "Custom", hint: "Comandi espliciti, qualsiasi linguaggio", icon: "solar:command-linear" },
 ];
 
@@ -232,7 +233,7 @@ export function AppForm({ projectId }: { projectId: string }) {
           <Input type="number" placeholder="3000" />
         </TextField>
 
-        {runtime !== "docker" && (
+        {runtime !== "docker" && runtime !== "compose" && (
           <div className="border-border space-y-3 border-t pt-4">
             <p className="text-muted text-xs">
               Un comando per riga. Lasciando vuoto, RunPanel prova a dedurli dal repository.

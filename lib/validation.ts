@@ -12,7 +12,7 @@ export const setupSchema = z.object({
   path: ["confirmPassword"],
 });
 
-export const runtimeTypes = ["node", "docker", "custom"] as const;
+export const runtimeTypes = ["node", "docker", "compose", "custom"] as const;
 export type RuntimeType = (typeof runtimeTypes)[number];
 
 export const createProjectSchema = z.object({
