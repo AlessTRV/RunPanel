@@ -28,12 +28,14 @@ export const updateProjectSchema = z.object({
   runtimeType: z.enum(runtimeTypes).optional().nullable(),
   port: z.number().int().min(1).max(65535).optional().nullable(),
   autoDeploy: z.boolean().optional(),
-  builderConfig: z.object({
-    buildCmd: z.string().optional(),
-    startCmd: z.string().optional(),
-    installCmd: z.string().optional(),
-    packageManager: z.enum(["auto", "npm", "bun", "pnpm", "yarn"]).optional(),
-  }).optional(),
+  /**
+   * The deploy contract, in either the current shape or the older four-field
+   * one. It is accepted loosely here and normalised in the route: a strict
+   * schema would silently DROP the legacy keys — Zod strips what it does not
+   * know — and a project configured through the old wizard would come back with
+   * no commands at all.
+   */
+  builderConfig: z.unknown().optional(),
 });
 
 export const envVarsSchema = z.object({
