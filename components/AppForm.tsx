@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { Button, Input, Label, TextField } from "@heroui/react";
 import { Icon } from "@iconify/react";
@@ -28,7 +28,16 @@ const RUNTIMES: { id: RuntimeType; label: string; hint: string; icon: string }[]
   { id: "custom", label: "Custom", hint: "Comandi espliciti, qualsiasi linguaggio", icon: "solar:command-linear" },
 ];
 
-export function AppForm({ projectId }: { projectId: string }) {
+export function AppForm({
+  projectId,
+  submitLabel = "Configura app",
+  secondaryAction,
+}: {
+  projectId: string;
+  submitLabel?: string;
+  /** Rendered beside the submit button — e.g. "configure later" during creation. */
+  secondaryAction?: ReactNode;
+}) {
   const router = useRouter();
   const [saving, setSaving] = useState(false);
 
@@ -258,9 +267,10 @@ export function AppForm({ projectId }: { projectId: string }) {
         )}
       </Panel>
 
-      <div className="flex justify-end">
+      <div className="flex items-center justify-end gap-3">
+        {secondaryAction}
         <Button variant="primary" isPending={saving} onPress={create}>
-          Configura app
+          {submitLabel}
         </Button>
       </div>
     </div>

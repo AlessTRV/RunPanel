@@ -84,6 +84,24 @@ export async function run({ base }) {
   const after = await api.call(`/api/projects/${projectId}`);
   r.check("project is not stuck on 'deploying'", after.body.status !== "deploying", after.body.status);
 
+  // A project with no source has no directory on disk. Node reports a missing
+  // cwd as ENOENT *on the executable*, so this used to fail with
+  // "spawn C:\Windows\system32\cmd.exe ENOENT" — which reads as a broken shell
+  // and sends you looking at PATH, Node and Windows instead of at the project.
+  if (Array.isArray(history) && history[0]) {
+    const log = (await api.call(`/api/deployments/${history[0].id}?tail=40`)).body?.build_log ?? "";
+    r.check(
+      "a source-less deploy names the missing source",
+      /no (source|repository)/i.test(log),
+      log.slice(-300)
+    );
+    r.check(
+      "it does not blame the shell",
+      !/cmd\.exe|ENOENT/i.test(log),
+      log.slice(-300)
+    );
+  }
+
   await api.call(`/api/projects/${projectId}`, { method: "DELETE" });
   return r.result();
 }

@@ -8,7 +8,7 @@ import { Panel } from "@/components/ui/Panel";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { cn } from "@/lib/utils";
 import { DOCKER_TEMPLATES, dockerTemplate } from "./_data/catalog";
-import { AppForm } from "./_components/AppForm";
+import { AppForm } from "@/components/AppForm";
 import { DatabaseForm } from "./_components/DatabaseForm";
 import { TemplateForm } from "./_components/TemplateForm";
 

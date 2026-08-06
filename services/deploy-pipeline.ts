@@ -146,6 +146,18 @@ async function runDeploy(
       }
     }
 
+    // A project whose source was never fetched has no directory on disk, and
+    // every step from here on would run against a path that is not there. On
+    // Windows that surfaces as `spawn cmd.exe ENOENT` — an error that points at
+    // the shell instead of the cause — so say what is actually missing.
+    if (!fs.existsSync(projectDir)) {
+      throw new Error(
+        project.source_type === "github" && !project.source_url
+          ? "No repository configured. Open the project's Source settings, set a GitHub URL, then deploy."
+          : "No source on disk for this project. Connect a GitHub repository or upload a ZIP, then deploy."
+      );
+    }
+
     // Now that the source is on disk, work out the rest of the contract.
     //
     // Precedence, lowest first: a preset detected from the repository's shape,

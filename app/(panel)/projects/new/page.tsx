@@ -2,22 +2,34 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Card, CardHeader, CardTitle, CardDescription, CardContent, TextField, Label, Input, Button, Spinner } from "@heroui/react";
+import { Button, Input, Label, TextField } from "@heroui/react";
 import { Icon } from "@iconify/react";
 import { toast } from "sonner";
+import { AppForm } from "@/components/AppForm";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { Panel, PanelHeader } from "@/components/ui/Panel";
+import { cn } from "@/lib/utils";
 
+/**
+ * Creating a project used to ask for a name and nothing else, dropping you on
+ * the project page with no source configured — and the only way to attach code
+ * was a form filed under "Services → New", which nobody would think to look
+ * for. A project with no source deploys nothing, so the source question is now
+ * part of creating one.
+ */
 export default function NewProjectPage() {
   const router = useRouter();
-  const [loading, setLoading] = useState(false);
+  const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
+  const [project, setProject] = useState<{ id: string; slug: string } | null>(null);
 
-  async function handleCreate() {
+  async function createProject() {
     if (!name.trim()) {
-      toast.error("Project name is required");
+      toast.error("Serve un nome per il progetto");
       return;
     }
 
-    setLoading(true);
+    setCreating(true);
     try {
       const res = await fetch("/api/projects", {
         method: "POST",
@@ -25,53 +37,100 @@ export default function NewProjectPage() {
         body: JSON.stringify({ name: name.trim() }),
       });
 
+      const data = await res.json();
       if (!res.ok) {
-        const data = await res.json();
-        toast.error(data.error || "Failed to create project");
+        toast.error(data.error ?? "Creazione fallita");
         return;
       }
 
-      // Straight into the new project rather than back to the list: creating
-      // one is always the first step of configuring it.
-      const project = await res.json();
-      toast.success("Progetto creato");
-      router.push(`/projects/${project.id}?tab=settings`);
+      // Straight on to the source step — the project exists, but it cannot do
+      // anything yet.
+      setProject({ id: data.id, slug: data.slug });
     } catch {
-      toast.error("Failed to create project");
+      toast.error("Creazione fallita");
     } finally {
-      setLoading(false);
+      setCreating(false);
     }
   }
 
-  return (
-    <div>
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold">New Project</h1>
-        <p className="text-sm text-muted">Create a project to group your app and services</p>
-      </div>
+  const step = project ? 2 : 1;
 
-      <div className="max-w-md">
-        <Card>
-          <CardHeader>
-            <div className="flex items-center gap-3">
-              <Icon icon="solar:folder-bold-duotone" width={24} className="text-accent" />
-              <div>
-                <CardTitle>Project Name</CardTitle>
-                <CardDescription>Give your project a name</CardDescription>
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-4">
+  return (
+    <>
+      <PageHeader
+        title="Nuovo progetto"
+        description={
+          step === 1
+            ? "Un progetto raggruppa un'app e i servizi di cui ha bisogno"
+            : `Da dove arriva il codice di ${name}`
+        }
+      />
+
+      <ol className="mb-6 flex items-center gap-3" aria-label="Avanzamento">
+        {[
+          { n: 1, label: "Nome" },
+          { n: 2, label: "Sorgente e runtime" },
+        ].map(({ n, label }) => (
+          <li key={n} className="flex items-center gap-3">
+            <span
+              className={cn(
+                "flex items-center gap-2 text-sm transition-colors",
+                step === n ? "text-foreground" : "text-muted"
+              )}
+              aria-current={step === n ? "step" : undefined}
+            >
+              <span
+                className={cn(
+                  "flex size-5 items-center justify-center rounded-full border font-mono text-[11px]",
+                  step > n
+                    ? "border-accent text-accent"
+                    : step === n
+                      ? "border-accent bg-accent/10 text-accent"
+                      : "border-border text-muted"
+                )}
+              >
+                {step > n ? <Icon icon="solar:check-read-linear" width={12} aria-hidden /> : n}
+              </span>
+              {label}
+            </span>
+            {n === 1 && <span className="bg-border h-px w-8" aria-hidden />}
+          </li>
+        ))}
+      </ol>
+
+      {step === 1 ? (
+        <div className="max-w-md">
+          <Panel className="space-y-4">
+            <PanelHeader title="Nome" description="Diventa anche lo slug su disco e in Docker" />
             <TextField value={name} onChange={setName} autoFocus>
-              <Label>Name</Label>
-              <Input placeholder="my-project" onKeyDown={(e) => e.key === "Enter" && handleCreate()} />
+              <Label>Nome</Label>
+              <Input
+                placeholder="il-mio-progetto"
+                onKeyDown={(e) => e.key === "Enter" && createProject()}
+              />
             </TextField>
-            <Button variant="primary" className="w-full" isDisabled={loading} onPress={handleCreate}>
-              {loading ? <Spinner /> : "Create Project"}
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
-    </div>
+            <div className="flex justify-end">
+              <Button variant="primary" isPending={creating} onPress={createProject}>
+                Continua
+              </Button>
+            </div>
+          </Panel>
+        </div>
+      ) : (
+        <AppForm
+          projectId={project!.id}
+          submitLabel="Salva e apri il progetto"
+          secondaryAction={
+            <button
+              type="button"
+              onClick={() => router.push(`/projects/${project!.id}`)}
+              className="text-muted hover:text-foreground text-sm transition-colors"
+            >
+              Configuro dopo
+            </button>
+          }
+        />
+      )}
+    </>
   );
 }
