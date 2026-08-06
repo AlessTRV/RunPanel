@@ -19,4 +19,18 @@ export async function register() {
   // so the first real request does not pay for it.
   const { getDb } = await import("./lib/db");
   await getDb();
+
+  // The data directory can outlive a container rebuild, and a missing auth file
+  // shows up as an unexplained "pull access denied" rather than as an error.
+  const { syncRegistryConfig } = await import("./services/docker/registry");
+  const registries = await syncRegistryConfig();
+  if (registries > 0) {
+    console.log(`[RunPanel] Registry credentials restored for ${registries} registr${registries === 1 ? "y" : "ies"}`);
+  }
+
+  // Housekeeping on a timer, in addition to the per-project sweep after each
+  // deploy: a project deleted while Docker was unreachable leaves resources
+  // nothing else would ever come back for.
+  const { startGcScheduler } = await import("./services/docker/gc");
+  startGcScheduler();
 }
