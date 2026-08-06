@@ -5,6 +5,8 @@ import { Icon } from "@iconify/react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { AccentPicker } from "@/components/ui/AccentPicker";
+import { SessionList } from "@/components/ui/SessionList";
+import { RegistryList } from "@/components/ui/RegistryList";
 
 export default function AccountPage() {
   const [currentPassword, setCurrentPassword] = useState("");
@@ -75,6 +77,42 @@ export default function AccountPage() {
             <TextField type="password" value={newPassword} onChange={setNewPassword}><Label>New Password</Label><Input /></TextField>
             <TextField type="password" value={confirmPassword} onChange={setConfirmPassword}><Label>Confirm New Password</Label><Input /></TextField>
             <Button variant="primary" isDisabled={loading} onPress={handleChangePassword}>{loading ? <Spinner /> : "Update Password"}</Button>
+          </CardContent>
+        </Card>
+
+        {/* Devices */}
+        <Card>
+          <CardHeader>
+            <div className="flex items-center gap-3">
+              <Icon icon="solar:monitor-linear" width={22} className="text-muted" />
+              <div>
+                <CardTitle>Dispositivi</CardTitle>
+                <CardDescription>
+                  Sessioni attive. Cambiare password le chiude tutte tranne questa.
+                </CardDescription>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <SessionList />
+          </CardContent>
+        </Card>
+
+        {/* Registries */}
+        <Card>
+          <CardHeader>
+            <div className="flex items-center gap-3">
+              <Icon icon="solar:lock-linear" width={22} className="text-muted" />
+              <div>
+                <CardTitle>Registry privati</CardTitle>
+                <CardDescription>
+                  Credenziali usate per pull e build di immagini private.
+                </CardDescription>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <RegistryList />
           </CardContent>
         </Card>
 
