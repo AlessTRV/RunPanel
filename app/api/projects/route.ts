@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth-guard";
-import { getDb } from "@/lib/db";
+import { getDb, nowIso } from "@/lib/db";
 import { generateId, slugify } from "@/lib/utils";
 import { createProjectSchema } from "@/lib/validation";
 import crypto from "crypto";
@@ -10,31 +10,55 @@ export async function GET() {
   if (denied) return denied;
 
   try {
-    const db = getDb();
-    const projects = db.prepare(`
-      SELECT p.*,
-        (SELECT COUNT(*) FROM deployments WHERE project_id = p.id) as deploy_count,
-        (SELECT started_at FROM deployments WHERE project_id = p.id ORDER BY started_at DESC LIMIT 1) as last_deploy_at
-      FROM projects p
-      ORDER BY p.created_at DESC
-    `).all() as Record<string, unknown>[];
+    const db = await getDb();
 
-    // Batch load all services (avoids N+1 query)
-    let allServices: Record<string, unknown>[] = [];
-    try {
-      allServices = db.prepare("SELECT * FROM services WHERE project_id IS NOT NULL").all() as Record<string, unknown>[];
-    } catch { /* services table might not have project_id column yet */ }
+    const projects = await db
+      .selectFrom("projects")
+      .selectAll()
+      .orderBy("created_at", "desc")
+      .execute();
 
-    const servicesByProject = new Map<string, Record<string, unknown>[]>();
+    // Deployment stats in one grouped pass rather than two correlated
+    // subqueries per project. `count` comes back as a string on Postgres and a
+    // number on SQLite, so normalise it.
+    const stats = await db
+      .selectFrom("deployments")
+      .select(["project_id"])
+      .select((eb) => [
+        eb.fn.count("id").as("deploy_count"),
+        eb.fn.max("started_at").as("last_deploy_at"),
+      ])
+      .groupBy("project_id")
+      .execute();
+
+    const statsByProject = new Map(
+      stats.map((s) => [
+        s.project_id,
+        { deploy_count: Number(s.deploy_count), last_deploy_at: s.last_deploy_at },
+      ])
+    );
+
+    // Batch load all services (avoids N+1)
+    const allServices = await db
+      .selectFrom("services")
+      .selectAll()
+      .where("project_id", "is not", null)
+      .execute();
+
+    const servicesByProject = new Map<string, typeof allServices>();
     for (const svc of allServices) {
-      const pid = svc.project_id as string;
-      if (!servicesByProject.has(pid)) servicesByProject.set(pid, []);
-      servicesByProject.get(pid)!.push(svc);
+      const pid = svc.project_id;
+      if (!pid) continue;
+      const list = servicesByProject.get(pid);
+      if (list) list.push(svc);
+      else servicesByProject.set(pid, [svc]);
     }
 
     const result = projects.map((p) => ({
       ...p,
-      services: servicesByProject.get(p.id as string) || [],
+      deploy_count: statsByProject.get(p.id)?.deploy_count ?? 0,
+      last_deploy_at: statsByProject.get(p.id)?.last_deploy_at ?? null,
+      services: servicesByProject.get(p.id) ?? [],
     }));
 
     return NextResponse.json(result);
@@ -52,7 +76,7 @@ export async function POST(request: NextRequest) {
   const parsed = createProjectSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json(
-      { error: "Validation failed", details: parsed.error.flatten() },
+      { error: "Validation failed", details: parsed.error.issues },
       { status: 400 }
     );
   }
@@ -61,9 +85,14 @@ export async function POST(request: NextRequest) {
   const id = generateId();
   const slug = slugify(name);
 
-  const db = getDb();
+  const db = await getDb();
 
-  const existing = db.prepare("SELECT id FROM projects WHERE slug = ?").get(slug);
+  const existing = await db
+    .selectFrom("projects")
+    .select("id")
+    .where("slug", "=", slug)
+    .executeTakeFirst();
+
   if (existing) {
     return NextResponse.json(
       { error: `A project with slug "${slug}" already exists` },
@@ -71,14 +100,36 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const webhookSecret = crypto.randomBytes(20).toString("hex");
+  const now = nowIso();
 
-  // Create project as empty container — app and services added separately
-  db.prepare(`
-    INSERT INTO projects (id, name, slug, source_type, runtime_type, webhook_secret)
-    VALUES (?, ?, ?, 'upload', 'node', ?)
-  `).run(id, name, slug, webhookSecret);
+  // A project starts as an empty container — the app and its services are
+  // added afterwards.
+  await db
+    .insertInto("projects")
+    .values({
+      id,
+      name,
+      slug,
+      app_name: null,
+      source_type: "upload",
+      source_url: null,
+      source_branch: "main",
+      runtime_type: "node",
+      builder_config: "{}",
+      port: null,
+      status: "stopped",
+      auto_deploy: 0,
+      webhook_secret: crypto.randomBytes(20).toString("hex"),
+      created_at: now,
+      updated_at: now,
+    })
+    .execute();
 
-  const project = db.prepare("SELECT * FROM projects WHERE id = ?").get(id);
+  const project = await db
+    .selectFrom("projects")
+    .selectAll()
+    .where("id", "=", id)
+    .executeTakeFirst();
+
   return NextResponse.json(project, { status: 201 });
 }

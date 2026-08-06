@@ -3,7 +3,7 @@ import { getSession, isFirstRun } from "@/lib/auth";
 
 export async function GET() {
   const authenticated = await getSession();
-  const firstRun = isFirstRun();
+  const firstRun = await isFirstRun();
 
   return NextResponse.json({ authenticated, firstRun });
 }

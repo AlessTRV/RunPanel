@@ -49,9 +49,12 @@ export async function GET(request: NextRequest, { params }: Params) {
     return NextResponse.json({ error: "Binary files cannot be edited" }, { status: 400 });
   }
 
-  const db = getDb();
-  const project = db.prepare("SELECT slug, runtime_type FROM projects WHERE id = ?")
-    .get(projectId) as { slug: string; runtime_type: string } | undefined;
+  const db = await getDb();
+  const project = await db
+    .selectFrom("projects")
+    .select(["slug", "runtime_type"])
+    .where("id", "=", projectId)
+    .executeTakeFirst();
 
   if (!project) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
@@ -60,7 +63,7 @@ export async function GET(request: NextRequest, { params }: Params) {
   try {
     if (project.runtime_type === "docker") {
       const containerName = `runpanel-${project.slug}`;
-      const tmpDir = path.join(config.dataDir, "tmp");
+      const tmpDir = config.tmpDir;
       fs.mkdirSync(tmpDir, { recursive: true });
       const tmpFile = path.join(tmpDir, `${project.slug}-${Date.now()}`);
 
@@ -124,9 +127,12 @@ export async function PUT(request: NextRequest, { params }: Params) {
     return NextResponse.json({ error: "Content too large (max 1MB)" }, { status: 400 });
   }
 
-  const db = getDb();
-  const project = db.prepare("SELECT slug, runtime_type FROM projects WHERE id = ?")
-    .get(projectId) as { slug: string; runtime_type: string } | undefined;
+  const db = await getDb();
+  const project = await db
+    .selectFrom("projects")
+    .select(["slug", "runtime_type"])
+    .where("id", "=", projectId)
+    .executeTakeFirst();
 
   if (!project) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
@@ -135,7 +141,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
   try {
     if (project.runtime_type === "docker") {
       const containerName = `runpanel-${project.slug}`;
-      const tmpDir = path.join(config.dataDir, "tmp");
+      const tmpDir = config.tmpDir;
       fs.mkdirSync(tmpDir, { recursive: true });
       const tmpFile = path.join(tmpDir, `${project.slug}-${Date.now()}`);
 

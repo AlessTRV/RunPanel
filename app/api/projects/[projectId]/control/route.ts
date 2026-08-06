@@ -1,42 +1,47 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth-guard";
-import { getDb } from "@/lib/db";
+import { getDb, nowIso } from "@/lib/db";
 import { controlActionSchema } from "@/lib/validation";
 import { processManager } from "@/services/process-manager";
 import { decrypt } from "@/lib/auth";
 
 type Params = { params: Promise<{ projectId: string }> };
 
-/** Load last deployment info and env vars, then start via processManager */
+/** Replay the last successful deployment's start command. */
 async function startFromDeploy(
   projectId: string,
   slug: string,
   runtimeType: string,
   projectPort: number | null
 ) {
-  const db = getDb();
+  const db = await getDb();
 
-  const lastDeploy = db.prepare(`
-    SELECT start_cmd, artifact_dir FROM deployments
-    WHERE project_id = ? AND status IN ('running', 'superseded') AND start_cmd IS NOT NULL
-    ORDER BY started_at DESC LIMIT 1
-  `).get(projectId) as { start_cmd: string; artifact_dir: string } | undefined;
+  const lastDeploy = await db
+    .selectFrom("deployments")
+    .select(["start_cmd", "artifact_dir"])
+    .where("project_id", "=", projectId)
+    .where("status", "in", ["running", "superseded"])
+    .where("start_cmd", "is not", null)
+    .orderBy("started_at", "desc")
+    .limit(1)
+    .executeTakeFirst();
 
-  if (!lastDeploy) {
+  if (!lastDeploy?.start_cmd || !lastDeploy.artifact_dir) {
     return { error: "No previous successful deployment found. Deploy the project first." };
   }
 
-  // Load and decrypt env vars
-  const envRows = db.prepare(
-    "SELECT key, value FROM env_vars WHERE project_id = ?"
-  ).all(projectId) as { key: string; value: string }[];
+  const envRows = await db
+    .selectFrom("env_vars")
+    .select(["key", "value"])
+    .where("project_id", "=", projectId)
+    .execute();
 
   const envVars: Record<string, string> = {};
   for (const row of envRows) {
     envVars[row.key] = decrypt(row.value);
   }
 
-  const port = projectPort || 3000;
+  const port = projectPort ?? 3000;
 
   await processManager.start(slug, lastDeploy.start_cmd, runtimeType, {
     cwd: lastDeploy.artifact_dir,
@@ -44,10 +49,13 @@ async function startFromDeploy(
     port,
   });
 
-  db.prepare("UPDATE projects SET status = 'running', updated_at = datetime('now') WHERE id = ?")
-    .run(projectId);
+  await db
+    .updateTable("projects")
+    .set({ status: "running", updated_at: nowIso() })
+    .where("id", "=", projectId)
+    .execute();
 
-  return { success: true };
+  return { success: true as const };
 }
 
 export async function POST(request: NextRequest, { params }: Params) {
@@ -61,23 +69,25 @@ export async function POST(request: NextRequest, { params }: Params) {
     return NextResponse.json({ error: "Invalid action" }, { status: 400 });
   }
 
-  const db = getDb();
-  const project = db.prepare("SELECT * FROM projects WHERE id = ?").get(projectId) as Record<string, unknown> | undefined;
+  const db = await getDb();
+  const project = await db
+    .selectFrom("projects")
+    .selectAll()
+    .where("id", "=", projectId)
+    .executeTakeFirst();
+
   if (!project) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
 
   const { action } = parsed.data;
-  const slug = project.slug as string;
-  const runtimeType = project.runtime_type as string;
+  const { slug, runtime_type: runtimeType } = project;
 
   try {
     switch (action) {
       case "start":
       case "restart": {
-        const result = await startFromDeploy(
-          projectId, slug, runtimeType, project.port as number | null
-        );
+        const result = await startFromDeploy(projectId, slug, runtimeType, project.port);
         if ("error" in result) {
           return NextResponse.json({ error: result.error }, { status: 400 });
         }
@@ -85,7 +95,11 @@ export async function POST(request: NextRequest, { params }: Params) {
       }
       case "stop":
         await processManager.stop(slug, runtimeType);
-        db.prepare("UPDATE projects SET status = 'stopped', updated_at = datetime('now') WHERE id = ?").run(projectId);
+        await db
+          .updateTable("projects")
+          .set({ status: "stopped", updated_at: nowIso() })
+          .where("id", "=", projectId)
+          .execute();
         break;
     }
 

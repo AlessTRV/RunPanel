@@ -1,9 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth-guard";
-import { getDb } from "@/lib/db";
+import { getDb, nowIso } from "@/lib/db";
+import type { ProjectsTable } from "@/lib/db/schema";
 import { updateProjectSchema } from "@/lib/validation";
+import { deployContractSchema, normalizeContractInput } from "@/lib/deploy-contract";
 import { processManager } from "@/services/process-manager";
 import { removeService, serviceContainerName } from "@/services/service-provisioner";
+import { removeProjectNetwork } from "@/services/docker-network";
+import { removeProjectImages } from "@/services/docker/images";
+import { removeProjectVolumes } from "@/services/docker/volumes";
+import { removePm2Artifacts } from "@/services/process-drivers/pm2-driver";
+import { removeEnvFile } from "@/services/env-file";
+import { clearQueuedDeploy } from "@/services/deploy-queue";
+import { processLogHub } from "@/services/process-logs";
 import fs from "fs";
 import path from "path";
 import { config } from "@/lib/config";
@@ -15,19 +24,29 @@ export async function GET(_request: NextRequest, { params }: Params) {
   if (denied) return denied;
 
   const { projectId } = await params;
-  const db = getDb();
-  const project = db.prepare(`
-    SELECT p.*,
-      (SELECT COUNT(*) FROM deployments WHERE project_id = p.id) as deploy_count,
-      (SELECT started_at FROM deployments WHERE project_id = p.id ORDER BY started_at DESC LIMIT 1) as last_deploy_at
-    FROM projects p WHERE p.id = ?
-  `).get(projectId);
+  const db = await getDb();
+
+  const project = await db
+    .selectFrom("projects")
+    .selectAll()
+    .where("id", "=", projectId)
+    .executeTakeFirst();
 
   if (!project) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
 
-  return NextResponse.json(project);
+  const stats = await db
+    .selectFrom("deployments")
+    .select((eb) => [eb.fn.count("id").as("deploy_count"), eb.fn.max("started_at").as("last_deploy_at")])
+    .where("project_id", "=", projectId)
+    .executeTakeFirst();
+
+  return NextResponse.json({
+    ...project,
+    deploy_count: Number(stats?.deploy_count ?? 0),
+    last_deploy_at: stats?.last_deploy_at ?? null,
+  });
 }
 
 export async function PATCH(request: NextRequest, { params }: Params) {
@@ -39,39 +58,66 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   const parsed = updateProjectSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json(
-      { error: "Validation failed", details: parsed.error.flatten() },
+      { error: "Validation failed", details: parsed.error.issues },
       { status: 400 }
     );
   }
 
-  const db = getDb();
-  const project = db.prepare("SELECT * FROM projects WHERE id = ?").get(projectId) as Record<string, unknown> | undefined;
+  const db = await getDb();
+  const project = await db
+    .selectFrom("projects")
+    .select("id")
+    .where("id", "=", projectId)
+    .executeTakeFirst();
+
   if (!project) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
 
-  const updates: string[] = [];
-  const values: unknown[] = [];
+  const { name, appName, sourceType, sourceUrl, sourceBranch, runtimeType, port, autoDeploy, builderConfig } =
+    parsed.data;
 
-  const { name, appName, sourceType, sourceUrl, sourceBranch, runtimeType, port, autoDeploy, builderConfig } = parsed.data;
+  const updates: Partial<ProjectsTable> = {};
+  if (name !== undefined) updates.name = name;
+  if (appName !== undefined) updates.app_name = appName || null;
+  if (sourceType !== undefined) updates.source_type = sourceType;
+  if (sourceUrl !== undefined) updates.source_url = sourceUrl;
+  if (sourceBranch !== undefined) updates.source_branch = sourceBranch;
+  if (runtimeType !== undefined && runtimeType !== null) updates.runtime_type = runtimeType;
+  if (port !== undefined) updates.port = port;
+  if (autoDeploy !== undefined) updates.auto_deploy = autoDeploy ? 1 : 0;
 
-  if (name !== undefined) { updates.push("name = ?"); values.push(name); }
-  if (appName !== undefined) { updates.push("app_name = ?"); values.push(appName || null); }
-  if (sourceType !== undefined) { updates.push("source_type = ?"); values.push(sourceType); }
-  if (sourceUrl !== undefined) { updates.push("source_url = ?"); values.push(sourceUrl); }
-  if (sourceBranch !== undefined) { updates.push("source_branch = ?"); values.push(sourceBranch); }
-  if (runtimeType !== undefined) { updates.push("runtime_type = ?"); values.push(runtimeType); }
-  if (port !== undefined) { updates.push("port = ?"); values.push(port); }
-  if (autoDeploy !== undefined) { updates.push("auto_deploy = ?"); values.push(autoDeploy ? 1 : 0); }
-  if (builderConfig !== undefined) { updates.push("builder_config = ?"); values.push(JSON.stringify(builderConfig)); }
+  if (builderConfig !== undefined) {
+    // Normalise first: callers may still send the pre-contract shape
+    // (installCmd/buildCmd/startCmd/dockerImage). Validating before that would
+    // discard those keys and leave the project with no commands.
+    const normalized = normalizeContractInput(builderConfig);
 
-  if (updates.length > 0) {
-    updates.push("updated_at = datetime('now')");
-    values.push(projectId);
-    db.prepare(`UPDATE projects SET ${updates.join(", ")} WHERE id = ?`).run(...values);
+    // Validate for shape, but persist the NORMALISED INPUT rather than the
+    // parsed result. Parsing fills in every default, and a stored config full
+    // of defaults is indistinguishable from one the operator chose — which
+    // would stop a repository's runpanel.json from ever contributing a value.
+    const parsed = deployContractSchema.safeParse(normalized);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: "Invalid deploy configuration", details: parsed.error.issues },
+        { status: 400 }
+      );
+    }
+    updates.builder_config = JSON.stringify({ version: 1, ...normalized });
   }
 
-  const updated = db.prepare("SELECT * FROM projects WHERE id = ?").get(projectId);
+  if (Object.keys(updates).length > 0) {
+    updates.updated_at = nowIso();
+    await db.updateTable("projects").set(updates).where("id", "=", projectId).execute();
+  }
+
+  const updated = await db
+    .selectFrom("projects")
+    .selectAll()
+    .where("id", "=", projectId)
+    .executeTakeFirst();
+
   return NextResponse.json(updated);
 }
 
@@ -80,61 +126,78 @@ export async function DELETE(_request: NextRequest, { params }: Params) {
   if (denied) return denied;
 
   const { projectId } = await params;
-  const db = getDb();
-  const project = db.prepare("SELECT * FROM projects WHERE id = ?").get(projectId) as Record<string, unknown> | undefined;
+  const db = await getDb();
+
+  const project = await db
+    .selectFrom("projects")
+    .selectAll()
+    .where("id", "=", projectId)
+    .executeTakeFirst();
 
   if (!project) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
 
-  // Stop running process + remove Docker container/image if applicable
+  const { slug } = project;
+
+  // Drop any follow-up deploy and stop following this project's logs before
+  // taking anything apart, so nothing tries to redeploy what we are deleting.
+  clearQueuedDeploy(projectId);
+  processLogHub.detachAll(projectId);
+
+  // Stop the running process (PM2 delete or Docker rm)
   try {
-    await processManager.stop(project.slug as string, project.runtime_type as string);
+    // `remove`, not `stop`: a stopped container still references its image, so
+    // stopping here would leave both the container and the image on disk.
+    await processManager.remove(slug, project.runtime_type);
   } catch { /* ignore */ }
 
-  // Remove Docker image built for this project (if docker runtime)
-  if (project.runtime_type === "docker") {
-    const { execFile: execF } = await import("child_process");
-    const { promisify: prom } = await import("util");
-    const ex = prom(execF);
-    const imageName = `runpanel-${project.slug}`;
-    try { await ex("docker", ["rmi", "-f", imageName], { timeout: 15_000 }); } catch { /* ignore */ }
-  }
+  // Remove every image RunPanel built for this project, not just the one tag
+  // the old code knew about — each deploy produces its own immutable tag.
+  await removeProjectImages(slug);
 
-  // Stop and remove all services linked to this project
-  const services = db.prepare("SELECT * FROM services WHERE project_id = ?").all(projectId) as Record<string, unknown>[];
+  // Stop and remove every service container linked to this project
+  const services = await db
+    .selectFrom("services")
+    .select(["name", "config"])
+    .where("project_id", "=", projectId)
+    .execute();
+
   for (const svc of services) {
-    let cn: string;
-    try { const cfg = JSON.parse((svc.config as string) || "{}"); cn = cfg.containerName; } catch { cn = ""; }
-    if (!cn) cn = serviceContainerName(svc.name as string);
-    try { await removeService(cn); } catch { /* ignore */ }
+    let containerName = "";
+    try {
+      containerName = (JSON.parse(svc.config || "{}") as { containerName?: string }).containerName ?? "";
+    } catch { /* fall through to the derived name */ }
+    if (!containerName) containerName = serviceContainerName(svc.name);
+    try {
+      await removeService(containerName);
+    } catch { /* ignore */ }
   }
-  db.prepare("DELETE FROM services WHERE project_id = ?").run(projectId);
 
-  // Delete project files
-  const repoDir = path.join(config.reposDir, project.slug as string);
+  // Deleting the project deletes its databases' storage too. Previously the
+  // containers went and the named volumes stayed on disk forever, invisible and
+  // ready to silently reattach to a future service with the same name.
+  const volumesRemoved = await removeProjectVolumes(slug);
+
+  // Delete project source
+  const repoDir = path.join(config.reposDir, slug);
   if (fs.existsSync(repoDir)) {
     fs.rmSync(repoDir, { recursive: true, force: true });
   }
 
-  // Delete PM2 wrapper files
-  const pm2Dir = path.join(config.dataDir, "pm2");
-  for (const ext of [".js", ".json", ".cmd", ".sh"]) {
-    const f = path.join(pm2Dir, `${project.slug}${ext}`);
-    if (fs.existsSync(f)) fs.rmSync(f);
-  }
+  // Delete generated PM2 files, including the 0600 sidecar holding the
+  // project's environment.
+  removePm2Artifacts(slug);
+  removeEnvFile(slug);
 
-  // Remove project Docker network
   try {
-    const { removeProjectNetwork } = await import("@/services/docker-network");
-    await removeProjectNetwork(project.slug as string);
+    await removeProjectNetwork(slug);
   } catch { /* ignore */ }
 
-  // Manual cascade delete — webhook_deliveries first (has FK to deployments.id)
-  db.prepare("DELETE FROM webhook_deliveries WHERE project_id = ?").run(projectId);
-  db.prepare("DELETE FROM deployments WHERE project_id = ?").run(projectId);
-  db.prepare("DELETE FROM env_vars WHERE project_id = ?").run(projectId);
-  db.prepare("DELETE FROM projects WHERE id = ?").run(projectId);
+  // Child rows go with the parent: the schema declares ON DELETE CASCADE on
+  // deployments, env_vars, services and webhook_deliveries, so a single delete
+  // is enough — no hand-rolled ordering to get wrong.
+  await db.deleteFrom("projects").where("id", "=", projectId).execute();
 
-  return NextResponse.json({ success: true });
+  return NextResponse.json({ success: true, volumesRemoved });
 }

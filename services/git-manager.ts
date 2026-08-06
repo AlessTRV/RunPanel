@@ -4,6 +4,8 @@ import crypto from "crypto";
 import fs from "fs";
 import path from "path";
 import { config } from "@/lib/config";
+import { getSetting } from "@/lib/settings";
+import { decrypt } from "@/lib/auth";
 
 const exec = promisify(execFile);
 
@@ -24,15 +26,12 @@ function authArgs(token: string | null): string[] {
   return ["-c", `http.extraheader=Authorization: basic ${encoded}`];
 }
 
-/** Load GitHub token from DB settings (if configured) */
-function getGitHubToken(): string | null {
+/** Load GitHub token from settings (if configured) */
+async function getGitHubToken(): Promise<string | null> {
   try {
-    const { getDb } = require("@/lib/db");
-    const { decrypt } = require("@/lib/auth");
-    const db = getDb();
-    const row = db.prepare("SELECT value FROM settings WHERE key = 'github_token'").get() as { value: string } | undefined;
-    if (row?.value) return decrypt(row.value);
-  } catch { /* ignore */ }
+    const stored = await getSetting("github_token");
+    if (stored) return decrypt(stored);
+  } catch { /* not configured, or the secret changed — clone will go anonymous */ }
   return null;
 }
 
@@ -47,7 +46,7 @@ export async function gitClone(
     fs.rmSync(destDir, { recursive: true, force: true });
   }
 
-  const token = getGitHubToken();
+  const token = await getGitHubToken();
   const url = cleanRepoUrl(repoUrl);
 
   await exec("git", [...authArgs(token), "clone", "--depth", "1", "--branch", branch, url, destDir], {
@@ -61,7 +60,7 @@ export async function gitPull(
   branch: string
 ): Promise<CommitInfo> {
   const repoDir = path.join(config.reposDir, projectSlug);
-  const token = getGitHubToken();
+  const token = await getGitHubToken();
 
   // Clean any old embedded-token URL from the remote (legacy repos)
   try {
@@ -72,16 +71,46 @@ export async function gitPull(
     }
   } catch { /* ignore */ }
 
-  await exec("git", [...authArgs(token), "fetch", "origin", branch], {
-    cwd: repoDir,
-    timeout: 60_000,
-    env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
-  });
+  // Explicit refspec, and `--depth 1` again.
+  //
+  // The clone is shallow and was made with `--branch <x>`, so its fetch refspec
+  // only covers that one branch. A plain `git fetch origin <other>` then leaves
+  // `origin/<other>` unwritten, and the reset below either fails or — worse —
+  // silently keeps deploying the old branch. Naming the destination ref makes
+  // switching branches from the UI actually work.
+  try {
+    await exec(
+      "git",
+      [
+        ...authArgs(token),
+        "fetch",
+        "--depth", "1",
+        "origin",
+        `+refs/heads/${branch}:refs/remotes/origin/${branch}`,
+      ],
+      {
+        cwd: repoDir,
+        timeout: 120_000,
+        env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+      }
+    );
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (/couldn't find remote ref|not found in upstream/i.test(message)) {
+      throw new Error(`Il branch "${branch}" non esiste sul remote.`);
+    }
+    throw err;
+  }
 
-  await exec("git", ["reset", "--hard", `origin/${branch}`], {
+  await exec("git", ["reset", "--hard", `refs/remotes/origin/${branch}`], {
     cwd: repoDir,
     timeout: 30_000,
   });
+
+  // Drop files left by the previous branch that the new one does not track,
+  // but keep ignored artefacts (node_modules, venv, .next) so a redeploy does
+  // not pay to rebuild them from scratch.
+  await exec("git", ["clean", "-fd"], { cwd: repoDir, timeout: 60_000 });
 
   return getLatestCommit(projectSlug);
 }

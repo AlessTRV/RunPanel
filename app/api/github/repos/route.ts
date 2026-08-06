@@ -1,22 +1,21 @@
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth-guard";
-import { getDb } from "@/lib/db";
+import { getSetting } from "@/lib/settings";
 import { decrypt } from "@/lib/auth";
 
 export async function GET() {
   const denied = await requireAuth();
   if (denied) return denied;
 
-  const db = getDb();
-  const row = db.prepare("SELECT value FROM settings WHERE key = 'github_token'").get() as { value: string } | undefined;
+  const stored = await getSetting("github_token");
 
-  if (!row || !row.value) {
+  if (!stored) {
     return NextResponse.json({ error: "GitHub token not configured", repos: [] }, { status: 400 });
   }
 
   let token: string;
   try {
-    token = decrypt(row.value);
+    token = decrypt(stored);
   } catch {
     return NextResponse.json({ error: "Failed to decrypt token", repos: [] }, { status: 500 });
   }

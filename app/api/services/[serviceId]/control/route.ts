@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth-guard";
-import { getDb } from "@/lib/db";
+import { getDb, nowIso } from "@/lib/db";
 import { controlActionSchema } from "@/lib/validation";
 import { startService, stopService, restartService, serviceContainerName } from "@/services/service-provisioner";
 
@@ -17,8 +17,13 @@ export async function POST(request: NextRequest, { params }: Params) {
     return NextResponse.json({ error: "Invalid action" }, { status: 400 });
   }
 
-  const db = getDb();
-  const service = db.prepare("SELECT * FROM services WHERE id = ?").get(serviceId) as Record<string, unknown> | undefined;
+  const db = await getDb();
+  const service = await db
+    .selectFrom("services")
+    .selectAll()
+    .where("id", "=", serviceId)
+    .executeTakeFirst();
+
   if (!service) {
     return NextResponse.json({ error: "Service not found" }, { status: 404 });
   }
@@ -26,29 +31,35 @@ export async function POST(request: NextRequest, { params }: Params) {
   const { action } = parsed.data;
 
   // Resolve full container name: from config JSON (new services) or legacy unscoped pattern
-  let containerName: string;
+  let containerName = "";
   try {
-    const cfg = JSON.parse((service.config as string) || "{}");
-    containerName = cfg.containerName;
-  } catch { containerName = ""; }
+    containerName = (JSON.parse(service.config || "{}") as { containerName?: string }).containerName ?? "";
+  } catch { /* fall through to the derived name */ }
   if (!containerName) {
     // Legacy services don't have containerName in config — use old unscoped pattern
-    containerName = serviceContainerName(service.name as string);
+    containerName = serviceContainerName(service.name);
   }
+
+  const setStatus = (status: "running" | "stopped") =>
+    db
+      .updateTable("services")
+      .set({ status, updated_at: nowIso() })
+      .where("id", "=", serviceId)
+      .execute();
 
   try {
     switch (action) {
       case "start":
         await startService(containerName);
-        db.prepare("UPDATE services SET status = 'running', updated_at = datetime('now') WHERE id = ?").run(serviceId);
+        await setStatus("running");
         break;
       case "stop":
         await stopService(containerName);
-        db.prepare("UPDATE services SET status = 'stopped', updated_at = datetime('now') WHERE id = ?").run(serviceId);
+        await setStatus("stopped");
         break;
       case "restart":
         await restartService(containerName);
-        db.prepare("UPDATE services SET status = 'running', updated_at = datetime('now') WHERE id = ?").run(serviceId);
+        await setStatus("running");
         break;
     }
 

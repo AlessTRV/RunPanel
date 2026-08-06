@@ -10,9 +10,12 @@ export async function GET(_request: NextRequest, { params }: Params) {
   if (denied) return denied;
 
   const { projectId } = await params;
-  const db = getDb();
-  const project = db.prepare("SELECT id, slug, status, port, runtime_type FROM projects WHERE id = ?")
-    .get(projectId) as Record<string, unknown> | undefined;
+  const db = await getDb();
+  const project = await db
+    .selectFrom("projects")
+    .select(["id", "slug", "status", "port", "runtime_type"])
+    .where("id", "=", projectId)
+    .executeTakeFirst();
 
   if (!project) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
@@ -20,10 +23,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
 
   let processInfo = null;
   try {
-    processInfo = await processManager.status(
-      project.slug as string,
-      project.runtime_type as string
-    );
+    processInfo = await processManager.status(project.slug, project.runtime_type);
   } catch { /* ignore */ }
 
   return NextResponse.json({

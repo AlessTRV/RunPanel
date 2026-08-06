@@ -6,30 +6,28 @@ import {
   verifyPassword,
   createSession,
 } from "@/lib/auth";
+import { clearRateLimit, consumeRateLimit } from "@/lib/rate-limit";
 
-// Simple in-memory rate limiter: max 5 attempts per IP per 15 minutes
-const attempts = new Map<string, { count: number; resetAt: number }>();
 const MAX_ATTEMPTS = 5;
 const WINDOW_MS = 15 * 60 * 1000;
 
-function isRateLimited(ip: string): boolean {
-  const now = Date.now();
-  const entry = attempts.get(ip);
-  if (!entry || now > entry.resetAt) {
-    attempts.set(ip, { count: 1, resetAt: now + WINDOW_MS });
-    return false;
-  }
-  entry.count++;
-  return entry.count > MAX_ATTEMPTS;
+function clientIp(request: NextRequest): string {
+  // Only the first hop is meaningful; the rest of an X-Forwarded-For chain is
+  // client-supplied and trivially spoofed.
+  const forwarded = request.headers.get("x-forwarded-for");
+  if (forwarded) return forwarded.split(",")[0].trim();
+  return request.headers.get("x-real-ip") ?? "unknown";
 }
 
 export async function POST(request: NextRequest) {
-  const ip = request.headers.get("x-forwarded-for") || request.headers.get("x-real-ip") || "unknown";
+  const ip = clientIp(request);
+  const limitKey = `login:${ip}`;
 
-  if (isRateLimited(ip)) {
+  const limit = await consumeRateLimit(limitKey, MAX_ATTEMPTS, WINDOW_MS);
+  if (!limit.allowed) {
     return NextResponse.json(
-      { error: "Too many login attempts. Try again in 15 minutes." },
-      { status: 429 }
+      { error: `Troppi tentativi. Riprova tra ${Math.ceil(limit.retryAfter / 60)} minuti.` },
+      { status: 429, headers: { "Retry-After": String(limit.retryAfter) } }
     );
   }
 
@@ -40,8 +38,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid password" }, { status: 400 });
   }
 
+  const sessionMeta = {
+    userAgent: request.headers.get("user-agent") ?? undefined,
+    ip,
+  };
+
   // First-run setup
-  if (setup && isFirstRun()) {
+  if (setup && (await isFirstRun())) {
     if (password.length < 8) {
       return NextResponse.json(
         { error: "Password must be at least 8 characters" },
@@ -49,14 +52,13 @@ export async function POST(request: NextRequest) {
       );
     }
     await setAdminPassword(password);
-    await createSession();
-    // Clear rate limit on successful setup
-    attempts.delete(ip);
+    await createSession(sessionMeta);
+    await clearRateLimit(limitKey);
     return NextResponse.json({ success: true });
   }
 
   // Normal login
-  const hash = getAdminPasswordHash();
+  const hash = await getAdminPasswordHash();
   if (!hash) {
     return NextResponse.json(
       { error: "Panel not set up. Please refresh the page." },
@@ -69,8 +71,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid password" }, { status: 401 });
   }
 
-  // Clear rate limit on successful login
-  attempts.delete(ip);
-  await createSession();
+  await clearRateLimit(limitKey);
+  await createSession(sessionMeta);
   return NextResponse.json({ success: true });
 }

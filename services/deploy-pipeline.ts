@@ -1,68 +1,106 @@
-import { getDb } from "@/lib/db";
+import { getDb, nowIso } from "@/lib/db";
+import type { DeploymentsTable, ProjectsTable } from "@/lib/db/schema";
 import { decrypt } from "@/lib/auth";
-import { config } from "@/lib/config";
-import { gitPull, gitClone, repoExists, getRepoPath } from "./git-manager";
+import { gitPull, gitClone, repoExists, getRepoPath, getLatestCommit } from "./git-manager";
 import { buildProject } from "./builder-registry";
 import { processManager } from "./process-manager";
-import { serviceContainerName } from "./service-provisioner";
-import type { BuildContext } from "./builders/types";
+import { runReleaseCommand, waitForHealthy } from "./deploy-steps";
+import { writeEnvFile, writeEnvFileInto } from "./env-file";
+import { readRepoContract, RUNPANEL_CONFIG_FILE } from "./deploy-presets";
+import {
+  parseContractJson,
+  preflight,
+  resolveContractJson,
+  selectBuildEnv,
+} from "@/lib/deploy-contract";
+import {
+  buildConnectionString,
+  connectionEnvKey,
+  serviceContainerName,
+} from "./service-provisioner";
+import { sweep } from "./docker/gc";
+import { BuildLogFile } from "./build-logs";
+import { projectEvents } from "./events";
 import path from "path";
 import fs from "fs";
 
-interface Project {
-  id: string;
-  name: string;
-  slug: string;
-  source_type: string;
-  source_url: string | null;
-  source_branch: string;
-  runtime_type: string;
-  builder_config: string;
-  port: number | null;
-  status: string;
-}
+type Project = ProjectsTable;
 
 interface DeployOptions {
   onLog?: (line: string) => void;
   mode?: "deploy" | "rebuild";
 }
 
+/** Directories wiped by a rebuild, by runtime. */
+const REBUILD_CLEAN_DIRS: Record<string, string[]> = {
+  node: [".next", "node_modules", "dist", "build", ".turbo"],
+  static: ["dist", "build"],
+  custom: ["venv", "__pycache__", "dist", "build"],
+  docker: [],
+};
+
+/**
+ * Deploys are started with `void executeDeploy(...)` — nothing awaits them, so
+ * this must never reject. An unhandled rejection here would take down the whole
+ * panel, not just the deploy.
+ */
 export async function executeDeploy(
   project: Project,
   deploymentId: string,
   opts: DeployOptions = {}
 ): Promise<void> {
-  const db = getDb();
-  const log = opts.onLog || (() => {});
-  const mode = opts.mode || "deploy";
+  try {
+    await runDeploy(project, deploymentId, opts);
+  } catch (err) {
+    // Only reachable if the store itself is unavailable — runDeploy handles
+    // every failure it can still record.
+    console.error(`[deploy] Unrecoverable error for deployment ${deploymentId}:`, err);
+  }
+}
+
+async function runDeploy(
+  project: Project,
+  deploymentId: string,
+  opts: DeployOptions
+): Promise<void> {
+  const db = await getDb();
+  const externalLog = opts.onLog;
+  const mode = opts.mode ?? "deploy";
   const wasRunning = project.status === "running";
+  const logFile = new BuildLogFile(deploymentId);
 
-  let builderConfig: Record<string, string | undefined> = {};
-  try {
-    builderConfig = JSON.parse(project.builder_config || "{}");
-  } catch {
-    builderConfig = {};
+  // Resolved once the source is on disk, so an in-repo `runpanel.json` can take
+  // part. Until then, the panel's settings alone.
+  let contract = parseContractJson(project.builder_config);
+
+  async function updateDeployment(fields: Partial<DeploymentsTable>) {
+    await db.updateTable("deployments").set(fields).where("id", "=", deploymentId).execute();
+    if (fields.status) {
+      projectEvents.emit(project.id, {
+        type: "deploy:status",
+        deploymentId,
+        status: fields.status,
+        message: fields.error_message ?? undefined,
+      });
+    }
   }
 
-  function updateDeployment(fields: Record<string, unknown>) {
-    const sets = Object.keys(fields).map((k) => `${k} = ?`).join(", ");
-    const values = Object.values(fields);
-    db.prepare(`UPDATE deployments SET ${sets} WHERE id = ?`).run(...values, deploymentId);
-  }
-
+  /**
+   * One call sends a line three places: the optional in-process callback, the
+   * on-disk log, and every browser watching this project. Publishing here is
+   * what makes a deploy visible while it happens rather than only afterwards.
+   */
   function appendLog(line: string) {
-    log(line);
-    db.prepare("UPDATE deployments SET build_log = build_log || ? WHERE id = ?")
-      .run(line + "\n", deploymentId);
+    externalLog?.(line);
+    logFile.append(line);
+    projectEvents.emit(project.id, { type: "deploy:log", deploymentId, line });
   }
 
-  function nowTimestamp() {
-    return new Date().toISOString().replace("T", " ").replace("Z", "").split(".")[0];
-  }
+  const label = mode === "rebuild" ? "Re-Build" : "Deploy";
 
   try {
-    updateDeployment({ status: "building" });
-    appendLog(`=== ${mode === "rebuild" ? "Re-Build" : "Deploy"} started ===`);
+    await updateDeployment({ status: "building" });
+    appendLog(`=== ${label} started ===`);
 
     // REBUILD only: stop + clean first
     if (mode === "rebuild") {
@@ -78,8 +116,7 @@ export async function executeDeploy(
 
       appendLog("\n--- Cleaning build artifacts ---");
       const cleanDir = getRepoPath(project.slug);
-      const dirsToClean = [".next", "node_modules", "dist", "build", ".turbo", "venv", "__pycache__"];
-      for (const dir of dirsToClean) {
+      for (const dir of REBUILD_CLEAN_DIRS[project.runtime_type] ?? []) {
         const fullPath = path.join(cleanDir, dir);
         if (fs.existsSync(fullPath)) {
           fs.rmSync(fullPath, { recursive: true, force: true });
@@ -96,22 +133,31 @@ export async function executeDeploy(
       if (repoExists(project.slug)) {
         appendLog(`Pulling latest from ${project.source_branch}...`);
         const commit = await gitPull(project.slug, project.source_branch);
-        updateDeployment({ commit_sha: commit.sha, commit_message: commit.message });
+        await updateDeployment({ commit_sha: commit.sha, commit_message: commit.message });
         appendLog(`Commit: ${commit.sha.slice(0, 7)} - ${commit.message}`);
       } else {
         appendLog(`Cloning ${project.source_url}...`);
         await gitClone(project.source_url, project.source_branch, project.slug);
-        const { default: commitInfo } = await import("./git-manager").then(m => ({ default: m.getLatestCommit }));
-        const commit = await commitInfo(project.slug);
-        updateDeployment({ commit_sha: commit.sha, commit_message: commit.message });
+        const commit = await getLatestCommit(project.slug);
+        await updateDeployment({ commit_sha: commit.sha, commit_message: commit.message });
         appendLog(`Cloned at: ${commit.sha.slice(0, 7)} - ${commit.message}`);
       }
     }
 
+    // A repository can declare its own deploy contract. Panel settings win —
+    // the operator can see the target machine, the repository cannot.
+    const repoContract = readRepoContract(projectDir);
+    if (repoContract) {
+      contract = resolveContractJson(project.builder_config, repoContract);
+      appendLog(`Found ${RUNPANEL_CONFIG_FILE} in the repository — merged under the panel settings.`);
+    }
+
     // Load env vars
-    const envRows = db.prepare(
-      "SELECT key, value FROM env_vars WHERE project_id = ?"
-    ).all(project.id) as { key: string; value: string }[];
+    const envRows = await db
+      .selectFrom("env_vars")
+      .select(["key", "value"])
+      .where("project_id", "=", project.id)
+      .execute();
 
     appendLog(`Loaded ${envRows.length} env var(s)`);
 
@@ -120,7 +166,7 @@ export async function executeDeploy(
       envVars[row.key] = decrypt(row.value);
     }
 
-    const port = project.port || (project.runtime_type === "docker" ? 0 : 3000);
+    const port = project.port ?? (project.runtime_type === "docker" ? 0 : 3000);
     if (port > 0) {
       envVars.PORT = port.toString();
     }
@@ -129,46 +175,96 @@ export async function executeDeploy(
     }
 
     // Auto-inject service connection URLs (DB, Redis, etc.)
-    const linkedServices = db.prepare(
-      "SELECT name, type, port, credentials, config FROM services WHERE project_id = ?"
-    ).all(project.id) as { name: string; type: string; port: number; credentials: string; config: string }[];
+    const linkedServices = await db
+      .selectFrom("services")
+      .select(["name", "type", "port", "credentials", "config"])
+      .where("project_id", "=", project.id)
+      .execute();
 
     const isDockerApp = project.runtime_type === "docker";
     for (const svc of linkedServices) {
-      let cn: string;
-      try { const cfg = JSON.parse(svc.config || "{}"); cn = cfg.containerName; } catch { cn = ""; }
-      if (!cn) cn = serviceContainerName(svc.name);
-      const host = isDockerApp ? cn : "localhost";
-      let creds: { user?: string; password?: string; database?: string; connectionString?: string } = {};
-      try { creds = JSON.parse(decrypt(svc.credentials)); } catch {}
+      let containerName = "";
+      try {
+        containerName =
+          (JSON.parse(svc.config || "{}") as { containerName?: string }).containerName ?? "";
+      } catch { /* fall through to the derived name */ }
+      if (!containerName) containerName = serviceContainerName(svc.name);
 
-      const envKey = svc.type === "redis" ? "REDIS_URL" : svc.type === "mongodb" ? "MONGODB_URL" : "DATABASE_URL";
+      // A containerised app reaches the service by container name over the
+      // shared project network; a native process reaches it on localhost.
+      const host = isDockerApp ? containerName : "localhost";
+      let creds: { user?: string; password?: string; database?: string } = {};
+      try {
+        creds = JSON.parse(decrypt(svc.credentials));
+      } catch { /* credentials unreadable — fall back to an empty URL */ }
 
-      // Don't overwrite if user already set it
+      const envKey = connectionEnvKey(svc.type);
+
+      // Don't overwrite if the user already set it
       if (!envVars[envKey]) {
-        if (svc.type === "redis") {
-          envVars[envKey] = `redis://${creds.password ? `:${creds.password}@` : ""}${host}:${svc.port}/0`;
-        } else if (svc.type === "mongodb") {
-          envVars[envKey] = `mongodb://${creds.user || ""}:${creds.password || ""}@${host}:${svc.port}/${creds.database || ""}`;
-        } else {
-          envVars[envKey] = `${svc.type === "mysql" ? "mysql" : "postgresql"}://${creds.user || ""}:${creds.password || ""}@${host}:${svc.port}/${creds.database || ""}`;
-        }
+        envVars[envKey] = buildConnectionString(svc.type, {
+          host,
+          port: svc.port,
+          user: creds.user,
+          password: creds.password,
+          database: creds.database,
+        });
         appendLog(`Auto-linked ${svc.type} service "${svc.name}" → ${envKey}`);
       }
     }
 
-    // Build (install + compile) — process stays running during this phase
+    // Fail fast on anything knowable before a build that may run for minutes.
+    const issues = preflight(contract, { runtimeType: project.runtime_type, envVars });
+    if (issues.length > 0) {
+      appendLog("\n--- Preflight ---");
+      for (const issue of issues) appendLog(`[warn] ${issue.field}: ${issue.message}`);
+    }
+
+    // Values a frontend build inlines into its client bundle have to exist at
+    // BUILD time. Supplying them only at runtime either ships the wrong value
+    // or fails a Dockerfile that asserts on them.
+    const buildEnv = selectBuildEnv(contract, envVars);
+    if (Object.keys(buildEnv).length > 0) {
+      appendLog(`Build-time variables: ${Object.keys(buildEnv).sort().join(", ")}`);
+    }
+
+    // Materialise a .env file when the app reads one itself.
+    if (contract.envFile.enabled) {
+      if (isDockerApp) {
+        const hostPath = writeEnvFile(project.slug, envVars);
+        appendLog(`Wrote env file for mounting at ${contract.envFile.path}`);
+        contract.docker.mounts = [
+          ...contract.docker.mounts,
+          `${hostPath}:${contract.envFile.path}:ro`,
+        ];
+      } else {
+        const written = writeEnvFileInto(projectDir, contract.envFile.path, envVars);
+        appendLog(`Wrote env file to ${path.relative(projectDir, written)}`);
+      }
+    }
+
+    // Build (install + compile) — the old process stays up during this phase
     appendLog("\n--- Building ---");
 
     const buildResult = await buildProject(projectDir, project.runtime_type, {
-      buildCmd: builderConfig.buildCmd,
-      startCmd: builderConfig.startCmd,
-      installCmd: builderConfig.installCmd,
-      packageManager: builderConfig.packageManager as BuildContext["packageManager"],
-      dockerImage: builderConfig.dockerImage as string | undefined,
-      dockerTemplate: builderConfig.dockerTemplate as string | undefined,
-      dockerFields: builderConfig.dockerFields as Record<string, string> | undefined,
-      envVars,
+      slug: project.slug,
+      deploymentId,
+      buildCmd: contract.commands.build,
+      startCmd: contract.commands.start,
+      installCmd: contract.commands.install,
+      packageManager: contract.packageManager,
+      dockerImage: contract.docker.image,
+      dockerfile: contract.docker.dockerfile,
+      buildContext: contract.docker.context,
+      target: contract.docker.target,
+      buildArgs: buildEnv,
+      buildTimeout: contract.build.timeoutSec * 1000,
+      // Build-time env for native runtimes, plus any Node heap override.
+      envVars: {
+        ...envVars,
+        ...buildEnv,
+        ...(contract.build.nodeOptions ? { NODE_OPTIONS: contract.build.nodeOptions } : {}),
+      },
       onLog: appendLog,
     });
 
@@ -176,12 +272,28 @@ export async function executeDeploy(
       throw new Error(buildResult.error || "Build failed");
     }
 
-    updateDeployment({
+    // Release command: one-shot work that must happen after the build and
+    // before the app serves traffic — migrations, schema push, cache warm.
+    if (contract.commands.release) {
+      appendLog("\n--- Release ---");
+      await runReleaseCommand(contract.commands.release, {
+        runtimeType: project.runtime_type,
+        slug: project.slug,
+        projectDir: buildResult.artifactDir,
+        image: buildResult.startCmd.replace(/^docker:/, ""),
+        env: envVars,
+        contract,
+        onLog: appendLog,
+      });
+      appendLog("Release command completed.");
+    }
+
+    await updateDeployment({
       start_cmd: buildResult.startCmd,
       artifact_dir: buildResult.artifactDir,
     });
 
-    // Stop old process AFTER build succeeded (deploy keeps it alive during build)
+    // Stop the old process only after the build succeeded
     if (wasRunning && mode === "deploy") {
       appendLog("\n--- Stopping previous instance ---");
       try {
@@ -198,94 +310,102 @@ export async function executeDeploy(
       cwd: buildResult.artifactDir,
       env: envVars,
       port,
+      deploymentId,
+      onLog: appendLog,
+      restartPolicy: contract.runtime.restartPolicy,
+      network: contract.docker.network,
+      hostname: contract.docker.hostname,
+      capAdd: contract.docker.capAdd,
+      extraHosts: contract.docker.extraHosts,
+      mounts: contract.docker.mounts,
+      memory: contract.runtime.memory,
+      cpus: contract.runtime.cpus,
+      shmSize: contract.runtime.shmSize,
+    });
+
+    appendLog("\n--- Health check ---");
+    const health = await waitForHealthy({
+      slug: project.slug,
+      runtimeType: project.runtime_type,
+      port,
+      contract,
       onLog: appendLog,
     });
 
-    // Health check (wait up to 15s for process + port binding)
-    appendLog("Waiting for process to start...");
-    let healthy = false;
-    for (let i = 0; i < 15; i++) {
-      await new Promise((r) => setTimeout(r, 1000));
-      const info = await processManager.status(project.slug, project.runtime_type);
-      if (!info.running) {
-        if (i % 3 === 2) appendLog(`Process not yet running (attempt ${i + 1}/15)...`);
-        continue;
-      }
-
-      // Docker without explicit port — just check container is running
-      if (port === 0) {
-        healthy = true;
-        appendLog(`Container running (${info.containerId || "N/A"}).`);
-        break;
-      }
-
+    if (!health.healthy) {
+      const driverName = project.runtime_type === "docker" ? "Docker" : "PM2";
+      appendLog(`\n--- ${driverName} process logs ---`);
       try {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 2000);
-        await fetch(`http://127.0.0.1:${port}`, { signal: controller.signal });
-        clearTimeout(timeout);
-        healthy = true;
-        appendLog(`Process running (PID: ${info.pid || "N/A"}) — port ${port} responding.`);
-        break;
-      } catch {
-        if (i >= 5) {
-          const recheck = await processManager.status(project.slug, project.runtime_type);
-          if (!recheck.running) {
-            appendLog("Process exited before port became available.");
-            break;
-          }
-        }
-        appendLog(`Port ${port} not yet responding (attempt ${i + 1}/15)...`);
-      }
-    }
-
-    if (!healthy) {
-      appendLog("\n--- PM2 process logs ---");
-      try {
-        const pm2Logs = await processManager.logs(project.slug, project.runtime_type, 30);
-        if (pm2Logs.length > 0) {
-          for (const line of pm2Logs) appendLog(line);
+        const recentLogs = await processManager.logs(project.slug, project.runtime_type, 40);
+        if (recentLogs.length > 0) {
+          for (const line of recentLogs) appendLog(line);
         } else {
-          appendLog("(no PM2 logs available)");
+          appendLog(`(no ${driverName} logs available)`);
         }
       } catch {
-        appendLog("(failed to retrieve PM2 logs)");
+        appendLog(`(failed to retrieve ${driverName} logs)`);
       }
-      throw new Error(`Process failed to start or port ${port} not responding within 15 seconds`);
+      throw new Error(
+        `Health check failed after ${contract.healthcheck.timeoutSec}s: ${health.reason}`
+      );
     }
 
     // Finalize
-    appendLog(`\n=== ${mode === "rebuild" ? "Re-Build" : "Deploy"} successful ===`);
-    updateDeployment({ status: "running", finished_at: nowTimestamp() });
+    appendLog(`\n=== ${label} successful ===`);
+    logFile.flush();
 
-    db.prepare(`
-      UPDATE deployments SET status = 'superseded'
-      WHERE project_id = ? AND id != ? AND status = 'running'
-    `).run(project.id, deploymentId);
+    await updateDeployment({ status: "running", finished_at: nowIso() });
 
-    db.prepare("UPDATE projects SET status = 'running', port = ?, updated_at = datetime('now') WHERE id = ?")
-      .run(port, project.id);
+    await db
+      .updateTable("deployments")
+      .set({ status: "superseded" })
+      .where("project_id", "=", project.id)
+      .where("id", "!=", deploymentId)
+      .where("status", "=", "running")
+      .execute();
 
+    await db
+      .updateTable("projects")
+      .set({ status: "running", port, updated_at: nowIso() })
+      .where("id", "=", project.id)
+      .execute();
+
+    // Retire images this project no longer needs. Scoped to the project and run
+    // after success, so a failed deploy never destroys the image that is still
+    // serving traffic. Orphans are left alone — those need a human decision.
+    if (project.runtime_type === "docker") {
+      try {
+        const result = await sweep({ project: project.slug });
+        if (result.prunedImageTags.length > 0) {
+          console.log(
+            `[deploy] Retired ${result.prunedImageTags.length} old image(s) for ${project.slug}`
+          );
+        }
+      } catch (err) {
+        console.error("[deploy] Image cleanup failed:", err);
+      }
+    }
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Deploy failed";
     const stack = err instanceof Error ? err.stack : undefined;
-    appendLog(`\n=== ${mode === "rebuild" ? "Re-Build" : "Deploy"} FAILED: ${message} ===`);
+    appendLog(`\n=== ${label} FAILED: ${message} ===`);
     if (stack) appendLog(`Stack: ${stack}`);
+    logFile.flush();
 
-    updateDeployment({
+    await updateDeployment({
       status: "failed",
       error_message: message,
-      finished_at: nowTimestamp(),
+      finished_at: nowIso(),
     });
 
-    // If the project was running and we stopped it during the process, mark as error
-    // If it was stopped/error before, keep that status
-    if (wasRunning) {
-      db.prepare("UPDATE projects SET status = 'error', updated_at = datetime('now') WHERE id = ?")
-        .run(project.id);
-    } else {
-      db.prepare("UPDATE projects SET status = 'stopped', updated_at = datetime('now') WHERE id = ?")
-        .run(project.id);
-    }
+    // If it had been running and we took it down, that is an error state.
+    // If it was already stopped, leave it stopped.
+    await db
+      .updateTable("projects")
+      .set({ status: wasRunning ? "error" : "stopped", updated_at: nowIso() })
+      .where("id", "=", project.id)
+      .execute();
+  } finally {
+    logFile.flush();
   }
 }

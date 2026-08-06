@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth-guard";
-import { getDb } from "@/lib/db";
+import { getDb, nowIso } from "@/lib/db";
 import { generateId } from "@/lib/utils";
 import { createServiceSchema } from "@/lib/validation";
 import { encrypt } from "@/lib/auth";
@@ -15,8 +15,12 @@ export async function GET() {
   const denied = await requireAuth();
   if (denied) return denied;
 
-  const db = getDb();
-  const services = db.prepare("SELECT * FROM services ORDER BY created_at DESC").all();
+  const db = await getDb();
+  const services = await db
+    .selectFrom("services")
+    .selectAll()
+    .orderBy("created_at", "desc")
+    .execute();
   return NextResponse.json(services);
 }
 
@@ -28,7 +32,7 @@ export async function POST(request: NextRequest) {
   const parsed = createServiceSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json(
-      { error: "Validation failed", details: parsed.error.flatten() },
+      { error: "Validation failed", details: parsed.error.issues },
       { status: 400 }
     );
   }
@@ -42,37 +46,50 @@ export async function POST(request: NextRequest) {
     database: customCreds?.database || defaultCreds.database,
   };
 
-  const db = getDb();
+  const db = await getDb();
 
   try {
     // Get project slug for network linking
     let projectSlug: string | undefined;
     if (projectId) {
-      const proj = db.prepare("SELECT slug FROM projects WHERE id = ?").get(projectId) as { slug: string } | undefined;
+      const proj = await db
+        .selectFrom("projects")
+        .select("slug")
+        .where("id", "=", projectId)
+        .executeTakeFirst();
       projectSlug = proj?.slug;
     }
 
-    const config = { name, type: type as "postgresql" | "mysql" | "redis" | "mongodb", version, port, credentials, projectSlug };
+    const config = { name, type, version, port, credentials, projectSlug };
     const containerId = await provisionService(config, projectSlug);
     const connString = getConnectionString(config);
     const containerName = serviceContainerName(name, projectSlug);
+    const now = nowIso();
 
-    db.prepare(`
-      INSERT INTO services (id, name, type, version, status, container_id, port, credentials, config, project_id)
-      VALUES (?, ?, ?, ?, 'running', ?, ?, ?, ?, ?)
-    `).run(
-      id,
-      name,
-      type,
-      version,
-      containerId,
-      port,
-      encrypt(JSON.stringify({ ...credentials, connectionString: connString })),
-      JSON.stringify({ containerName }),
-      projectId || null
-    );
+    await db
+      .insertInto("services")
+      .values({
+        id,
+        name,
+        type,
+        version,
+        status: "running",
+        container_id: containerId,
+        port,
+        credentials: encrypt(JSON.stringify({ ...credentials, connectionString: connString })),
+        config: JSON.stringify({ containerName }),
+        project_id: projectId || null,
+        created_at: now,
+        updated_at: now,
+      })
+      .execute();
 
-    const service = db.prepare("SELECT * FROM services WHERE id = ?").get(id);
+    const service = await db
+      .selectFrom("services")
+      .selectAll()
+      .where("id", "=", id)
+      .executeTakeFirst();
+
     return NextResponse.json(service, { status: 201 });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Provisioning failed";

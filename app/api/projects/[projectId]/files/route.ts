@@ -29,9 +29,12 @@ export async function GET(request: NextRequest, { params }: Params) {
     return NextResponse.json({ error: "Invalid path" }, { status: 400 });
   }
 
-  const db = getDb();
-  const project = db.prepare("SELECT slug, runtime_type, status FROM projects WHERE id = ?")
-    .get(projectId) as { slug: string; runtime_type: string; status: string } | undefined;
+  const db = await getDb();
+  const project = await db
+    .selectFrom("projects")
+    .select(["slug", "runtime_type", "status"])
+    .where("id", "=", projectId)
+    .executeTakeFirst();
 
   if (!project) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });

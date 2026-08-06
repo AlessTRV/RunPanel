@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth-guard";
-import { getDb } from "@/lib/db";
+import { getDb, nowIso } from "@/lib/db";
 import { encrypt, decrypt } from "@/lib/auth";
+import { generateId } from "@/lib/utils";
 import { envVarsSchema } from "@/lib/validation";
 
 type Params = { params: Promise<{ projectId: string }> };
@@ -13,15 +14,23 @@ export async function GET(request: NextRequest, { params }: Params) {
   const { projectId } = await params;
   const reveal = request.nextUrl.searchParams.get("reveal") === "true";
 
-  const db = getDb();
-  const project = db.prepare("SELECT id FROM projects WHERE id = ?").get(projectId);
+  const db = await getDb();
+  const project = await db
+    .selectFrom("projects")
+    .select("id")
+    .where("id", "=", projectId)
+    .executeTakeFirst();
+
   if (!project) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
 
-  const rows = db.prepare(
-    "SELECT id, key, value FROM env_vars WHERE project_id = ? ORDER BY key"
-  ).all(projectId) as { id: number; key: string; value: string }[];
+  const rows = await db
+    .selectFrom("env_vars")
+    .select(["id", "key", "value"])
+    .where("project_id", "=", projectId)
+    .orderBy("key")
+    .execute();
 
   const vars = rows.map((row) => ({
     id: row.id,
@@ -41,26 +50,37 @@ export async function PUT(request: NextRequest, { params }: Params) {
   const parsed = envVarsSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json(
-      { error: "Validation failed", details: parsed.error.flatten() },
+      { error: "Validation failed", details: parsed.error.issues },
       { status: 400 }
     );
   }
 
-  const db = getDb();
-  const project = db.prepare("SELECT id FROM projects WHERE id = ?").get(projectId);
+  const db = await getDb();
+  const project = await db
+    .selectFrom("projects")
+    .select("id")
+    .where("id", "=", projectId)
+    .executeTakeFirst();
+
   if (!project) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
 
-  db.transaction(() => {
-    db.prepare("DELETE FROM env_vars WHERE project_id = ?").run(projectId);
-    const insert = db.prepare(
-      "INSERT INTO env_vars (project_id, key, value) VALUES (?, ?, ?)"
-    );
-    for (const v of parsed.data.vars) {
-      insert.run(projectId, v.key, encrypt(v.value));
-    }
-  })();
+  const now = nowIso();
+  const rows = parsed.data.vars.map((v) => ({
+    id: generateId(),
+    project_id: projectId,
+    key: v.key,
+    value: encrypt(v.value),
+    created_at: now,
+  }));
 
-  return NextResponse.json({ success: true, count: parsed.data.vars.length });
+  await db.transaction().execute(async (trx) => {
+    await trx.deleteFrom("env_vars").where("project_id", "=", projectId).execute();
+    if (rows.length > 0) {
+      await trx.insertInto("env_vars").values(rows).execute();
+    }
+  });
+
+  return NextResponse.json({ success: true, count: rows.length });
 }

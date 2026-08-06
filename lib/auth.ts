@@ -1,11 +1,18 @@
 import crypto from "crypto";
 import bcrypt from "bcryptjs";
 import { cookies } from "next/headers";
-import { getDb } from "./db";
 import { getSecret } from "./config";
+import { getSetting, setSetting } from "./settings";
+import { getDb, rowCount } from "./db";
+import { generateId } from "./utils";
 
 const SESSION_COOKIE = "runpanel_session";
 const SESSION_MAX_AGE = 60 * 60 * 24 * 7; // 7 days
+
+/** Only the hash is stored, so a database copy cannot be replayed as a cookie. */
+function hashToken(token: string): string {
+  return crypto.createHash("sha256").update(token).digest("hex");
+}
 
 // --- Password ---
 
@@ -23,17 +30,34 @@ function generateToken(): string {
   return crypto.randomBytes(32).toString("hex");
 }
 
-export async function createSession(): Promise<string> {
-  const db = getDb();
+/**
+ * Sessions are rows, not a singleton.
+ *
+ * The panel previously kept one `session_token` in the settings table, so
+ * signing in anywhere signed you out everywhere else, and there was no way to
+ * revoke one device without revoking all of them.
+ */
+export async function createSession(meta: { userAgent?: string; ip?: string } = {}): Promise<string> {
   const token = generateToken();
-  const expiresAt = new Date(Date.now() + SESSION_MAX_AGE * 1000).toISOString();
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + SESSION_MAX_AGE * 1000).toISOString();
 
-  db.prepare(
-    "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)"
-  ).run("session_token", token);
-  db.prepare(
-    "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)"
-  ).run("session_expires", expiresAt);
+  const db = await getDb();
+  await db
+    .insertInto("sessions")
+    .values({
+      id: generateId(),
+      token_hash: hashToken(token),
+      user_agent: meta.userAgent?.slice(0, 255) ?? null,
+      ip: meta.ip?.slice(0, 64) ?? null,
+      created_at: now.toISOString(),
+      last_seen_at: now.toISOString(),
+      expires_at: expiresAt,
+    })
+    .execute();
+
+  // Opportunistic tidy-up: expired rows have no other reaper.
+  await db.deleteFrom("sessions").where("expires_at", "<", now.toISOString()).execute();
 
   const cookieStore = await cookies();
   cookieStore.set(SESSION_COOKIE, token, {
@@ -53,18 +77,30 @@ export async function getSession(): Promise<boolean> {
     const token = cookieStore.get(SESSION_COOKIE)?.value;
     if (!token) return false;
 
-    const db = getDb();
-    const stored = db.prepare(
-      "SELECT value FROM settings WHERE key = 'session_token'"
-    ).get() as { value: string } | undefined;
+    // Looked up by hash, so the comparison happens inside an indexed equality
+    // check rather than against a secret held in application memory.
+    const db = await getDb();
+    const session = await db
+      .selectFrom("sessions")
+      .select(["id", "expires_at", "last_seen_at"])
+      .where("token_hash", "=", hashToken(token))
+      .executeTakeFirst();
 
-    if (!stored || stored.value !== token) return false;
+    if (!session) return false;
 
-    const expires = db.prepare(
-      "SELECT value FROM settings WHERE key = 'session_expires'"
-    ).get() as { value: string } | undefined;
+    if (new Date(session.expires_at) < new Date()) {
+      await db.deleteFrom("sessions").where("id", "=", session.id).execute();
+      return false;
+    }
 
-    if (!expires || new Date(expires.value) < new Date()) return false;
+    // Throttled: without this every request would write a row.
+    if (Date.now() - new Date(session.last_seen_at).getTime() > 60_000) {
+      await db
+        .updateTable("sessions")
+        .set({ last_seen_at: new Date().toISOString() })
+        .where("id", "=", session.id)
+        .execute();
+    }
 
     return true;
   } catch {
@@ -73,36 +109,49 @@ export async function getSession(): Promise<boolean> {
 }
 
 export async function destroySession(): Promise<void> {
-  const db = getDb();
-  db.prepare("DELETE FROM settings WHERE key IN ('session_token', 'session_expires')").run();
-
   const cookieStore = await cookies();
+  const token = cookieStore.get(SESSION_COOKIE)?.value;
+
+  if (token) {
+    const db = await getDb();
+    await db.deleteFrom("sessions").where("token_hash", "=", hashToken(token)).execute();
+  }
+
   cookieStore.delete(SESSION_COOKIE);
+}
+
+/** Sign out every device. Used after a password change. */
+export async function destroyAllSessions(): Promise<number> {
+  const db = await getDb();
+  const result = await db.deleteFrom("sessions").executeTakeFirst();
+  return rowCount(result);
+}
+
+export async function listSessions() {
+  const db = await getDb();
+  return db
+    .selectFrom("sessions")
+    .select(["id", "user_agent", "ip", "created_at", "last_seen_at", "expires_at"])
+    .orderBy("last_seen_at", "desc")
+    .execute();
 }
 
 // --- Admin password ---
 
-export function getAdminPasswordHash(): string | null {
-  const db = getDb();
-  const row = db.prepare(
-    "SELECT value FROM settings WHERE key = 'admin_password_hash'"
-  ).get() as { value: string } | undefined;
-  return row?.value ?? null;
+export async function getAdminPasswordHash(): Promise<string | null> {
+  return getSetting("admin_password_hash");
 }
 
 export async function setAdminPassword(password: string): Promise<void> {
-  const db = getDb();
   const hash = await hashPassword(password);
-  db.prepare(
-    "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)"
-  ).run("admin_password_hash", hash);
+  await setSetting("admin_password_hash", hash);
 }
 
-export function isFirstRun(): boolean {
-  return getAdminPasswordHash() === null;
+export async function isFirstRun(): Promise<boolean> {
+  return (await getAdminPasswordHash()) === null;
 }
 
-// --- Encryption (for env vars) ---
+// --- Encryption (for env vars and service credentials) ---
 
 const ALGORITHM = "aes-256-gcm";
 const IV_LENGTH = 12;
@@ -125,5 +174,7 @@ export function decrypt(encoded: string): string {
   const encrypted = data.subarray(IV_LENGTH + TAG_LENGTH);
   const decipher = crypto.createDecipheriv(ALGORITHM, key, iv);
   decipher.setAuthTag(tag);
-  return decipher.update(encrypted) + decipher.final("utf8");
+  // Concat as bytes, decode once: decoding each chunk separately corrupts any
+  // multi-byte character that straddles the update/final boundary.
+  return Buffer.concat([decipher.update(encrypted), decipher.final()]).toString("utf8");
 }

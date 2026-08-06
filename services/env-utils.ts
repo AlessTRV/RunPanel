@@ -1,14 +1,22 @@
 import path from "path";
 import os from "os";
+import { sanitizedProcessEnv } from "@/lib/env";
 
 /**
- * Merge project env vars into process.env without clobbering PATH.
+ * Build the environment for a child process: a user's build command, or an app
+ * started under PM2.
+ *
+ * The base is `process.env` with RunPanel's own configuration stripped out —
+ * see `PRIVATE_ENV_KEYS`. Without that, every build script a user deploys would
+ * inherit `RUNPANEL_SECRET`, the key that every stored env var in the panel is
+ * encrypted with.
+ *
  * On Windows, env var keys are case-insensitive at OS level but JS objects
  * are case-sensitive — process.env may have "Path" while user vars have "PATH".
  * We preserve the system PATH and append any user-supplied PATH to it.
  */
 export function buildEnv(extra?: Record<string, string>): NodeJS.ProcessEnv {
-  const merged: NodeJS.ProcessEnv = { ...process.env };
+  const merged: NodeJS.ProcessEnv = sanitizedProcessEnv();
   if (!extra) return merged;
 
   // Grab the system PATH value (could be "Path", "PATH", or "path" on Windows)
