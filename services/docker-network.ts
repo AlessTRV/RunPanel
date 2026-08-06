@@ -1,40 +1,30 @@
-import { execFile } from "child_process";
-import { promisify } from "util";
+import { docker, dockerTry } from "./docker/cli";
+import { labelArgs, networkName } from "./docker/labels";
 
-const exec = promisify(execFile);
-
-const networkName = (projectSlug: string) => `runpanel-net-${projectSlug}`;
+export { networkName as getNetworkName };
 
 export async function ensureProjectNetwork(projectSlug: string): Promise<string> {
   const name = networkName(projectSlug);
-  try {
-    // Check if network exists
-    await exec("docker", ["network", "inspect", name], { timeout: 10_000 });
-  } catch {
-    // Create it
-    await exec("docker", ["network", "create", name], { timeout: 10_000 });
+
+  const existing = await dockerTry(["network", "inspect", name], { timeout: 10_000 });
+  if (!existing) {
+    // Labelled like everything else, so the garbage collector can recognise a
+    // network left behind by a deleted project.
+    await docker(["network", "create", ...labelArgs({ project: projectSlug, kind: "network" }), name], {
+      timeout: 15_000,
+    });
   }
+
   return name;
 }
 
 export async function connectToNetwork(containerName: string, projectSlug: string): Promise<void> {
-  const name = networkName(projectSlug);
-  try {
-    await exec("docker", ["network", "connect", name, containerName], { timeout: 10_000 });
-  } catch {
-    // Already connected or network doesn't exist — ignore
-  }
+  // Already-connected is a normal outcome, not an error worth surfacing.
+  await dockerTry(["network", "connect", networkName(projectSlug), containerName], {
+    timeout: 10_000,
+  });
 }
 
 export async function removeProjectNetwork(projectSlug: string): Promise<void> {
-  const name = networkName(projectSlug);
-  try {
-    await exec("docker", ["network", "rm", name], { timeout: 10_000 });
-  } catch {
-    // Network doesn't exist or has containers — ignore
-  }
-}
-
-export function getNetworkName(projectSlug: string): string {
-  return networkName(projectSlug);
+  await dockerTry(["network", "rm", networkName(projectSlug)], { timeout: 15_000 });
 }

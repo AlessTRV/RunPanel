@@ -16,6 +16,11 @@ export const processManager = {
     return getDriver(runtimeType).stop(slug);
   },
 
+  /** Stop AND tear down. Use on delete, never on a plain stop. */
+  remove(slug: string, runtimeType: string): Promise<void> {
+    return getDriver(runtimeType).remove(slug);
+  },
+
   restart(slug: string, runtimeType: string): Promise<void> {
     return getDriver(runtimeType).restart(slug);
   },
