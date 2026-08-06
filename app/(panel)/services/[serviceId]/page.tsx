@@ -87,15 +87,15 @@ export default function ServiceDetailPage() {
     <div>
       <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-4">
-          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10">
-            <Icon icon="solar:database-bold-duotone" className="text-primary" width={28} />
+          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-accent/10">
+            <Icon icon="solar:database-bold-duotone" className="text-accent" width={28} />
           </div>
           <div>
             <div className="flex items-center gap-3">
               <h1 className="text-2xl font-bold">{service.name}</h1>
               <StatusBadge status={service.status} />
             </div>
-            <p className="text-sm text-foreground-400">
+            <p className="text-sm text-muted">
               {service.type} v{service.version} · Port {service.port}
             </p>
           </div>
@@ -128,8 +128,8 @@ export default function ServiceDetailPage() {
             {showCreds && creds ? (
               <div className="space-y-2 font-mono text-sm">
                 {Object.entries(creds).map(([key, value]) => (
-                  <div key={key} className="flex justify-between rounded-lg border border-white/[0.07] bg-black/40 backdrop-blur-xl px-3 py-2">
-                    <span className="text-foreground-400">{key}:</span>
+                  <div key={key} className="flex justify-between rounded-lg border border-border bg-background px-3 py-2">
+                    <span className="text-muted">{key}:</span>
                     <span className="text-foreground">{value}</span>
                   </div>
                 ))}

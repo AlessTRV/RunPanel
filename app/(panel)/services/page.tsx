@@ -1,11 +1,16 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Button, Card, CardContent, CardHeader, CardTitle, CardDescription, Input, Spinner } from "@heroui/react";
-import { Icon } from "@iconify/react";
+import { memo, useMemo, useState } from "react";
 import Link from "next/link";
-import { StatusBadge } from "@/components/StatusBadge";
+import { Button, Input } from "@heroui/react";
+import { Icon } from "@iconify/react";
 import { toast } from "sonner";
+import { useResource } from "@/lib/hooks/useResource";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { Panel } from "@/components/ui/Panel";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { PageSkeleton } from "@/components/ui/Skeletons";
+import { StatusBadge } from "@/components/StatusBadge";
 
 interface Service {
   id: string;
@@ -16,31 +21,74 @@ interface Service {
   port: number;
 }
 
-const typeIcons: Record<string, string> = {
-  postgresql: "solar:database-bold-duotone",
-  mysql: "solar:database-bold-duotone",
-  redis: "solar:bolt-bold-duotone",
-  mongodb: "solar:database-bold-duotone",
+const TYPE_ICONS: Record<string, string> = {
+  postgresql: "solar:database-linear",
+  mysql: "solar:database-linear",
+  mongodb: "solar:database-linear",
+  redis: "solar:bolt-linear",
 };
 
-export default function ServicesPage() {
-  const [services, setServices] = useState<Service[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState("");
+const ServiceRow = memo(function ServiceRow({
+  service,
+  onControl,
+}: {
+  service: Service;
+  onControl: (id: string, action: "start" | "stop" | "restart") => void;
+}) {
+  const running = service.status === "running";
 
-  useEffect(() => {
-    const controller = new AbortController();
-    async function loadServices() {
-      try {
-        const res = await fetch("/api/services", { signal: controller.signal });
-        if (res.ok) setServices(await res.json());
-      } catch (e) { if (e instanceof Error && e.name === "AbortError") return; }
-      finally { setLoading(false); }
-    }
-    loadServices();
-    const interval = setInterval(loadServices, 5000);
-    return () => { controller.abort(); clearInterval(interval); };
-  }, []);
+  return (
+    <Panel interactive padding="compact" className="flex items-center gap-3">
+      <Icon
+        icon={TYPE_ICONS[service.type] ?? "solar:database-linear"}
+        width={20}
+        className="text-muted shrink-0"
+        aria-hidden
+      />
+
+      <Link href={`/services/${service.id}`} className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <span className="text-foreground truncate text-sm font-medium">{service.name}</span>
+          <StatusBadge status={service.status} />
+        </div>
+        <p className="text-muted mt-0.5 truncate font-mono text-xs">
+          {service.type} {service.version} · :{service.port}
+        </p>
+      </Link>
+
+      <div className="flex shrink-0 gap-1.5">
+        {running ? (
+          <>
+            <Button variant="ghost" size="sm" isIconOnly aria-label="Riavvia" onPress={() => onControl(service.id, "restart")}>
+              <Icon icon="solar:refresh-linear" width={16} />
+            </Button>
+            <Button variant="ghost" size="sm" isIconOnly aria-label="Ferma" onPress={() => onControl(service.id, "stop")}>
+              <Icon icon="solar:stop-linear" width={16} className="text-danger" />
+            </Button>
+          </>
+        ) : (
+          <Button variant="ghost" size="sm" isIconOnly aria-label="Avvia" onPress={() => onControl(service.id, "start")}>
+            <Icon icon="solar:play-linear" width={16} className="text-success" />
+          </Button>
+        )}
+      </div>
+    </Panel>
+  );
+});
+
+export default function ServicesPage() {
+  const [search, setSearch] = useState("");
+  const { data, loading, refresh } = useResource<Service[]>("/api/services", { intervalMs: 5000 });
+
+  const services = useMemo(() => (Array.isArray(data) ? data : []), [data]);
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return services;
+    return services.filter(
+      (s) => s.name.toLowerCase().includes(q) || s.type.toLowerCase().includes(q)
+    );
+  }, [services, search]);
 
   async function handleControl(serviceId: string, action: "start" | "stop" | "restart") {
     try {
@@ -49,95 +97,66 @@ export default function ServicesPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action }),
       });
-      if (res.ok) {
-        toast.success(`Service ${action}ed`);
-        // Refresh
-        const updated = await fetch("/api/services").then((r) => r.json());
-        setServices(updated);
+      if (!res.ok) {
+        const body = await res.json();
+        toast.error(body.error ?? `Azione "${action}" fallita`);
+        return;
       }
+      toast.success(`Azione "${action}" eseguita`);
+      refresh();
     } catch {
-      toast.error(`Failed to ${action}`);
+      toast.error(`Azione "${action}" fallita`);
     }
   }
 
-  if (loading) {
-    return <div className="flex justify-center py-20"><Spinner /></div>;
-  }
+  if (loading && !data) return <PageSkeleton />;
 
   return (
-    <div>
-      <div className="mb-6 flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">Services</h1>
-          <p className="text-sm text-foreground-400">Managed database and cache services</p>
-        </div>
-        <Link href="/services/new">
-          <Button variant="primary">
-            <Icon icon="solar:add-circle-bold-duotone" width={20} />
-            New Service
-          </Button>
-        </Link>
-      </div>
+    <>
+      <PageHeader
+        title="Servizi"
+        description="Database e cache provisionati da RunPanel"
+        actions={
+          <Link
+            href="/services/new"
+            className="border-border bg-surface hover:bg-surface-hover text-foreground flex items-center gap-1.5 rounded-[var(--radius)] border px-3 py-1.5 text-sm transition-colors"
+          >
+            <Icon icon="solar:add-circle-linear" width={16} aria-hidden />
+            Nuovo servizio
+          </Link>
+        }
+      />
 
-      {services.length > 0 && (
-        <div className="mb-4">
-          <Input placeholder="Search services..." value={search} onChange={(e) => setSearch(e.target.value)} className="text-sm max-w-xs" />
+      {services.length > 3 && (
+        <div className="mb-4 max-w-sm">
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Cerca per nome o tipo…"
+            aria-label="Cerca servizi"
+          />
         </div>
       )}
 
-      {services.length === 0 ? (
-        <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-white/[0.07] py-20">
-          <Icon icon="solar:database-bold-duotone" className="mb-4 text-foreground-300" width={48} />
-          <p className="text-foreground-400">No services yet</p>
-          <p className="text-sm text-foreground-500">Provision a database or cache service</p>
-        </div>
+      {filtered.length === 0 ? (
+        <Panel>
+          <EmptyState
+            icon="solar:database-linear"
+            title={services.length === 0 ? "Nessun servizio" : "Nessun risultato"}
+            description={
+              services.length === 0
+                ? "Provisiona PostgreSQL, MySQL, Redis o MongoDB e collegalo a un progetto."
+                : "Nessun servizio corrisponde alla ricerca."
+            }
+          />
+        </Panel>
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {services.filter(svc => !search || svc.name.toLowerCase().includes(search.toLowerCase()) || svc.type.toLowerCase().includes(search.toLowerCase())).map((svc) => (
-            <Card key={svc.id}>
-              <CardHeader>
-                <div className="flex items-center justify-between w-full">
-                  <div className="flex items-center gap-3">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
-                      <Icon icon={typeIcons[svc.type] || typeIcons.postgresql} className="text-primary" width={22} />
-                    </div>
-                    <div>
-                      <CardTitle className="text-base">{svc.name}</CardTitle>
-                      <CardDescription>{svc.type} v{svc.version} · :{svc.port}</CardDescription>
-                    </div>
-                  </div>
-                  <StatusBadge status={svc.status} />
-                </div>
-              </CardHeader>
-              <CardContent className="flex gap-2 border-t border-white/[0.07] pt-3">
-                {svc.status === "running" ? (
-                  <>
-                    <Button variant="outline" size="sm" onPress={() => handleControl(svc.id, "restart")}>
-                      <Icon icon="solar:refresh-bold-duotone" width={14} />
-                      Restart
-                    </Button>
-                    <Button variant="danger" size="sm" onPress={() => handleControl(svc.id, "stop")}>
-                      <Icon icon="solar:stop-bold-duotone" width={14} />
-                      Stop
-                    </Button>
-                  </>
-                ) : (
-                  <Button variant="secondary" size="sm" onPress={() => handleControl(svc.id, "start")}>
-                    <Icon icon="solar:play-bold-duotone" width={14} />
-                    Start
-                  </Button>
-                )}
-                <Link href={`/services/${svc.id}`}>
-                  <Button variant="ghost" size="sm">
-                    <Icon icon="solar:eye-bold-duotone" width={14} />
-                    Details
-                  </Button>
-                </Link>
-              </CardContent>
-            </Card>
+        <div className="space-y-2">
+          {filtered.map((service) => (
+            <ServiceRow key={service.id} service={service} onControl={handleControl} />
           ))}
         </div>
       )}
-    </div>
+    </>
   );
 }

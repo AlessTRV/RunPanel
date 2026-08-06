@@ -4,6 +4,7 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent, TextField, L
 import { Icon } from "@iconify/react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { AccentPicker } from "@/components/ui/AccentPicker";
 
 export default function AccountPage() {
   const [currentPassword, setCurrentPassword] = useState("");
@@ -54,7 +55,7 @@ export default function AccountPage() {
     <div>
       <div className="mb-6">
         <h1 className="text-2xl font-bold">Account</h1>
-        <p className="text-sm text-foreground-400">Password and preferences</p>
+        <p className="text-sm text-muted">Password and preferences</p>
       </div>
 
       <div className="max-w-xl space-y-6">
@@ -62,7 +63,7 @@ export default function AccountPage() {
         <Card>
           <CardHeader>
             <div className="flex items-center gap-3">
-              <Icon icon="solar:lock-password-bold-duotone" width={24} className="text-purple-400" />
+              <Icon icon="solar:lock-password-bold-duotone" width={24} className="text-accent" />
               <div>
                 <CardTitle>Change Password</CardTitle>
                 <CardDescription>Update your admin password</CardDescription>
@@ -77,11 +78,30 @@ export default function AccountPage() {
           </CardContent>
         </Card>
 
+        {/* Theme */}
+        <Card>
+          <CardHeader>
+            <div className="flex items-center gap-3">
+              <Icon icon="solar:pallete-2-linear" width={22} className="text-muted" />
+              <div>
+                <CardTitle>Tema</CardTitle>
+                <CardDescription>
+                  Cambia solo il colore d&apos;accento. Gli stati (running, deploying, errore)
+                  restano identici in ogni preset.
+                </CardDescription>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <AccentPicker />
+          </CardContent>
+        </Card>
+
         {/* Preferences */}
         <Card>
           <CardHeader>
             <div className="flex items-center gap-3">
-              <Icon icon="solar:settings-bold-duotone" width={24} className="text-purple-400" />
+              <Icon icon="solar:settings-linear" width={22} className="text-muted" />
               <div>
                 <CardTitle>Preferences</CardTitle>
                 <CardDescription>Dashboard settings</CardDescription>
@@ -90,13 +110,13 @@ export default function AccountPage() {
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
             <div>
-              <label className="block text-sm font-medium text-foreground-400 mb-2">Polling Interval</label>
+              <label className="block text-sm font-medium text-muted mb-2">Polling Interval</label>
               <div className="flex gap-2">
                 {["2", "5", "10"].map((v) => (
                   <Button key={v} variant={pollingInterval === v ? "primary" : "outline"} size="sm" onPress={() => setPollingInterval(v)}>{v}s</Button>
                 ))}
               </div>
-              <p className="text-xs text-foreground-500 mt-1">How often to refresh stats and status</p>
+              <p className="text-xs text-muted mt-1">How often to refresh stats and status</p>
             </div>
             <TextField value={timezone} onChange={setTimezone}><Label>Timezone</Label><Input placeholder="Europe/Rome" /></TextField>
             <Button variant="primary" isDisabled={prefsSaving} onPress={handleSavePrefs}>{prefsSaving ? <Spinner /> : "Save Preferences"}</Button>

@@ -1,8 +1,16 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Spinner } from "@heroui/react";
+import { memo, useCallback, useState } from "react";
+import Link from "next/link";
 import { Icon } from "@iconify/react";
+import { useResource } from "@/lib/hooks/useResource";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { Panel } from "@/components/ui/Panel";
+import { StatTile } from "@/components/ui/StatTile";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { PageSkeleton } from "@/components/ui/Skeletons";
+import { statusMeta, TONE_DOT } from "@/lib/status";
+import { cn } from "@/lib/utils";
 
 interface ProcessInfo {
   running: boolean;
@@ -39,256 +47,211 @@ interface MonitorData {
   projects: ProjectInfo[];
 }
 
-function fmtMem(bytes: number): string {
+function fmtMem(bytes: number | undefined): string {
+  if (!bytes) return "—";
   const mb = bytes / (1024 * 1024);
-  return mb >= 1024 ? `${(mb / 1024).toFixed(1)}G` : `${mb.toFixed(0)}M`;
+  return mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${mb.toFixed(0)} MB`;
 }
 
-function fmtUptime(seconds: number): string {
+function fmtUptime(seconds: number | undefined): string {
+  if (!seconds) return "—";
   const d = Math.floor(seconds / 86400);
   const h = Math.floor((seconds % 86400) / 3600);
   const m = Math.floor((seconds % 3600) / 60);
-  if (d > 0) return `${d}d ${h}h`;
+  if (d > 0) return `${d}g ${h}h`;
   if (h > 0) return `${h}h ${m}m`;
   return `${m}m`;
 }
 
-const STATUS_DOT: Record<string, string> = {
-  running: "text-emerald-400",
-  stopped: "text-foreground-500",
-  deploying: "text-amber-400",
-  error: "text-red-400",
-};
+/**
+ * One row, for a project or one of its services.
+ *
+ * A single responsive layout, not a desktop table plus a mobile card list. The
+ * previous version rendered both and hid one with `hidden sm:block`, so every
+ * row existed twice in the DOM and was re-rendered twice on every 3-second
+ * poll.
+ */
+const Row = memo(function Row({
+  label,
+  sublabel,
+  status,
+  cpu,
+  memory,
+  uptime,
+  href,
+  nested,
+  onToggle,
+  collapsed,
+}: {
+  label: string;
+  sublabel: string;
+  status: string;
+  cpu?: number;
+  memory?: number;
+  uptime?: number;
+  href?: string;
+  nested?: boolean;
+  onToggle?: () => void;
+  collapsed?: boolean;
+}) {
+  const meta = statusMeta(status);
 
-const STATUS_BG: Record<string, string> = {
-  running: "bg-emerald-400",
-  stopped: "bg-foreground-500",
-  deploying: "bg-amber-400",
-  error: "bg-red-400",
-};
+  const content = (
+    <>
+      <div className="flex min-w-0 flex-1 items-center gap-2">
+        {onToggle && (
+          <span className="text-muted shrink-0" aria-hidden>
+            <Icon icon={collapsed ? "solar:alt-arrow-right-linear" : "solar:alt-arrow-down-linear"} width={14} />
+          </span>
+        )}
+        <span
+          className={cn("size-1.5 shrink-0 rounded-full", TONE_DOT[meta.tone], meta.active && "animate-pulse")}
+          aria-hidden
+        />
+        <span className="text-foreground truncate text-sm">{label}</span>
+        <span className="text-muted hidden truncate font-mono text-xs sm:inline">{sublabel}</span>
+      </div>
+
+      {/* Numbers stay on one line on every width: tabular figures and fixed
+          columns, so the values do not jitter as they update. */}
+      <div className="text-muted flex shrink-0 items-center gap-3 font-mono text-xs tabular-nums sm:gap-5">
+        <span className="w-14 text-right" title="CPU">
+          {cpu != null ? `${cpu.toFixed(1)}%` : "—"}
+        </span>
+        <span className="w-16 text-right" title="Memoria">
+          {fmtMem(memory)}
+        </span>
+        <span className="hidden w-16 text-right sm:inline" title="Uptime">
+          {fmtUptime(uptime)}
+        </span>
+      </div>
+    </>
+  );
+
+  const className = cn(
+    "flex w-full items-center gap-3 px-3 py-2 text-left transition-colors",
+    nested ? "pl-8" : "",
+    (href || onToggle) && "hover:bg-surface-hover"
+  );
+
+  if (onToggle) {
+    return (
+      <button type="button" onClick={onToggle} className={className} aria-expanded={!collapsed}>
+        {content}
+      </button>
+    );
+  }
+
+  if (href) {
+    return (
+      <Link href={href} className={className}>
+        {content}
+      </Link>
+    );
+  }
+
+  return <div className={className}>{content}</div>;
+});
 
 export default function MonitorPage() {
-  const [data, setData] = useState<MonitorData | null>(null);
-  const [loading, setLoading] = useState(true);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 
-  useEffect(() => {
-    const controller = new AbortController();
-    const poll = async () => {
-      try {
-        const res = await fetch("/api/monitor", { signal: controller.signal });
-        if (res.ok) {
-          const d = await res.json();
-          setData(d);
-          setLoading(false);
-        }
-      } catch (e) { if (e instanceof Error && e.name === "AbortError") return; }
-    };
-    poll();
-    const interval = setInterval(poll, 3000);
-    return () => { controller.abort(); clearInterval(interval); };
-  }, []);
+  // Polls, but stops while the tab is hidden — this endpoint inspects
+  // containers, so an idle background tab was doing real work on the host
+  // every three seconds forever.
+  const { data, loading } = useResource<MonitorData>("/api/monitor", { intervalMs: 3000 });
 
-  function toggleCollapse(id: string) {
-    setCollapsed(prev => {
+  const toggle = useCallback((id: string) => {
+    setCollapsed((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       return next;
     });
-  }
+  }, []);
 
-  if (loading || !data) {
-    return <div className="flex justify-center py-20"><Spinner /></div>;
-  }
+  if (loading && !data) return <PageSkeleton />;
+  if (!data) return null;
 
-  const memPercent = data.server.memory.total > 0 ? Math.round((data.server.memory.used / data.server.memory.total) * 100) : 0;
+  const memoryPercent = data.server.memory.total
+    ? (data.server.memory.used / data.server.memory.total) * 100
+    : 0;
 
   return (
-    <div>
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold">Monitor</h1>
-        <p className="text-sm text-foreground-400">Real-time process and resource monitoring</p>
+    <>
+      <PageHeader title="Monitor" description="Processi e servizi in esecuzione su questo host" />
+
+      <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-3">
+        <StatTile label="CPU host" value={`${data.server.cpu.toFixed(1)}%`} percent={data.server.cpu} icon="solar:cpu-linear" />
+        <StatTile
+          label="Memoria"
+          value={fmtMem(data.server.memory.used)}
+          hint={`di ${fmtMem(data.server.memory.total)}`}
+          percent={memoryPercent}
+          icon="solar:server-linear"
+        />
+        <StatTile label="Uptime" value={fmtUptime(data.server.uptime)} icon="solar:clock-circle-linear" />
       </div>
 
-      {/* Terminal-style monitor */}
-      <div className="rounded-xl border border-white/[0.07] bg-black/50 backdrop-blur-2xl overflow-hidden font-mono text-xs">
-        {/* Server totals header */}
-        <div className="flex flex-wrap items-center gap-3 sm:gap-6 px-3 sm:px-4 py-3 border-b border-white/[0.07] bg-white/[0.03] text-foreground-400 text-[11px] sm:text-xs">
-          <span className="font-bold text-foreground-300">SYSTEM</span>
-          <span>CPU <span className="text-purple-400">{data.server.cpu}%</span></span>
-          <span>RAM <span className="text-violet-400">{fmtMem(data.server.memory.used)}</span><span className="text-foreground-500">/{fmtMem(data.server.memory.total)}</span> <span className="text-violet-400">{memPercent}%</span></span>
-          <span>UP <span className="text-emerald-400">{Math.floor(data.server.uptime / 3600)}h {Math.floor((data.server.uptime % 3600) / 60)}m</span></span>
-        </div>
-
-        {/* Desktop: Table layout (sm and up) */}
-        <div className="hidden sm:block">
-          {/* Column headers */}
-          <div className="grid grid-cols-[1fr_80px_70px_70px_70px_60px] gap-2 px-4 py-2 border-b border-white/[0.05] text-foreground-500 text-[10px] uppercase tracking-wider">
-            <span>Name</span>
-            <span className="text-right">Status</span>
-            <span className="text-right">CPU</span>
-            <span className="text-right">Memory</span>
-            <span className="text-right">Uptime</span>
-            <span className="text-right">PID</span>
+      {data.projects.length === 0 ? (
+        <Panel>
+          <EmptyState
+            icon="solar:widget-2-linear"
+            title="Nessun progetto"
+            description="I progetti creati compariranno qui con i loro processi e servizi."
+          />
+        </Panel>
+      ) : (
+        <Panel padding="flush" className="divide-border divide-y overflow-hidden">
+          <div className="text-muted flex items-center gap-3 px-3 py-2 text-[11px] font-medium">
+            <span className="flex-1">Progetto</span>
+            <span className="flex shrink-0 gap-3 sm:gap-5">
+              <span className="w-14 text-right">CPU</span>
+              <span className="w-16 text-right">RAM</span>
+              <span className="hidden w-16 text-right sm:inline">Uptime</span>
+            </span>
           </div>
 
-          {/* Process rows */}
-          <div className="divide-y divide-white/[0.03]">
-            {data.projects.length === 0 ? (
-              <div className="px-4 py-6 text-center text-foreground-500">No projects</div>
-            ) : (
-              data.projects.map((project) => {
-                const isCollapsed = collapsed.has(project.id);
-                return (
-                  <div key={project.id}>
-                    <div
-                      className="flex items-center gap-2 px-4 py-2 hover:bg-white/[0.02] cursor-pointer transition-colors"
-                      onClick={() => toggleCollapse(project.id)}
-                    >
-                      <Icon icon={isCollapsed ? "solar:alt-arrow-right-bold" : "solar:alt-arrow-down-bold"} width={10} className="text-foreground-500" />
-                      <span className="text-foreground-200 font-semibold">{project.name}</span>
-                    </div>
+          {data.projects.map((project) => {
+            const isCollapsed = collapsed.has(project.id);
+            const hasChildren = project.services.length > 0;
 
-                    {!isCollapsed && (
-                      <>
-                        <div className="grid grid-cols-[1fr_80px_70px_70px_70px_60px] gap-2 px-4 py-1.5 pl-8 text-foreground-400 hover:bg-white/[0.02] transition-colors">
-                          <span className="flex items-center gap-2">
-                            <span className="text-foreground-500">{project.services.length > 0 ? "\u251C\u2500" : "\u2514\u2500"}</span>
-                            <Icon icon="solar:server-square-bold" width={12} className="text-purple-400/70" />
-                            <span>app</span>
-                            <span className="text-foreground-500">({project.runtimeType})</span>
-                            {project.port && <span className="text-foreground-500">:{project.port}</span>}
-                          </span>
-                          <span className={`text-right ${STATUS_DOT[project.status] || "text-foreground-500"}`}>{project.status}</span>
-                          <span className="text-right">{project.process?.cpu != null ? `${project.process.cpu}%` : "\u2014"}</span>
-                          <span className="text-right">{project.process?.memory ? fmtMem(project.process.memory) : "\u2014"}</span>
-                          <span className="text-right">{project.process?.uptime != null ? fmtUptime(project.process.uptime) : "\u2014"}</span>
-                          <span className="text-right text-foreground-500">{project.process?.pid || "\u2014"}</span>
-                        </div>
+            return (
+              <div key={project.id}>
+                <Row
+                  label={project.name}
+                  sublabel={`${project.runtimeType}${project.port ? ` · :${project.port}` : ""}`}
+                  status={project.status}
+                  cpu={project.process?.cpu}
+                  memory={project.process?.memory}
+                  uptime={project.process?.uptime}
+                  href={hasChildren ? undefined : `/projects/${project.id}`}
+                  onToggle={hasChildren ? () => toggle(project.id) : undefined}
+                  collapsed={isCollapsed}
+                />
 
-                        {project.services.map((svc, i) => {
-                          const isLast = i === project.services.length - 1;
-                          return (
-                            <div key={svc.id} className="grid grid-cols-[1fr_80px_70px_70px_70px_60px] gap-2 px-4 py-1.5 pl-8 text-foreground-400 hover:bg-white/[0.02] transition-colors">
-                              <span className="flex items-center gap-2">
-                                <span className="text-foreground-500">{isLast ? "\u2514\u2500" : "\u251C\u2500"}</span>
-                                <Icon icon="solar:database-bold" width={12} className="text-cyan-400/70" />
-                                <span>{svc.name}</span>
-                                <span className="text-foreground-500">({svc.type})</span>
-                                <span className="text-foreground-500">:{svc.port}</span>
-                              </span>
-                              <span className={`text-right ${STATUS_DOT[svc.status] || "text-foreground-500"}`}>{svc.status}</span>
-                              <span className="text-right">{svc.cpu != null ? `${svc.cpu}%` : "\u2014"}</span>
-                              <span className="text-right">{svc.memory ? fmtMem(svc.memory) : "\u2014"}</span>
-                              <span className="text-right">{svc.uptime != null ? fmtUptime(svc.uptime) : "\u2014"}</span>
-                              <span className="text-right text-foreground-500">{"\u2014"}</span>
-                            </div>
-                          );
-                        })}
-                      </>
-                    )}
+                {hasChildren && !isCollapsed && (
+                  <div className="border-border/60 border-t">
+                    {project.services.map((service) => (
+                      <Row
+                        key={service.id}
+                        nested
+                        label={service.name}
+                        sublabel={`${service.type} · :${service.port}`}
+                        status={service.status}
+                        cpu={service.cpu}
+                        memory={service.memory}
+                        uptime={service.uptime}
+                        href={`/services/${service.id}`}
+                      />
+                    ))}
                   </div>
-                );
-              })
-            )}
-          </div>
-        </div>
-
-        {/* Mobile: Card layout (below sm) */}
-        <div className="sm:hidden divide-y divide-white/[0.03]">
-          {data.projects.length === 0 ? (
-            <div className="px-4 py-6 text-center text-foreground-500">No projects</div>
-          ) : (
-            data.projects.map((project) => {
-              const isCollapsed = collapsed.has(project.id);
-              return (
-                <div key={project.id}>
-                  <div
-                    className="flex items-center gap-2 px-3 py-2.5 hover:bg-white/[0.02] cursor-pointer transition-colors"
-                    onClick={() => toggleCollapse(project.id)}
-                  >
-                    <Icon icon={isCollapsed ? "solar:alt-arrow-right-bold" : "solar:alt-arrow-down-bold"} width={10} className="text-foreground-500" />
-                    <span className="text-foreground-200 font-semibold flex-1 truncate">{project.name}</span>
-                  </div>
-
-                  {!isCollapsed && (
-                    <>
-                      {/* App process card */}
-                      <div className="mx-3 mb-2 rounded-lg bg-white/[0.02] px-3 py-2.5">
-                        <div className="flex items-center justify-between mb-2">
-                          <div className="flex items-center gap-2">
-                            <Icon icon="solar:server-square-bold" width={12} className="text-purple-400/70" />
-                            <span className="text-foreground-300 text-[11px] font-medium">app</span>
-                            <span className="text-foreground-500 text-[10px]">({project.runtimeType})</span>
-                          </div>
-                          <div className="flex items-center gap-1.5">
-                            <div className={`h-1.5 w-1.5 rounded-full ${STATUS_BG[project.status] || "bg-foreground-500"}`} />
-                            <span className={`text-[10px] ${STATUS_DOT[project.status] || "text-foreground-500"}`}>{project.status}</span>
-                          </div>
-                        </div>
-                        <div className="grid grid-cols-3 gap-2 text-[10px]">
-                          <div>
-                            <span className="text-foreground-500">CPU</span>
-                            <p className="text-foreground-300">{project.process?.cpu != null ? `${project.process.cpu}%` : "\u2014"}</p>
-                          </div>
-                          <div>
-                            <span className="text-foreground-500">MEM</span>
-                            <p className="text-foreground-300">{project.process?.memory ? fmtMem(project.process.memory) : "\u2014"}</p>
-                          </div>
-                          <div>
-                            <span className="text-foreground-500">UP</span>
-                            <p className="text-foreground-300">{project.process?.uptime != null ? fmtUptime(project.process.uptime) : "\u2014"}</p>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Service cards */}
-                      {project.services.map((svc) => (
-                        <div key={svc.id} className="mx-3 mb-2 rounded-lg bg-white/[0.02] px-3 py-2.5">
-                          <div className="flex items-center justify-between mb-2">
-                            <div className="flex items-center gap-2">
-                              <Icon icon="solar:database-bold" width={12} className="text-cyan-400/70" />
-                              <span className="text-foreground-300 text-[11px] font-medium">{svc.name}</span>
-                              <span className="text-foreground-500 text-[10px]">({svc.type})</span>
-                            </div>
-                            <div className="flex items-center gap-1.5">
-                              <div className={`h-1.5 w-1.5 rounded-full ${STATUS_BG[svc.status] || "bg-foreground-500"}`} />
-                              <span className={`text-[10px] ${STATUS_DOT[svc.status] || "text-foreground-500"}`}>{svc.status}</span>
-                            </div>
-                          </div>
-                          <div className="grid grid-cols-3 gap-2 text-[10px]">
-                            <div>
-                              <span className="text-foreground-500">CPU</span>
-                              <p className="text-foreground-300">{svc.cpu != null ? `${svc.cpu}%` : "\u2014"}</p>
-                            </div>
-                            <div>
-                              <span className="text-foreground-500">MEM</span>
-                              <p className="text-foreground-300">{svc.memory ? fmtMem(svc.memory) : "\u2014"}</p>
-                            </div>
-                            <div>
-                              <span className="text-foreground-500">UP</span>
-                              <p className="text-foreground-300">{svc.uptime != null ? fmtUptime(svc.uptime) : "\u2014"}</p>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </>
-                  )}
-                </div>
-              );
-            })
-          )}
-        </div>
-
-        {/* Footer */}
-        <div className="px-4 py-2 border-t border-white/[0.07] bg-white/[0.02] text-foreground-500 text-[10px] flex items-center justify-between">
-          <span>{data.projects.length} projects · {data.projects.reduce((n, p) => n + p.services.length, 0)} services</span>
-          <span className="flex items-center gap-1">
-            <div className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
-            live · 3s
-          </span>
-        </div>
-      </div>
-    </div>
+                )}
+              </div>
+            );
+          })}
+        </Panel>
+      )}
+    </>
   );
 }

@@ -31,9 +31,11 @@ export default function NewProjectPage() {
         return;
       }
 
+      // Straight into the new project rather than back to the list: creating
+      // one is always the first step of configuring it.
       const project = await res.json();
-      toast.success("Project created");
-      router.push("/home");
+      toast.success("Progetto creato");
+      router.push(`/projects/${project.id}?tab=settings`);
     } catch {
       toast.error("Failed to create project");
     } finally {
@@ -45,14 +47,14 @@ export default function NewProjectPage() {
     <div>
       <div className="mb-6">
         <h1 className="text-2xl font-bold">New Project</h1>
-        <p className="text-sm text-foreground-400">Create a project to group your app and services</p>
+        <p className="text-sm text-muted">Create a project to group your app and services</p>
       </div>
 
       <div className="max-w-md">
         <Card>
           <CardHeader>
             <div className="flex items-center gap-3">
-              <Icon icon="solar:folder-bold-duotone" width={24} className="text-purple-400" />
+              <Icon icon="solar:folder-bold-duotone" width={24} className="text-accent" />
               <div>
                 <CardTitle>Project Name</CardTitle>
                 <CardDescription>Give your project a name</CardDescription>

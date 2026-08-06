@@ -1,11 +1,18 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
-import { Button, Spinner, TextField, Label, Input } from "@heroui/react";
-import { Icon } from "@iconify/react";
-import { toast } from "sonner";
+import { memo } from "react";
 import Link from "next/link";
+import { Button } from "@heroui/react";
+import { Icon } from "@iconify/react";
+import { useResource } from "@/lib/hooks/useResource";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { Panel } from "@/components/ui/Panel";
+import { StatTile } from "@/components/ui/StatTile";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { PageSkeleton } from "@/components/ui/Skeletons";
+import { StatusBadge } from "@/components/StatusBadge";
+import { statusMeta, TONE_DOT } from "@/lib/status";
+import { cn } from "@/lib/utils";
 
 interface Service {
   id: string;
@@ -37,256 +44,154 @@ interface Metrics {
   uptime: number;
 }
 
-function formatBytes(bytes: number) {
-  const gb = bytes / (1024 * 1024 * 1024);
-  return gb >= 1 ? `${gb.toFixed(1)} GB` : `${(bytes / (1024 * 1024)).toFixed(0)} MB`;
+function formatBytes(bytes: number): string {
+  const gb = bytes / 1024 ** 3;
+  return gb >= 1 ? `${gb.toFixed(1)} GB` : `${(bytes / 1024 ** 2).toFixed(0)} MB`;
 }
 
-function formatUptime(seconds: number) {
+function formatUptime(seconds: number): string {
   const d = Math.floor(seconds / 86400);
   const h = Math.floor((seconds % 86400) / 3600);
   const m = Math.floor((seconds % 3600) / 60);
-  if (d > 0) return `${d}d ${h}h`;
+  if (d > 0) return `${d}g ${h}h`;
   if (h > 0) return `${h}h ${m}m`;
   return `${m}m`;
 }
 
-const statusColors: Record<string, string> = {
-  running: "bg-emerald-400",
-  stopped: "bg-foreground-400",
-  deploying: "bg-amber-400",
-  error: "bg-red-400",
-};
+/** Memoised so a 5-second metrics refresh does not re-render every card. */
+const ProjectCard = memo(function ProjectCard({ project }: { project: Project }) {
+  return (
+    <Panel interactive padding="compact" className="flex flex-col gap-3">
+      <Link href={`/projects/${project.id}`} className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <h3 className="text-foreground truncate text-sm font-medium">{project.name}</h3>
+            <StatusBadge status={project.status} />
+          </div>
+          <p className="text-muted mt-1 truncate font-mono text-xs">
+            {project.runtime_type}
+            {project.port ? ` · :${project.port}` : ""}
+            {project.deploy_count > 0 ? ` · ${project.deploy_count} deploy` : ""}
+          </p>
+        </div>
+        <Icon icon="solar:alt-arrow-right-linear" width={16} className="text-muted mt-0.5 shrink-0" aria-hidden />
+      </Link>
+
+      {project.services.length > 0 && (
+        <ul className="border-border flex flex-wrap gap-1.5 border-t pt-3">
+          {project.services.map((service) => {
+            const meta = statusMeta(service.status);
+            return (
+              <li key={service.id}>
+                <Link
+                  href={`/services/${service.id}`}
+                  className="border-border bg-surface-secondary hover:bg-surface-hover flex items-center gap-1.5 rounded-full border px-2 py-1 text-xs transition-colors"
+                >
+                  <span className={cn("size-1.5 rounded-full", TONE_DOT[meta.tone])} aria-hidden />
+                  <span className="text-foreground">{service.name}</span>
+                  <span className="text-muted font-mono">{service.type}</span>
+                </Link>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </Panel>
+  );
+});
 
 export default function HomePage() {
-  const router = useRouter();
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [metrics, setMetrics] = useState<Metrics | null>(null);
-  const [loading, setLoading] = useState(true);
+  // Both endpoints go through the shared hook, so they stop polling when the
+  // tab is hidden and never overlap requests.
+  const { data: projects, loading: projectsLoading, error } = useResource<Project[]>(
+    "/api/projects",
+    { intervalMs: 5000 }
+  );
+  const { data: metrics } = useResource<Metrics>("/api/metrics", { intervalMs: 5000 });
 
-  // Fetch helper that handles redirects and auth failures
-  async function fetchJSON<T>(url: string, signal?: AbortSignal): Promise<T | null> {
-    try {
-      const res = await fetch(url, { credentials: "same-origin", signal });
-      if (!res.ok) return null;
-      const contentType = res.headers.get("content-type");
-      if (!contentType?.includes("application/json")) return null;
-      return await res.json();
-    } catch { return null; }
-  }
+  if (projectsLoading && !projects) return <PageSkeleton />;
 
-  // Initial load + polling combined
-  useEffect(() => {
-    const controller = new AbortController();
-    let mounted = true;
-
-    async function loadData() {
-      const [p, m] = await Promise.all([
-        fetchJSON<Project[]>("/api/projects", controller.signal),
-        fetchJSON<Metrics>("/api/metrics", controller.signal),
-      ]);
-      if (!mounted) return;
-      if (Array.isArray(p)) setProjects(p);
-      if (m) setMetrics(m);
-      setLoading(false);
-    }
-
-    loadData();
-    const interval = setInterval(loadData, 5000);
-
-    return () => { mounted = false; controller.abort(); clearInterval(interval); };
-  }, []);
-
-  // Project settings modal state
-  const [editProject, setEditProject] = useState<Project | null>(null);
-  const [editName, setEditName] = useState("");
-  const [editSaving, setEditSaving] = useState(false);
-  const [editDeleting, setEditDeleting] = useState(false);
-
-  useEffect(() => {
-    if (!editProject) return;
-    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") setEditProject(null); };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [editProject]);
-
-  function openProjectSettings(project: Project) {
-    setEditProject(project);
-    setEditName(project.name);
-  }
-
-  async function saveProjectName() {
-    if (!editProject || !editName.trim()) return;
-    setEditSaving(true);
-    try {
-      const res = await fetch(`/api/projects/${editProject.id}`, {
-        method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: editName.trim() }),
-      });
-      if (res.ok) {
-        toast.success("Project renamed");
-        setProjects((prev) => prev.map((p) => p.id === editProject.id ? { ...p, name: editName.trim() } : p));
-        setEditProject(null);
-      } else { const d = await res.json(); toast.error(d.error || "Failed"); }
-    } catch { toast.error("Failed"); }
-    finally { setEditSaving(false); }
-  }
-
-  async function deleteProject() {
-    if (!editProject) return;
-    if (!confirm("Delete this project and ALL its services? This cannot be undone.")) return;
-    setEditDeleting(true);
-    try {
-      const res = await fetch(`/api/projects/${editProject.id}`, { method: "DELETE" });
-      if (res.ok) {
-        toast.success("Project deleted");
-        setProjects((prev) => prev.filter((p) => p.id !== editProject.id));
-        setEditProject(null);
-      } else { toast.error("Failed to delete"); }
-    } catch { toast.error("Failed"); }
-    finally { setEditDeleting(false); }
-  }
-
-  if (loading) {
-    return <div className="flex justify-center py-20"><Spinner /></div>;
-  }
-
-  const memPercent = metrics && metrics.memory.total > 0 ? Math.round((metrics.memory.used / metrics.memory.total) * 100) : 0;
-  const diskPercent = metrics?.disk && metrics.disk.total > 0 ? Math.round((metrics.disk.used / metrics.disk.total) * 100) : 0;
-
-  const stats = [
-    { label: "CPU", value: `${metrics?.cpu.usage ?? 0}%`, sub: `${metrics?.cpu.cores ?? 0} cores`, accent: "bg-orange-400" },
-    { label: "Memory", value: `${memPercent}%`, sub: metrics ? `${formatBytes(metrics.memory.used)} / ${formatBytes(metrics.memory.total)}` : "", accent: "bg-blue-400" },
-    { label: "Disk", value: `${diskPercent}%`, sub: metrics?.disk ? `${formatBytes(metrics.disk.used)} / ${formatBytes(metrics.disk.total)}` : "", accent: "bg-emerald-400" },
-    { label: "Uptime", value: metrics ? formatUptime(metrics.uptime) : "—", sub: "server", accent: "bg-purple-400" },
-  ];
+  const list = Array.isArray(projects) ? projects : [];
+  const memoryPercent = metrics?.memory.total
+    ? (metrics.memory.used / metrics.memory.total) * 100
+    : undefined;
+  const diskPercent = metrics?.disk.total
+    ? (metrics.disk.used / metrics.disk.total) * 100
+    : undefined;
 
   return (
-    <div>
-      {/* ── Metrics ── */}
-      <div className="grid grid-cols-2 gap-4 mb-12 lg:grid-cols-4">
-        {stats.map((s) => (
-          <div key={s.label} className="rounded-[14px] bg-white/[0.04] p-4 sm:p-5 flex flex-col justify-between min-h-[100px] sm:min-h-[120px]">
-            <p className="text-[13px] font-medium text-foreground-500">{s.label}</p>
-            <div>
-              <p className="text-[26px] sm:text-[34px] font-bold leading-none tracking-tight">{s.value}</p>
-              <p className="text-[12px] text-foreground-500 mt-1">{s.sub}</p>
-            </div>
-            <div className={`h-[3px] w-full rounded-full ${s.accent} opacity-40 mt-3`} />
-          </div>
-        ))}
-      </div>
-
-      {/* ── Projects Header ── */}
-      <div className="flex items-center justify-between mb-8">
-        <h1 className="text-[24px] sm:text-[32px] font-bold tracking-tight">Projects</h1>
-        <Link href="/projects/new">
-          <Button variant="outline" size="sm" className="rounded-[10px] px-4">
-            <Icon icon="solar:add-circle-linear" width={16} />
-            New
+    <>
+      <PageHeader
+        title="Overview"
+        description="Progetti e stato della macchina"
+        actions={
+          <Button variant="primary" size="sm" onPress={() => { window.location.href = "/projects/new"; }}>
+            <Icon icon="solar:add-circle-linear" width={16} aria-hidden />
+            Nuovo progetto
           </Button>
-        </Link>
+        }
+      />
+
+      <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <StatTile
+          label="CPU"
+          value={metrics ? `${metrics.cpu.usage.toFixed(1)}%` : "—"}
+          hint={metrics ? `${metrics.cpu.cores} core` : undefined}
+          percent={metrics?.cpu.usage}
+          icon="solar:cpu-linear"
+        />
+        <StatTile
+          label="Memoria"
+          value={metrics ? formatBytes(metrics.memory.used) : "—"}
+          hint={metrics ? `di ${formatBytes(metrics.memory.total)}` : undefined}
+          percent={memoryPercent}
+          icon="solar:server-linear"
+        />
+        <StatTile
+          label="Disco"
+          value={metrics ? formatBytes(metrics.disk.used) : "—"}
+          hint={metrics ? `di ${formatBytes(metrics.disk.total)}` : undefined}
+          percent={diskPercent}
+          icon="solar:ssd-square-linear"
+        />
+        <StatTile
+          label="Uptime"
+          value={metrics ? formatUptime(metrics.uptime) : "—"}
+          icon="solar:clock-circle-linear"
+        />
       </div>
 
-      {/* ── Project Groups ── */}
-      {projects.length === 0 ? (
-        <div className="flex flex-col items-center py-20 text-center">
-          <Icon icon="solar:box-bold-duotone" className="mb-3 text-foreground-300" width={40} />
-          <p className="text-foreground-400">No projects yet</p>
-          <p className="text-sm text-foreground-500 mb-4">Create your first project to get started</p>
-          <Link href="/projects/new">
-            <Button variant="primary" size="sm">New Project</Button>
-          </Link>
-        </div>
+      {error && (
+        <Panel className="border-danger/30 mb-4">
+          <p className="text-danger text-sm">
+            Impossibile leggere i progetti: {error}. Il polling continua.
+          </p>
+        </Panel>
+      )}
+
+      {list.length === 0 ? (
+        <Panel>
+          <EmptyState
+            icon="solar:widget-2-linear"
+            title="Nessun progetto"
+            description="Un progetto contiene un'app e i servizi di cui ha bisogno."
+            action={
+              <Link
+                href="/projects/new"
+                className="border-border bg-surface hover:bg-surface-hover text-foreground rounded-[var(--radius)] border px-4 py-2 text-sm transition-colors"
+              >
+                Crea il primo progetto
+              </Link>
+            }
+          />
+        </Panel>
       ) : (
-        <div className="space-y-10">
-          {projects.map((project) => (
-            <div key={project.id}>
-              {/* Project Header */}
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <h2 className="text-[20px] font-bold">{project.name}</h2>
-                  <Button variant="ghost" size="sm" onPress={() => openProjectSettings(project)} aria-label="Project settings">
-                    <Icon icon="solar:settings-bold-duotone" width={16} />
-                  </Button>
-                </div>
-                <Button variant="ghost" size="sm" onPress={() => router.push(`/services/new?projectId=${project.id}`)}>
-                  <Icon icon="solar:add-circle-linear" width={16} />
-                  Add
-                </Button>
-              </div>
-
-              {/* Divider */}
-              <div className="border-b border-white/[0.06] my-5" />
-
-              {/* Service Cards Grid */}
-              <div className="flex flex-wrap gap-4">
-                {/* App card — only if configured (has source_url, app_name, or been deployed) */}
-                {(project.source_url || project.app_name || project.status !== "stopped" || project.deploy_count > 0) && (
-                  <div
-                    className="flex items-center justify-between w-full sm:w-[260px] rounded-xl bg-white/[0.05] px-4 py-4 cursor-pointer hover:bg-white/[0.07] transition-colors"
-                    onClick={() => router.push(`/projects/${project.id}`)}
-                  >
-                    <div>
-                      <p className="text-[14px] font-semibold">{project.app_name || project.slug}</p>
-                      <p className="text-[13px] text-foreground-500 mt-0.5">app · {project.runtime_type}{project.port ? ` · :${project.port}` : ""}</p>
-                    </div>
-                    <div className={`h-[10px] w-[10px] rounded-full ${statusColors[project.status] || "bg-foreground-400"}`} />
-                  </div>
-                )}
-
-                {/* Service cards */}
-                {project.services.map((service) => (
-                  <div
-                    key={service.id}
-                    className="flex items-center justify-between w-full sm:w-[260px] rounded-xl bg-white/[0.05] px-4 py-4 cursor-pointer hover:bg-white/[0.07] transition-colors"
-                    onClick={() => router.push(`/services/${service.id}`)}
-                  >
-                    <div>
-                      <p className="text-[14px] font-semibold">{service.name}</p>
-                      <p className="text-[13px] text-foreground-500 mt-0.5">{service.type} {service.version}</p>
-                    </div>
-                    <div className={`h-[10px] w-[10px] rounded-full ${statusColors[service.status] || "bg-foreground-400"}`} />
-                  </div>
-                ))}
-              </div>
-            </div>
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          {list.map((project) => (
+            <ProjectCard key={project.id} project={project} />
           ))}
         </div>
       )}
-
-      {/* Project Settings Modal */}
-      {editProject && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setEditProject(null)} />
-          <div className="relative z-10 w-full max-w-md rounded-2xl border border-white/[0.07] bg-black/80 backdrop-blur-2xl p-6 shadow-2xl">
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-lg font-bold">Project Settings</h2>
-              <button onClick={() => setEditProject(null)} className="text-foreground-400 hover:text-foreground transition-colors">
-                <Icon icon="solar:close-circle-bold-duotone" width={22} />
-              </button>
-            </div>
-
-            <div className="space-y-4">
-              <TextField value={editName} onChange={setEditName}>
-                <Label>Project Name</Label>
-                <Input onKeyDown={(e) => e.key === "Enter" && saveProjectName()} />
-              </TextField>
-              <Button variant="primary" className="w-full" isDisabled={editSaving} onPress={saveProjectName}>
-                {editSaving ? <Spinner /> : "Save"}
-              </Button>
-            </div>
-
-            <div className="mt-8 pt-6 border-t border-white/[0.07]">
-              <p className="text-sm font-semibold text-danger mb-2">Danger Zone</p>
-              <p className="text-xs text-foreground-500 mb-4">This will stop all processes, remove all services, and delete all project data.</p>
-              <Button variant="danger" className="w-full" isDisabled={editDeleting} onPress={deleteProject}>
-                {editDeleting ? <Spinner /> : <><Icon icon="solar:trash-bin-trash-bold-duotone" width={18} />Delete Project</>}
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
+    </>
   );
 }
