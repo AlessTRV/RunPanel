@@ -1,17 +1,39 @@
 import path from "path";
 import fs from "fs";
+import crypto from "crypto";
+import { getEnv } from "./env";
 
-const DATA_DIR = process.env.RUNPANEL_DATA_DIR || `${process.cwd()}/data`;
+const env = () => getEnv();
 
 export const config = {
-  dataDir: DATA_DIR,
-  dbPath: path.join(DATA_DIR, "runpanel.db"),
-  reposDir: path.join(DATA_DIR, "repos"),
-  buildsDir: path.join(DATA_DIR, "builds"),
-  uploadsDir: path.join(DATA_DIR, "uploads"),
-  logsDir: path.join(DATA_DIR, "logs"),
-  servicesDir: path.join(DATA_DIR, "services"),
-  secretFile: path.join(DATA_DIR, ".secret"),
+  get dataDir() {
+    return env().dataDir;
+  },
+  get dbFile() {
+    const db = env().db;
+    return db.driver === "sqlite" ? db.file : null;
+  },
+  get reposDir() {
+    return path.join(env().dataDir, "repos");
+  },
+  get buildsDir() {
+    return path.join(env().dataDir, "builds");
+  },
+  get uploadsDir() {
+    return path.join(env().dataDir, "uploads");
+  },
+  get logsDir() {
+    return path.join(env().dataDir, "logs");
+  },
+  get servicesDir() {
+    return path.join(env().dataDir, "services");
+  },
+  get tmpDir() {
+    return path.join(env().dataDir, "tmp");
+  },
+  get secretFile() {
+    return path.join(env().dataDir, ".secret");
+  },
 };
 
 export function ensureDataDirs() {
@@ -22,6 +44,7 @@ export function ensureDataDirs() {
     config.uploadsDir,
     config.logsDir,
     config.servicesDir,
+    config.tmpDir,
   ];
   for (const dir of dirs) {
     fs.mkdirSync(dir, { recursive: true });
@@ -30,11 +53,18 @@ export function ensureDataDirs() {
 
 let _secret: string | null = null;
 
+/**
+ * The AES key used to encrypt stored env vars and service credentials.
+ *
+ * Precedence: `RUNPANEL_SECRET` from the environment, else a 32-byte key
+ * persisted at `<dataDir>/.secret` (0600) and generated on first run.
+ */
 export function getSecret(): string {
   if (_secret) return _secret;
 
-  if (process.env.RUNPANEL_SECRET) {
-    _secret = process.env.RUNPANEL_SECRET;
+  const fromEnv = env().secret;
+  if (fromEnv) {
+    _secret = fromEnv;
     return _secret;
   }
 
@@ -45,7 +75,6 @@ export function getSecret(): string {
     return _secret;
   }
 
-  const crypto = require("crypto") as typeof import("crypto");
   _secret = crypto.randomBytes(32).toString("hex");
   fs.writeFileSync(config.secretFile, _secret, { mode: 0o600 });
   return _secret;
