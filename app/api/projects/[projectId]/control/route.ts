@@ -3,6 +3,7 @@ import { requireAuth } from "@/lib/auth-guard";
 import { getDb, nowIso } from "@/lib/db";
 import { controlActionSchema } from "@/lib/validation";
 import { processManager } from "@/services/process-manager";
+import { projectEvents } from "@/services/events";
 import { decrypt } from "@/lib/auth";
 
 type Params = { params: Promise<{ projectId: string }> };
@@ -43,6 +44,10 @@ async function startFromDeploy(
 
   const port = projectPort ?? 3000;
 
+  // The driver empties the process output before launching, so tell any open
+  // viewer to do the same rather than leave it showing the previous run.
+  projectEvents.emit(projectId, { type: "process:reset" });
+
   await processManager.start(slug, lastDeploy.start_cmd, runtimeType, {
     cwd: lastDeploy.artifact_dir,
     env: envVars,
@@ -66,7 +71,7 @@ export async function POST(request: NextRequest, { params }: Params) {
   const body = await request.json();
   const parsed = controlActionSchema.safeParse(body);
   if (!parsed.success) {
-    return NextResponse.json({ error: "Invalid action" }, { status: 400 });
+    return NextResponse.json({ error: "Azione non valida" }, { status: 400 });
   }
 
   const db = await getDb();
@@ -77,7 +82,7 @@ export async function POST(request: NextRequest, { params }: Params) {
     .executeTakeFirst();
 
   if (!project) {
-    return NextResponse.json({ error: "Project not found" }, { status: 404 });
+    return NextResponse.json({ error: "Progetto non trovato" }, { status: 404 });
   }
 
   const { action } = parsed.data;

@@ -1,6 +1,13 @@
 import { execFile, spawn } from "child_process";
 import { promisify } from "util";
 import { sanitizedProcessEnv } from "@/lib/env";
+import {
+  ExecStreamError,
+  execFromFile,
+  execToFile,
+  type ExecFromFileOptions,
+  type ExecToFileOptions,
+} from "../stream-exec";
 import { dockerConfigEnv } from "./registry";
 
 const exec = promisify(execFile);
@@ -143,6 +150,55 @@ export function dockerStream(
     stopped = true;
     child.kill();
   };
+}
+
+/**
+ * Streaming variants of `docker()`, for output that must not be buffered.
+ *
+ * The machinery lives in `services/stream-exec.ts` because none of it is about
+ * Docker; what these two add is the sanitised environment every docker call
+ * gets, and the `DockerError` type every docker caller already handles.
+ */
+
+function streamEnv(opts: { env?: Record<string, string> }): NodeJS.ProcessEnv {
+  return { ...sanitizedProcessEnv(), ...(dockerConfigEnv() ?? {}), ...(opts.env ?? {}) };
+}
+
+function asDockerError(err: unknown, args: string[]): never {
+  if (err instanceof ExecStreamError) {
+    throw new DockerError(err.message, args, err.stderr, err.exitCode);
+  }
+  throw err;
+}
+
+export type DockerToFileOptions = Omit<ExecToFileOptions, 'env'> & { env?: Record<string, string> };
+export type DockerFromFileOptions = Omit<ExecFromFileOptions, 'env'> & { env?: Record<string, string> };
+export type { ExecToFileResult as DockerToFileResult } from '../stream-exec';
+
+/** Run a docker command and write its stdout straight to a file. */
+export async function dockerToFile(
+  args: string[],
+  destPath: string,
+  opts: DockerToFileOptions = {}
+) {
+  try {
+    return await execToFile('docker', args, destPath, { ...opts, env: streamEnv(opts) });
+  } catch (err) {
+    asDockerError(err, args);
+  }
+}
+
+/** Run a docker command and feed it a file on stdin — the restore direction. */
+export async function dockerFromFile(
+  args: string[],
+  srcPath: string,
+  opts: DockerFromFileOptions = {}
+) {
+  try {
+    return await execFromFile('docker', args, srcPath, { ...opts, env: streamEnv(opts) });
+  } catch (err) {
+    asDockerError(err, args);
+  }
 }
 
 let availability: { checked: number; available: boolean } | null = null;

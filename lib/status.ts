@@ -18,7 +18,11 @@ export type KnownStatus =
   | "building"
   | "failed"
   | "superseded"
-  | "checking";
+  | "checking"
+  | "success"
+  | "partial"
+  | "canceled"
+  | "skipped";
 
 interface StatusMeta {
   tone: StatusTone;
@@ -37,6 +41,12 @@ const STATUS_META: Record<KnownStatus, StatusMeta> = {
   error: { tone: "danger", label: "Error" },
   failed: { tone: "danger", label: "Failed" },
   superseded: { tone: "neutral", label: "Completed" },
+  success: { tone: "success", label: "Riuscito" },
+  // A backup where some targets failed still has value, so it is not an error —
+  // but it must not read as a clean night either.
+  partial: { tone: "warning", label: "Parziale" },
+  canceled: { tone: "neutral", label: "Annullato" },
+  skipped: { tone: "neutral", label: "Saltato" },
 };
 
 export function statusMeta(status: string): StatusMeta {

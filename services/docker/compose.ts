@@ -166,9 +166,14 @@ export async function composePs(ctx: ComposeContext): Promise<ComposeService[]> 
   return services;
 }
 
-export async function composeLogs(ctx: ComposeContext, tail: number): Promise<string[]> {
+export async function composeLogs(
+  ctx: ComposeContext,
+  tail: number,
+  /** `--since <stamp>`, so the caller can scope the output to the current run. */
+  extraArgs: string[] = []
+): Promise<string[]> {
   const result = await dockerTry(
-    [...baseArgs(ctx.slug, ctx.projectDir, ctx.file), "logs", "--tail", String(tail), "--no-color"],
+    [...baseArgs(ctx.slug, ctx.projectDir, ctx.file), "logs", "--tail", String(tail), "--no-color", ...extraArgs],
     { cwd: ctx.projectDir, timeout: 30_000, maxBuffer: 10 * 1024 * 1024 }
   );
   return result ? lines(`${result.stdout}\n${result.stderr}`) : [];

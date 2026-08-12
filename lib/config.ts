@@ -31,6 +31,28 @@ export const config = {
   get tmpDir() {
     return path.join(env().dataDir, "tmp");
   },
+  get backupsDir() {
+    return path.join(env().dataDir, "backups");
+  },
+  /**
+   * Finished archives, filed by year and month. Two years of nightlies in one
+   * flat directory is a directory nobody can read, and age-based retention
+   * would have to stat every entry to find the old ones.
+   */
+  get backupArchivesDir() {
+    return path.join(config.backupsDir, "archives");
+  },
+  /**
+   * Where a run assembles its dumps. Deliberately under the data dir and not in
+   * the OS temp dir: publishing an archive is then a rename on the same
+   * filesystem, which is atomic, instead of a copy that can be interrupted.
+   */
+  get backupStagingDir() {
+    return path.join(config.backupsDir, "staging");
+  },
+  get backupUploadsDir() {
+    return path.join(config.backupsDir, "uploads");
+  },
   get secretFile() {
     return path.join(env().dataDir, ".secret");
   },
@@ -45,9 +67,21 @@ export function ensureDataDirs() {
     config.logsDir,
     config.servicesDir,
     config.tmpDir,
+    config.backupsDir,
+    config.backupArchivesDir,
+    config.backupStagingDir,
+    config.backupUploadsDir,
   ];
   for (const dir of dirs) {
     fs.mkdirSync(dir, { recursive: true });
+  }
+
+  // Archives hold decrypted credentials, and on a shared host the default 0755
+  // would let any local user read last night's backup.
+  try {
+    fs.chmodSync(config.backupsDir, 0o700);
+  } catch {
+    /* Windows and some network filesystems have no mode bits to set. */
   }
 }
 

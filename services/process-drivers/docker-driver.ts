@@ -2,10 +2,16 @@ import { IProcessDriver, ProcessInfo, StartOpts, OutputCallback } from "./types"
 import { docker, dockerTry, dockerStream, lines } from "../docker/cli";
 import { appContainerName, labelArgs } from "../docker/labels";
 import { containerStats } from "../docker/stats";
+import { markRunStart, sinceArgs } from "./run-log";
 
 export const dockerDriver: IProcessDriver = {
   async start(slug: string, startCmd: string, opts: StartOpts): Promise<void> {
     const name = appContainerName(slug);
+
+    // A fresh container starts with an empty log, but a crash-restart under
+    // `--restart` does not, and neither does `restart()`. The marker is what
+    // makes `logs()` answer for this run in every one of those cases.
+    markRunStart(slug);
     // startCmd format: "docker:imageRef"
     const imageName = startCmd.replace(/^docker:/, "");
 
@@ -82,6 +88,7 @@ export const dockerDriver: IProcessDriver = {
   },
 
   async restart(slug: string): Promise<void> {
+    markRunStart(slug);
     await docker(["restart", appContainerName(slug)], { timeout: 60_000 });
   },
 
@@ -122,7 +129,7 @@ export const dockerDriver: IProcessDriver = {
 
   async logs(slug: string, count: number): Promise<string[]> {
     const name = appContainerName(slug);
-    const result = await dockerTry(["logs", name, "--tail", count.toString()], {
+    const result = await dockerTry(["logs", name, "--tail", count.toString(), ...sinceArgs(slug)], {
       timeout: 15_000,
       maxBuffer: 10 * 1024 * 1024,
     });

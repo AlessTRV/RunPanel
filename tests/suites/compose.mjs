@@ -1,4 +1,4 @@
-import { client, createReporter, docker, waitForDeploy } from "../harness.mjs";
+import { client, createReporter, docker, waitForDeploy, SETUP_TOKEN } from "../harness.mjs";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -22,7 +22,7 @@ export async function run({ base, dataDir }) {
 
   await api.call("/api/auth/login", {
     method: "POST",
-    body: JSON.stringify({ setup: true, password: "compose-suite-pw" }),
+    body: JSON.stringify({ setup: true, setupToken: SETUP_TOKEN, password: "compose-suite-pw" }),
   });
 
   const created = await api.call("/api/projects", {

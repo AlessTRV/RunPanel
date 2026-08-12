@@ -24,7 +24,7 @@ export async function POST(request: NextRequest, { params }: Params) {
   });
 
   if (result.status === "not-found") {
-    return NextResponse.json({ error: "Project not found" }, { status: 404 });
+    return NextResponse.json({ error: "Progetto non trovato" }, { status: 404 });
   }
 
   // A request that lands during a deploy is remembered rather than refused, so

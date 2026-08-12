@@ -1,4 +1,4 @@
-import { client, createReporter, sleep } from "../harness.mjs";
+import { client, createReporter, sleep, SETUP_TOKEN } from "../harness.mjs";
 
 /**
  * Deploy serialisation.
@@ -21,7 +21,7 @@ export async function run({ base }) {
 
   await api.call("/api/auth/login", {
     method: "POST",
-    body: JSON.stringify({ setup: true, password: "queue-suite-pw" }),
+    body: JSON.stringify({ setup: true, setupToken: SETUP_TOKEN, password: "queue-suite-pw" }),
   });
 
   const created = await api.call("/api/projects", {

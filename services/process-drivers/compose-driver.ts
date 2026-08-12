@@ -1,6 +1,7 @@
 import { IProcessDriver, ProcessInfo, StartOpts, OutputCallback } from "./types";
 import { getRepoPath } from "../git-manager";
 import { containerStats } from "../docker/stats";
+import { markRunStart, sinceArgs } from "./run-log";
 import {
   composeContext,
   composeDown,
@@ -30,6 +31,9 @@ function contextFor(slug: string) {
 export const composeDriver: IProcessDriver = {
   async start(slug: string, _startCmd: string, opts: StartOpts): Promise<void> {
     const ctx = contextFor(slug);
+    // `up` recreates only what changed, so the services it leaves alone keep
+    // every line they printed under the previous deploy.
+    markRunStart(slug);
     await composeUp(ctx, { env: opts.env, onLog: opts.onLog });
   },
 
@@ -44,6 +48,7 @@ export const composeDriver: IProcessDriver = {
 
   async restart(slug: string): Promise<void> {
     const ctx = contextFor(slug);
+    markRunStart(slug);
     try {
       await composeRestart(ctx);
     } catch {
@@ -87,7 +92,7 @@ export const composeDriver: IProcessDriver = {
 
   async logs(slug: string, count: number): Promise<string[]> {
     try {
-      return await composeLogs(contextFor(slug), count);
+      return await composeLogs(contextFor(slug), count, sinceArgs(slug));
     } catch {
       return [];
     }

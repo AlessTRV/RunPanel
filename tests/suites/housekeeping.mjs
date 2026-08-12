@@ -1,4 +1,4 @@
-import { client, createReporter, docker, sleep, waitForDeploy } from "../harness.mjs";
+import { client, createReporter, docker, sleep, waitForDeploy, SETUP_TOKEN } from "../harness.mjs";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -21,7 +21,7 @@ export async function run({ base, dataDir }) {
 
   await api.call("/api/auth/login", {
     method: "POST",
-    body: JSON.stringify({ setup: true, password: "housekeeping-pw" }),
+    body: JSON.stringify({ setup: true, setupToken: SETUP_TOKEN, password: "housekeeping-pw" }),
   });
 
   // --- image retention -----------------------------------------------------
@@ -132,6 +132,35 @@ CMD ["sh","-c","while true; do sleep 1; done"]
     const kept = docker("volume", "ls", "--filter", `label=runpanel.project=${slug}`, "--format", "{{.Name}}");
     r.check("a plain delete KEEPS the data volume", kept.length > 0, `"${kept}"`);
 
+    // A service with no project shares a first name with the project's one, and
+    // its volumes used to be selected with `endsWith("-db")` over every volume
+    // on the host: deleting it took every project's `db` volume with it. This
+    // is the assertion that would have caught that.
+    const loose = await api.call("/api/services", {
+      method: "POST",
+      body: JSON.stringify({ name: "db", type: "postgresql", version: "16", port: 55481 }),
+    });
+    r.check("a service with no project is accepted", loose.status === 201,
+      `${loose.status} ${JSON.stringify(loose.body).slice(0, 140)}`);
+    r.check("it is stored with no project", loose.body?.project_id === null, `${loose.body?.project_id}`);
+    r.check("its container name is unscoped", loose.body?.container_name === "runpanel-svc-db",
+      `${loose.body?.container_name}`);
+
+    if (loose.status === 201) {
+      const dup = await api.call("/api/services", {
+        method: "POST",
+        body: JSON.stringify({ name: "db", type: "postgresql", version: "16", port: 55482 }),
+      });
+      r.check("a second service claiming the same container is refused", dup.status === 409, `${dup.status}`);
+      r.check("the first one is still running",
+        docker("ps", "--filter", "name=runpanel-svc-db", "--format", "{{.Names}}").includes("runpanel-svc-db"));
+
+      await api.call(`/api/services/${loose.body.id}?deleteData=true`, { method: "DELETE" });
+      const survivors = docker("volume", "ls", "--filter", `label=runpanel.project=${slug}`, "--format", "{{.Name}}");
+      r.check("deleting it did NOT touch the project's volume of the same name",
+        survivors.length > 0, `"${survivors}"`);
+    }
+
     const svc2 = await api.call("/api/services", {
       method: "POST",
       body: JSON.stringify({ name: "db", type: "postgresql", version: "16", port: 55480, projectId }),
@@ -140,6 +169,23 @@ CMD ["sh","-c","while true; do sleep 1; done"]
     const gone = docker("volume", "ls", "--filter", `label=runpanel.project=${slug}`, "--format", "{{.Name}}");
     r.check("deleteData=true removes the volume", gone.length === 0, `"${gone}"`);
   }
+
+  // --- input the API must refuse -------------------------------------------
+  const badName = await api.call("/api/services", {
+    method: "POST",
+    body: JSON.stringify({ name: "My DB!", type: "postgresql", version: "16", port: 55490 }),
+  });
+  r.check("a name Docker cannot use is refused", badName.status === 400, `${badName.status}`);
+
+  const badProject = await api.call("/api/services", {
+    method: "POST",
+    body: JSON.stringify({ name: "ghost", type: "postgresql", version: "16", port: 55491, projectId: "nope" }),
+  });
+  r.check("an unknown projectId is refused", badProject.status === 404, `${badProject.status}`);
+
+  // The unscoped names live outside the project, so nothing else reclaims them.
+  docker("rm", "-f", "runpanel-svc-db");
+  docker("volume", "rm", "runpanel-pg-db");
 
   // --- project delete takes everything ------------------------------------
   await api.call(`/api/projects/${projectId}`, { method: "DELETE" });

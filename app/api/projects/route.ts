@@ -76,7 +76,7 @@ export async function POST(request: NextRequest) {
   const parsed = createProjectSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json(
-      { error: "Validation failed", details: parsed.error.issues },
+      { error: "Dati non validi", details: parsed.error.issues },
       { status: 400 }
     );
   }

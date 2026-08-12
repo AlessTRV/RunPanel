@@ -4,6 +4,7 @@ import { getDb, nowIso } from "@/lib/db";
 import { processManager } from "@/services/process-manager";
 import { removeProjectImages } from "@/services/docker/images";
 import { removePm2Artifacts } from "@/services/process-drivers/pm2-driver";
+import { forgetRun } from "@/services/process-drivers/run-log";
 import { removeEnvFile } from "@/services/env-file";
 import { config } from "@/lib/config";
 import fs from "fs";
@@ -25,7 +26,7 @@ export async function DELETE(_request: NextRequest, { params }: Params) {
     .executeTakeFirst();
 
   if (!project) {
-    return NextResponse.json({ error: "Project not found" }, { status: 404 });
+    return NextResponse.json({ error: "Progetto non trovato" }, { status: 404 });
   }
 
   const { slug, runtime_type: runtimeType } = project;
@@ -46,7 +47,9 @@ export async function DELETE(_request: NextRequest, { params }: Params) {
   }
 
   // 4. Delete generated PM2 files, including the sidecar with the environment
+  // and the process logs of an app that no longer exists
   removePm2Artifacts(slug);
+  forgetRun(slug);
   removeEnvFile(slug);
 
   // 5. Reset project app config (keep project + services)

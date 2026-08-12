@@ -5,11 +5,12 @@ import type { ProjectsTable } from "@/lib/db/schema";
 import { updateProjectSchema } from "@/lib/validation";
 import { deployContractSchema, normalizeContractInput } from "@/lib/deploy-contract";
 import { processManager } from "@/services/process-manager";
-import { removeService, serviceContainerName } from "@/services/service-provisioner";
+import { removeService } from "@/services/service-provisioner";
 import { removeProjectNetwork } from "@/services/docker-network";
 import { removeProjectImages } from "@/services/docker/images";
 import { removeProjectVolumes } from "@/services/docker/volumes";
 import { removePm2Artifacts } from "@/services/process-drivers/pm2-driver";
+import { forgetRun } from "@/services/process-drivers/run-log";
 import { removeEnvFile } from "@/services/env-file";
 import { clearQueuedDeploy } from "@/services/deploy-queue";
 import { processLogHub } from "@/services/process-logs";
@@ -33,7 +34,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
     .executeTakeFirst();
 
   if (!project) {
-    return NextResponse.json({ error: "Project not found" }, { status: 404 });
+    return NextResponse.json({ error: "Progetto non trovato" }, { status: 404 });
   }
 
   const stats = await db
@@ -58,7 +59,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   const parsed = updateProjectSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json(
-      { error: "Validation failed", details: parsed.error.issues },
+      { error: "Dati non validi", details: parsed.error.issues },
       { status: 400 }
     );
   }
@@ -71,7 +72,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     .executeTakeFirst();
 
   if (!project) {
-    return NextResponse.json({ error: "Project not found" }, { status: 404 });
+    return NextResponse.json({ error: "Progetto non trovato" }, { status: 404 });
   }
 
   const { name, appName, sourceType, sourceUrl, sourceBranch, runtimeType, port, autoDeploy, builderConfig } =
@@ -135,7 +136,7 @@ export async function DELETE(_request: NextRequest, { params }: Params) {
     .executeTakeFirst();
 
   if (!project) {
-    return NextResponse.json({ error: "Project not found" }, { status: 404 });
+    return NextResponse.json({ error: "Progetto non trovato" }, { status: 404 });
   }
 
   const { slug } = project;
@@ -156,21 +157,18 @@ export async function DELETE(_request: NextRequest, { params }: Params) {
   // the old code knew about — each deploy produces its own immutable tag.
   await removeProjectImages(slug);
 
-  // Stop and remove every service container linked to this project
+  // Stop and remove every service container linked to this project. The volumes
+  // are not passed here: `removeProjectVolumes` below takes them all by label,
+  // which is both scoped and complete.
   const services = await db
     .selectFrom("services")
-    .select(["name", "config"])
+    .select("container_name")
     .where("project_id", "=", projectId)
     .execute();
 
   for (const svc of services) {
-    let containerName = "";
     try {
-      containerName = (JSON.parse(svc.config || "{}") as { containerName?: string }).containerName ?? "";
-    } catch { /* fall through to the derived name */ }
-    if (!containerName) containerName = serviceContainerName(svc.name);
-    try {
-      await removeService(containerName);
+      await removeService(svc.container_name);
     } catch { /* ignore */ }
   }
 
@@ -179,15 +177,20 @@ export async function DELETE(_request: NextRequest, { params }: Params) {
   // ready to silently reattach to a future service with the same name.
   const volumesRemoved = await removeProjectVolumes(slug);
 
-  // Delete project source
+  // Delete project source.
+  //
+  // Asynchronously, because this tree contains `node_modules`: the synchronous
+  // version walked a hundred thousand files with the event loop stopped, so
+  // deleting one project froze the whole panel — every other tab, every poll,
+  // every running deploy's log stream — for as long as it took.
   const repoDir = path.join(config.reposDir, slug);
-  if (fs.existsSync(repoDir)) {
-    fs.rmSync(repoDir, { recursive: true, force: true });
-  }
+  await fs.promises.rm(repoDir, { recursive: true, force: true });
 
   // Delete generated PM2 files, including the 0600 sidecar holding the
-  // project's environment.
+  // project's environment and the process logs, plus the marker saying when the
+  // last run began.
   removePm2Artifacts(slug);
+  forgetRun(slug);
   removeEnvFile(slug);
 
   try {
