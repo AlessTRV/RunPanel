@@ -8,7 +8,7 @@
  * makes a red result mean something.
  */
 import { spawn, execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -32,6 +32,13 @@ export function allocatePort() {
   return nextPort++;
 }
 
+/**
+ * First-run setup requires a token that the server otherwise mints at boot and
+ * prints to its log. Pinning it here is what lets a suite claim its own panel;
+ * `security.mjs` covers the case where the token is wrong or missing.
+ */
+export const SETUP_TOKEN = "test-setup-token";
+
 /** Start a RunPanel server against a throwaway data directory. */
 export async function startServer({ driver = "sqlite", databaseUrl, env = {} } = {}) {
   const port = allocatePort();
@@ -48,6 +55,12 @@ export async function startServer({ driver = "sqlite", databaseUrl, env = {} } =
       ...process.env,
       RUNPANEL_DATA_DIR: dataDir,
       RUNPANEL_DB_DRIVER: driver,
+      // The runner starts one server per suite on one machine. Left alone,
+      // every one of them would begin sweeping Docker and dumping databases
+      // underneath the suite that is trying to assert on them. A suite that
+      // wants a scheduler turns it back on through `env`.
+      RUNPANEL_DISABLE_SCHEDULERS: "1",
+      RUNPANEL_SETUP_TOKEN: SETUP_TOKEN,
       ...(databaseUrl ? { RUNPANEL_DATABASE_URL: databaseUrl } : {}),
       ...env,
     },
@@ -135,6 +148,35 @@ export function docker(...args) {
 
 export function dockerAvailable() {
   return docker("version", "--format", "{{.Server.Version}}").length > 0;
+}
+
+/**
+ * Is PM2 reachable the way the driver reaches it?
+ *
+ * Deliberately mirrors `resolvePm2Command()` in `pm2-driver.ts`: a vendored
+ * binary first, otherwise `npx --no-install`, which is what finds a global
+ * install — the arrangement the README tells operators to use. Probing with
+ * anything else would answer a different question from the one the panel asks.
+ *
+ * `shell` on Windows because the resolved binary is `npx.cmd`, which
+ * `execFileSync` cannot launch directly.
+ */
+export function pm2Available() {
+  const vendored = join(REPO_ROOT, "node_modules", ".bin", process.platform === "win32" ? "pm2.cmd" : "pm2");
+  const [command, args] = existsSync(vendored)
+    ? [vendored, ["-v"]]
+    : ["npx", ["--no-install", "pm2", "-v"]];
+
+  try {
+    execFileSync(command, args, {
+      stdio: "ignore",
+      timeout: 60_000,
+      shell: process.platform === "win32",
+    });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** Poll a project until it leaves the `deploying` state. */

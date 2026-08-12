@@ -5,6 +5,7 @@
  *   npm test                       everything the machine can run
  *   npm test -- store sessions     only the named suites
  *   npm test -- --no-docker        skip suites that need a Docker daemon
+ *   npm test -- --no-pm2           skip suites that need PM2 installed
  *   npm test -- --driver postgres  only the Postgres pass
  *
  * Postgres suites need RUNPANEL_TEST_PG_URL, e.g.
@@ -16,7 +17,7 @@
  * change the admin password or call first-run setup, so sharing an instance
  * made later suites fail for reasons unrelated to the code under test.
  */
-import { dockerAvailable, startServer } from "./harness.mjs";
+import { dockerAvailable, pm2Available, startServer } from "./harness.mjs";
 import { readdirSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, join, resolve } from "node:path";
@@ -31,9 +32,15 @@ const driverFilter = args.includes("--driver") ? args[args.indexOf("--driver") +
 
 const pgUrl = process.env.RUNPANEL_TEST_PG_URL ?? null;
 const hasDocker = !flags.has("--no-docker") && dockerAvailable();
+// PM2 is not vendored — the README tells operators to install it globally — so
+// its absence is a normal state of a machine, not a broken checkout. Treated
+// like Docker: reported, and the suites that need it are skipped rather than
+// failed.
+const hasPm2 = !flags.has("--no-pm2") && pm2Available();
 
 console.log(`RunPanel test suite`);
 console.log(`  docker:   ${hasDocker ? "available" : "skipped"}`);
+console.log(`  pm2:      ${hasPm2 ? "available" : "skipped (npm i -g pm2)"}`);
 console.log(`  postgres: ${pgUrl ? "configured" : "not configured (set RUNPANEL_TEST_PG_URL)"}`);
 console.log("");
 
@@ -49,6 +56,11 @@ for (const file of suiteFiles) {
 
   if (meta.needsDocker && !hasDocker) {
     skipped.push(`${meta.name} (needs docker)`);
+    continue;
+  }
+
+  if (meta.needsPm2 && !hasPm2) {
+    skipped.push(`${meta.name} (needs pm2)`);
     continue;
   }
 
@@ -78,6 +90,9 @@ for (const file of suiteFiles) {
       server = await startServer({
         driver,
         databaseUrl: driver === "postgres" ? pgUrl : undefined,
+        // A suite that needs the server configured a particular way says so in
+        // its own meta, rather than the harness growing a flag per suite.
+        env: meta.env ?? {},
       });
       const result = await run({ base: server.base, dataDir: server.dataDir, repoRoot: REPO_ROOT });
       results.push({ ...result, name: `${result.name} [${driver}]` });

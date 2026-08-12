@@ -42,6 +42,16 @@ export function runCommand(command: string, opts: RunCommandOpts): Promise<void>
           stdio: ["ignore", "pipe", "pipe"],
           timeout,
           windowsHide: true,
+          // Without this Node quotes the argument list for a C runtime that
+          // cmd.exe is not: the whole command gets wrapped in quotes and every
+          // quote inside it escaped as \", which cmd does not understand. A
+          // command like
+          //     node -e "require('fs').writeFileSync('x','y')"
+          // then exits 0 having done nothing — no error, no output, nothing
+          // written. Any install, build or release command containing a double
+          // quote failed that way, silently, on Windows only. Verbatim hands
+          // cmd the line as written, which is what a shell invocation wants.
+          windowsVerbatimArguments: true,
         })
       : spawn(shell, ["-c", command], {
           cwd,

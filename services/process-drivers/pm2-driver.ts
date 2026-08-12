@@ -23,9 +23,34 @@ export function pm2ArtifactPaths(slug: string): string[] {
   return [".js", ".json", ".env.json", ".cmd", ".sh"].map((ext) => path.join(dir, `${slug}${ext}`));
 }
 
+/** Generated files and process logs both go: neither outlives the project. */
 export function removePm2Artifacts(slug: string): void {
-  for (const file of pm2ArtifactPaths(slug)) {
+  for (const file of [...pm2ArtifactPaths(slug), ...pm2LogPaths(slug)]) {
     if (fs.existsSync(file)) fs.rmSync(file, { force: true });
+  }
+}
+
+function pm2LogPaths(slug: string): string[] {
+  return [pm2LogFile(slug, "out"), pm2LogFile(slug, "error")];
+}
+
+/**
+ * Empty the log files before a run starts — see `run-log.ts` for why the output
+ * of the previous run must not survive into the next one. It also puts a ceiling
+ * back on files that nothing ever rotated.
+ *
+ * Truncated rather than deleted, so a handle that outlives the process it
+ * belonged to keeps appending into the file being read instead of into an
+ * unlinked one nobody can see. Called after the old process is gone, so in
+ * practice nothing is writing at that moment either way.
+ */
+function truncateLogs(slug: string): void {
+  for (const file of pm2LogPaths(slug)) {
+    try {
+      if (fs.existsSync(file)) fs.truncateSync(file, 0);
+    } catch {
+      /* a log that cannot be emptied is not worth failing a deploy over */
+    }
   }
 }
 
@@ -33,7 +58,12 @@ export function removePm2Artifacts(slug: string): void {
 function shellExec(command: string, options: Record<string, unknown> = {}) {
   const shell = getShellPath();
   const args = isWindows ? ["/c", command] : ["-c", command];
-  return exec(shell, args, options as Parameters<typeof exec>[2]);
+  // See the note in `run-command.ts`: Node's default quoting is wrong for
+  // cmd.exe. It bites here whenever the pm2 binary is vendored, because then
+  // `resolvePm2Command()` returns a quoted path and every pm2 call carries a
+  // double quote.
+  const windowsArgs = isWindows ? { windowsVerbatimArguments: true } : {};
+  return exec(shell, args, { ...windowsArgs, ...options } as Parameters<typeof exec>[2]);
 }
 
 /**
@@ -77,31 +107,61 @@ let jlistCache: { at: number; value: Pm2Process[] } | null = null;
 let jlistInFlight: Promise<Pm2Process[]> | null = null;
 const JLIST_TTL_MS = 1500;
 
-async function pm2List(): Promise<Pm2Process[]> {
-  if (jlistCache && Date.now() - jlistCache.at < JLIST_TTL_MS) return jlistCache.value;
-  // Collapse concurrent callers onto one spawn rather than starting several.
-  if (jlistInFlight) return jlistInFlight;
+/**
+ * Bumped by every state-changing command. A listing already in flight when the
+ * change happened describes the world before it, so its result must not be
+ * written to the cache afterwards.
+ */
+let jlistGeneration = 0;
 
-  jlistInFlight = (async () => {
+function readPm2List(): Promise<Pm2Process[]> {
+  const generation = jlistGeneration;
+
+  const promise = (async (): Promise<Pm2Process[]> => {
+    let value: Pm2Process[] = [];
     try {
       const { stdout } = await shellExec(`${resolvePm2Command()} jlist`, { timeout: 15_000 });
-      const parsed = JSON.parse(stdout.toString()) as Pm2Process[];
-      jlistCache = { at: Date.now(), value: parsed };
-      return parsed;
+      value = JSON.parse(stdout.toString()) as Pm2Process[];
     } catch {
-      jlistCache = { at: Date.now(), value: [] };
-      return [];
-    } finally {
-      jlistInFlight = null;
+      /* pm2 missing, or listing mid-write: an empty listing is the honest answer */
     }
-  })();
+    if (generation === jlistGeneration) jlistCache = { at: Date.now(), value };
+    return value;
+  })().finally(() => {
+    if (jlistInFlight === promise) jlistInFlight = null;
+  });
 
-  return jlistInFlight;
+  return promise;
+}
+
+/**
+ * Served stale-while-revalidate, the same shape as `diskUsage()` in
+ * host-metrics: measured here, the spawn costs ~800ms when pm2 is not vendored
+ * and has to be resolved through npx, and status is polled every 5 seconds —
+ * longer than the TTL, so a plain expiring cache never once hit. Only the very
+ * first caller waits; after that a poll is served from memory while the refresh
+ * lands in the background.
+ */
+async function pm2List(): Promise<Pm2Process[]> {
+  if (jlistCache && Date.now() - jlistCache.at < JLIST_TTL_MS) return jlistCache.value;
+
+  // Collapse concurrent callers onto one spawn rather than starting several.
+  if (!jlistInFlight) jlistInFlight = readPm2List();
+
+  // Nothing cached — first call of the process, or a state change just dropped
+  // it — so this caller does have to wait for a real listing.
+  if (!jlistCache) return jlistInFlight;
+
+  return jlistCache.value;
 }
 
 /** Any command that changes state must invalidate the cached listing. */
 function invalidatePm2Cache(): void {
+  jlistGeneration++;
   jlistCache = null;
+  // A listing started before the change cannot answer for after it, so it must
+  // not be handed to the next caller either.
+  jlistInFlight = null;
 }
 
 /**
@@ -137,8 +197,12 @@ export const pm2Driver: IProcessDriver = {
 
     // Delete existing process if any
     try {
-      await shellExec(`npx pm2 delete ${name}`, { timeout: 10_000 });
+      await shellExec(`${resolvePm2Command()} delete ${name}`, { timeout: 30_000 });
     } catch { /* ignore */ }
+
+    // After the old process is gone, so nothing is still appending to a file we
+    // are emptying.
+    truncateLogs(slug);
 
     // Build env with PATH protection
     const env = buildEnv({ ...opts.env, PORT: opts.port.toString() });
@@ -263,9 +327,11 @@ child.on("error", (e) => { console.error("Process error:", e.message); process.e
       try {
         await shellExec(`${pm2} delete ${name}`, { timeout: 30_000 });
       } catch { /* ignore */ }
+      truncateLogs(slug);
       const env = buildEnv();
       await shellExec(`${pm2} start ${ecosystemFile}`, { env, timeout: 60_000 });
     } else {
+      truncateLogs(slug);
       await shellExec(`${pm2} restart ${name}`, { timeout: 30_000 });
     }
     invalidatePm2Cache();
