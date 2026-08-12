@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { encrypt } from "@/lib/auth";
+import { encrypt } from "@/lib/crypto";
 import { requireAuth } from "@/lib/auth-guard";
 import { getDb, nowIso } from "@/lib/db";
 import { generateId } from "@/lib/utils";
@@ -33,7 +33,15 @@ export async function POST(request: NextRequest) {
   const denied = await requireAuth();
   if (denied) return denied;
 
-  const parsed = destinationSchema.safeParse(await request.json());
+  // A malformed body is a bad request, not a 500.
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Richiesta non valida" }, { status: 400 });
+  }
+
+  const parsed = destinationSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json(
       { error: "Dati non validi", details: parsed.error.issues },

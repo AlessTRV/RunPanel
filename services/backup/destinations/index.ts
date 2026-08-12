@@ -1,23 +1,26 @@
-import { decrypt, encrypt } from "@/lib/auth";
+import { decrypt, encrypt } from "@/lib/crypto";
 import { getDb, nowIso } from "@/lib/db";
 import type { BackupDestinationsTable } from "@/lib/db/schema";
 import { generateId } from "@/lib/utils";
 import { localDestination } from "./local";
+import { s3Destination } from "./s3";
 import type { Destination } from "../types";
 
 /**
  * Which transports exist, and how a stored row becomes one.
  *
- * Only `local` is implemented. The row's `config` is encrypted anyway, from the
- * very first migration: a column that is sometimes ciphertext and sometimes not
- * is a column nobody can reason about, and the day a bot token needs storing it
- * should not also be the day the storage format changes.
+ * `local` and any S3-compatible object store — S3 itself, R2, B2, MinIO. The
+ * row's `config` has been encrypted since the very first migration, which is
+ * why adding a transport that needs a secret key changed nothing about storage:
+ * a column that is sometimes ciphertext and sometimes not is a column nobody
+ * can reason about.
  */
 
 type Factory = (row: BackupDestinationsTable, config: Record<string, unknown>) => Destination;
 
 const FACTORIES: Record<string, Factory> = {
   local: (row) => localDestination(row),
+  s3: (row, config) => s3Destination(row, config),
 };
 
 export function destinationConfig(row: BackupDestinationsTable): Record<string, unknown> {
