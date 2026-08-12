@@ -1,7 +1,7 @@
 import crypto from "crypto";
 import bcrypt from "bcryptjs";
 import { cookies } from "next/headers";
-import { getSecret } from "./config";
+
 import { getSetting, setSetting, setSettingIfAbsent } from "./settings";
 import { getDb, rowCount } from "./db";
 import { generateId } from "./utils";
@@ -193,30 +193,3 @@ export async function isFirstRun(): Promise<boolean> {
   return (await getAdminPasswordHash()) === null;
 }
 
-// --- Encryption (for env vars and service credentials) ---
-
-const ALGORITHM = "aes-256-gcm";
-const IV_LENGTH = 12;
-const TAG_LENGTH = 16;
-
-export function encrypt(text: string): string {
-  const key = Buffer.from(getSecret(), "hex").subarray(0, 32);
-  const iv = crypto.randomBytes(IV_LENGTH);
-  const cipher = crypto.createCipheriv(ALGORITHM, key, iv);
-  const encrypted = Buffer.concat([cipher.update(text, "utf8"), cipher.final()]);
-  const tag = cipher.getAuthTag();
-  return Buffer.concat([iv, tag, encrypted]).toString("base64");
-}
-
-export function decrypt(encoded: string): string {
-  const key = Buffer.from(getSecret(), "hex").subarray(0, 32);
-  const data = Buffer.from(encoded, "base64");
-  const iv = data.subarray(0, IV_LENGTH);
-  const tag = data.subarray(IV_LENGTH, IV_LENGTH + TAG_LENGTH);
-  const encrypted = data.subarray(IV_LENGTH + TAG_LENGTH);
-  const decipher = crypto.createDecipheriv(ALGORITHM, key, iv);
-  decipher.setAuthTag(tag);
-  // Concat as bytes, decode once: decoding each chunk separately corrupts any
-  // multi-byte character that straddles the update/final boundary.
-  return Buffer.concat([decipher.update(encrypted), decipher.final()]).toString("utf8");
-}
