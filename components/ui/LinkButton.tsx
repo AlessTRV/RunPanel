@@ -32,9 +32,19 @@ interface Props {
   "aria-label"?: string;
 }
 
+/**
+ * Ghost by default, deliberately.
+ *
+ * `secondary` rendered identically to `Button variant="secondary"`, so in the
+ * backups list "Esegui ora" — which starts a backup — and "Dettagli" — which
+ * opens a page — sat side by side with the same weight. Going somewhere costs
+ * nothing and can be undone with Back; doing something cannot. The default
+ * should be the quieter of the two, and a link that genuinely is the primary
+ * action on its screen can still ask for it.
+ */
 export function LinkButton({
   href,
-  variant = "secondary",
+  variant = "ghost",
   size = "sm",
   download = false,
   className,

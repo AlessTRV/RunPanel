@@ -1,6 +1,7 @@
 "use client";
 
 import { Button } from "@heroui/react";
+import { formatRelative } from "@/lib/format";
 import { Icon } from "@iconify/react";
 import { toast } from "sonner";
 import { useResource } from "@/lib/hooks/useResource";
@@ -39,14 +40,6 @@ function describeDevice(userAgent: string | null): string {
   return browser ?? os ?? userAgent.slice(0, 40);
 }
 
-function relativeTime(iso: string): string {
-  const seconds = Math.round((Date.now() - new Date(iso).getTime()) / 1000);
-  if (seconds < 60) return "adesso";
-  if (seconds < 3600) return `${Math.floor(seconds / 60)} min fa`;
-  if (seconds < 86400) return `${Math.floor(seconds / 3600)} h fa`;
-  return `${Math.floor(seconds / 86400)} g fa`;
-}
-
 /**
  * Signed-in devices, with a way to revoke one.
  *
@@ -65,7 +58,7 @@ export function SessionList() {
       toast.success("Dispositivo disconnesso");
       refresh();
     } catch {
-      toast.error("Disconnessione fallita");
+      toast.error("Disconnessione non riuscita");
     }
   }
 
@@ -93,7 +86,7 @@ export function SessionList() {
             <p className="text-muted mt-0.5 truncate text-xs">
               {session.ip ? <span className="font-mono">{session.ip}</span> : "IP sconosciuto"}
               {" · attivo "}
-              {relativeTime(session.last_seen_at)}
+              {formatRelative(session.last_seen_at)}
             </p>
           </div>
           <Button

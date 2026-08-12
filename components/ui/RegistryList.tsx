@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Button, Input, Label, TextField } from "@heroui/react";
 import { Icon } from "@iconify/react";
+import { DeleteButton } from "./DangerAction";
 import { toast } from "sonner";
 import { useResource } from "@/lib/hooks/useResource";
 import { SkeletonBlock } from "./Skeletons";
@@ -52,7 +53,7 @@ export function RegistryList() {
       setAdding(false);
       refresh();
     } catch {
-      toast.error("Salvataggio fallito");
+      toast.error("Salvataggio non riuscito");
     } finally {
       setSaving(false);
     }
@@ -67,7 +68,7 @@ export function RegistryList() {
       toast.success("Registry rimosso");
       refresh();
     } catch {
-      toast.error("Rimozione fallita");
+      toast.error("Rimozione non riuscita");
     }
   }
 
@@ -88,15 +89,21 @@ export function RegistryList() {
                 <p className="text-foreground truncate font-mono text-xs">{item.registry}</p>
                 <p className="text-muted truncate text-xs">{item.username}</p>
               </div>
-              <Button
-                variant="ghost"
-                size="sm"
-                isIconOnly
-                aria-label={`Rimuovi ${item.registry}`}
-                onPress={() => remove(item.registry)}
-              >
-                <Icon icon="solar:trash-bin-trash-linear" width={16} className="text-danger" />
-              </Button>
+              {/*
+                This was the only delete in the panel that fired on the first
+                click. Same glyph as five confirmed ones elsewhere, so nothing
+                about it warned that this one meant it.
+              */}
+              <DeleteButton
+                label={`Rimuovi ${item.registry}`}
+                confirm={{
+                  title: `Rimuovere ${item.registry}?`,
+                  description:
+                    "Le immagini già scaricate restano. I deploy che devono autenticarsi su questo registry falliranno finché non lo riconfiguri.",
+                  confirmLabel: "Rimuovi",
+                }}
+                onConfirm={() => remove(item.registry)}
+              />
             </li>
           ))}
         </ul>

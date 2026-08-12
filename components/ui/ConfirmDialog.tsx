@@ -88,19 +88,3 @@ export function ConfirmDialog({
   );
 }
 
-/**
- * Small state helper so a page can drive several confirmations without keeping
- * a boolean and a payload per action.
- */
-export function useConfirm<T>() {
-  const [target, setTarget] = useState<T | null>(null);
-  return {
-    target,
-    isOpen: target !== null,
-    ask: (value: T) => setTarget(value),
-    close: () => setTarget(null),
-    onOpenChange: (open: boolean) => {
-      if (!open) setTarget(null);
-    },
-  };
-}

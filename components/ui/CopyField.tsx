@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Icon } from "@iconify/react";
 import { cn } from "@/lib/utils";
+import { useClipboard } from "@/lib/hooks/useClipboard";
 
 /**
  * A read-only value with a copy button — connection strings, webhook URLs,
@@ -20,18 +21,8 @@ export function CopyField({
   secret?: boolean;
   className?: string;
 }) {
-  const [copied, setCopied] = useState(false);
+  const { copied, copy } = useClipboard();
   const [revealed, setRevealed] = useState(!secret);
-
-  async function copy() {
-    try {
-      await navigator.clipboard.writeText(value);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch {
-      /* clipboard blocked — the value is selectable as a fallback */
-    }
-  }
 
   return (
     <div className={cn("space-y-1.5", className)}>
@@ -54,7 +45,7 @@ export function CopyField({
 
         <button
           type="button"
-          onClick={copy}
+          onClick={() => copy(value)}
           className="text-muted hover:text-foreground rounded p-1 transition-colors"
           aria-label={`Copia${label ? ` ${label}` : ""}`}
         >

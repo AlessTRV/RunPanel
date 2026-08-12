@@ -20,6 +20,27 @@
     Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-mono: var(--font-app-mono), ui-monospace, SFMono-Regular, "SF Mono", Menlo,
     Consolas, "Liberation Mono", monospace;
+
+  /*
+   * The one step Tailwind's own scale does not have.
+   *
+   * Below `text-xs` the app had grown `text-[11px]` in 22 places and
+   * `text-[10px]` in 6 more — arbitrary values, so nothing stopped a 23rd from
+   * being a different number. Declaring it here gives the step a name and makes
+   * it the only way to go smaller than `xs`.
+   *
+   * Six steps, one job each, and no others: `text-xl` page title, `text-base`
+   * dialog heading, `text-sm` body and controls, `text-xs` secondary
+   * description, `text-meta` field hints and row metadata.
+   *
+   * Spacing deliberately stays OUT of this block: Tailwind v4 already has a
+   * spacing scale, and a second parallel one is the disease being cured. Here
+   * spacing is always relational — panel padding, field-to-hint gap, gap
+   * between sections — so it belongs to the components that own the
+   * relationship, not to a token.
+   */
+  --text-meta: 0.6875rem;
+  --text-meta--line-height: 1.45;
 }
 
 /* ── Base palette ────────────────────────────────────────────────────────────
