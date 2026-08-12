@@ -4,12 +4,14 @@ import { memo, useCallback, useState } from "react";
 import Link from "next/link";
 import { Icon } from "@iconify/react";
 import { useResource } from "@/lib/hooks/useResource";
+import { usePollInterval } from "@/lib/hooks/usePollingInterval";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Panel } from "@/components/ui/Panel";
 import { StatTile } from "@/components/ui/StatTile";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { PageSkeleton } from "@/components/ui/Skeletons";
 import { statusMeta, TONE_DOT } from "@/lib/status";
+import { formatBytes, formatUptime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 interface ProcessInfo {
@@ -49,21 +51,6 @@ interface MonitorData {
   services: ServiceInfo[];
 }
 
-function fmtMem(bytes: number | undefined): string {
-  if (!bytes) return "—";
-  const mb = bytes / (1024 * 1024);
-  return mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${mb.toFixed(0)} MB`;
-}
-
-function fmtUptime(seconds: number | undefined): string {
-  if (!seconds) return "—";
-  const d = Math.floor(seconds / 86400);
-  const h = Math.floor((seconds % 86400) / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  if (d > 0) return `${d}g ${h}h`;
-  if (h > 0) return `${h}h ${m}m`;
-  return `${m}m`;
-}
 
 /**
  * One row, for a project or one of its services.
@@ -121,10 +108,10 @@ const Row = memo(function Row({
           {cpu != null ? `${cpu.toFixed(1)}%` : "—"}
         </span>
         <span className="w-16 text-right" title="Memoria">
-          {fmtMem(memory)}
+          {formatBytes(memory)}
         </span>
         <span className="hidden w-16 text-right sm:inline" title="Uptime">
-          {fmtUptime(uptime)}
+          {formatUptime(uptime)}
         </span>
       </div>
     </>
@@ -156,12 +143,13 @@ const Row = memo(function Row({
 });
 
 export default function MonitorPage() {
+  const poll3000 = usePollInterval(3000);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 
   // Polls, but stops while the tab is hidden — this endpoint inspects
   // containers, so an idle background tab was doing real work on the host
   // every three seconds forever.
-  const { data, loading } = useResource<MonitorData>("/api/monitor", { intervalMs: 3000 });
+  const { data, loading } = useResource<MonitorData>("/api/monitor", { intervalMs: poll3000 });
 
   const toggle = useCallback((id: string) => {
     setCollapsed((prev) => {
@@ -189,12 +177,12 @@ export default function MonitorPage() {
         <StatTile label="CPU host" value={`${data.server.cpu.toFixed(1)}%`} percent={data.server.cpu} icon="solar:cpu-linear" />
         <StatTile
           label="Memoria"
-          value={fmtMem(data.server.memory.used)}
-          hint={`di ${fmtMem(data.server.memory.total)}`}
+          value={formatBytes(data.server.memory.used)}
+          hint={`di ${formatBytes(data.server.memory.total)}`}
           percent={memoryPercent}
           icon="solar:server-linear"
         />
-        <StatTile label="Uptime" value={fmtUptime(data.server.uptime)} icon="solar:clock-circle-linear" />
+        <StatTile label="Uptime" value={formatUptime(data.server.uptime)} icon="solar:clock-circle-linear" />
       </div>
 
       {data.projects.length === 0 && standalone.length === 0 ? (
@@ -207,7 +195,7 @@ export default function MonitorPage() {
         </Panel>
       ) : (
         <Panel padding="flush" className="divide-border divide-y overflow-hidden">
-          <div className="text-muted flex items-center gap-3 px-3 py-2 text-[11px] font-medium">
+          <div className="text-muted flex items-center gap-3 px-3 py-2 text-meta font-medium">
             <span className="flex-1">Progetto</span>
             <span className="flex shrink-0 gap-3 sm:gap-5">
               <span className="w-14 text-right">CPU</span>
@@ -262,7 +250,7 @@ export default function MonitorPage() {
           CPU or memory reading anywhere in the panel. */}
       {standalone.length > 0 && (
         <>
-          <h2 className="text-muted mt-6 mb-2 text-[11px] font-medium">Servizi autonomi</h2>
+          <h2 className="text-muted mt-6 mb-2 text-meta font-medium">Servizi autonomi</h2>
           <Panel padding="flush" className="divide-border divide-y overflow-hidden">
             {standalone.map((service) => (
               <Row

@@ -9,6 +9,7 @@ import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { SkeletonBlock } from "@/components/ui/Skeletons";
+import { formatBytes } from "@/lib/format";
 
 interface UsageEntry {
   type: string;
@@ -46,13 +47,6 @@ interface StorageData {
   volumes: VolumeInfo[];
   orphans: Orphans;
   retention: { imagesPerProject: number; buildCacheHours: number };
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes <= 0) return "0 B";
-  const units = ["B", "KB", "MB", "GB", "TB"];
-  const i = Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(1024)));
-  return `${(bytes / 1024 ** i).toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
 }
 
 export default function StoragePage() {
@@ -118,7 +112,7 @@ export default function StoragePage() {
       }
       await load();
     } catch {
-      toast.error("Pulizia fallita");
+      toast.error("Pulizia non riuscita");
     } finally {
       setCleaning(false);
     }
@@ -184,7 +178,15 @@ export default function StoragePage() {
             title="Utilizzo Docker"
             description="Riepilogo di docker system df, su tutto il daemon"
           />
-          <div className="mt-3 overflow-x-auto">
+          {/*
+            A table on a wide screen, a list of cards on a phone.
+
+            Five columns of numbers do not survive 360px: they either wrap into
+            unreadable stacks or force a horizontal scroll on the page body. The
+            same data reads fine as one block per row, with the label attached
+            to each number instead of five columns up.
+          */}
+          <div className="mt-3 hidden overflow-x-auto sm:block">
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-muted border-border border-b text-left text-xs">
@@ -208,6 +210,23 @@ export default function StoragePage() {
               </tbody>
             </table>
           </div>
+
+          <ul className="divide-border mt-3 divide-y sm:hidden">
+            {data.usage.map((row) => (
+              <li key={row.type} className="py-2.5 first:pt-0 last:pb-0">
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="text-foreground text-sm">{row.type}</span>
+                  <span className="text-foreground font-mono text-xs">{row.size}</span>
+                </div>
+                <p className="text-muted text-meta mt-0.5">
+                  {row.active} attivi su {row.total}
+                  {row.reclaimable && row.reclaimable !== "0B" ? (
+                    <span className="text-warning"> · {row.reclaimable} recuperabili</span>
+                  ) : null}
+                </p>
+              </li>
+            ))}
+          </ul>
         </Panel>
 
         <Panel>

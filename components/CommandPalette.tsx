@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Icon } from "@iconify/react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { NAV_ITEMS } from "@/lib/nav";
 
 /**
  * Ctrl/Cmd+K: go anywhere, do the frequent things.
@@ -25,18 +26,8 @@ interface Command {
   run: () => void | Promise<void>;
 }
 
-const PAGES: { label: string; href: string; icon: string; keys?: string }[] = [
-  { label: "Overview", href: "/home", icon: "solar:widget-2-linear" },
-  { label: "Progetti", href: "/projects", icon: "solar:folder-linear", keys: "g p" },
-  { label: "Servizi", href: "/services", icon: "solar:database-linear", keys: "g s" },
-  { label: "Monitor", href: "/monitor", icon: "solar:chart-2-linear" },
-  { label: "Storage", href: "/storage", icon: "solar:ssd-square-linear" },
-  { label: "Backup", href: "/backups", icon: "solar:archive-linear", keys: "g b" },
-  { label: "Avvio automatico", href: "/autostart", icon: "solar:power-linear" },
-  { label: "Diagnostica", href: "/diagnostics", icon: "solar:health-linear" },
-  { label: "GitHub", href: "/github", icon: "solar:code-linear" },
-  { label: "Impostazioni", href: "/account", icon: "solar:settings-linear" },
-];
+/** The same destinations the sidebar shows, from the same list. */
+const PAGES = NAV_ITEMS;
 
 interface Indexed {
   projects: { id: string; name: string; slug: string }[];
@@ -249,7 +240,7 @@ export function CommandPalette() {
             className="text-foreground placeholder:text-muted h-11 flex-1 bg-transparent text-sm outline-none"
             aria-label="Cerca"
           />
-          <kbd className="text-muted border-border rounded border px-1.5 py-0.5 text-[10px]">
+          <kbd className="text-muted border-border rounded border px-1.5 py-0.5 text-meta">
             esc
           </kbd>
         </div>

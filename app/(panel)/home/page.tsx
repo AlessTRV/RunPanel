@@ -4,7 +4,9 @@ import { memo } from "react";
 import Link from "next/link";
 import { Icon } from "@iconify/react";
 import { useResource } from "@/lib/hooks/useResource";
+import { usePollInterval } from "@/lib/hooks/usePollingInterval";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { LinkButton } from "@/components/ui/LinkButton";
 import { Panel } from "@/components/ui/Panel";
 import { StatTile } from "@/components/ui/StatTile";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -12,6 +14,7 @@ import { PageSkeleton } from "@/components/ui/Skeletons";
 import { StatusBadge } from "@/components/StatusBadge";
 import { HealthBanner } from "@/components/HealthBanner";
 import { statusMeta, TONE_DOT } from "@/lib/status";
+import { formatBytes, formatUptime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 interface Service {
@@ -44,19 +47,6 @@ interface Metrics {
   uptime: number;
 }
 
-function formatBytes(bytes: number): string {
-  const gb = bytes / 1024 ** 3;
-  return gb >= 1 ? `${gb.toFixed(1)} GB` : `${(bytes / 1024 ** 2).toFixed(0)} MB`;
-}
-
-function formatUptime(seconds: number): string {
-  const d = Math.floor(seconds / 86400);
-  const h = Math.floor((seconds % 86400) / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  if (d > 0) return `${d}g ${h}h`;
-  if (h > 0) return `${h}h ${m}m`;
-  return `${m}m`;
-}
 
 /** Memoised so a 5-second metrics refresh does not re-render every card. */
 const ProjectCard = memo(function ProjectCard({ project }: { project: Project }) {
@@ -103,11 +93,13 @@ const ProjectCard = memo(function ProjectCard({ project }: { project: Project })
 export default function HomePage() {
   // Both endpoints go through the shared hook, so they stop polling when the
   // tab is hidden and never overlap requests.
+  const poll5000 = usePollInterval(5000);
+
   const { data: projects, loading: projectsLoading, error } = useResource<Project[]>(
     "/api/projects",
-    { intervalMs: 5000 }
+    { intervalMs: poll5000 }
   );
-  const { data: metrics } = useResource<Metrics>("/api/metrics", { intervalMs: 5000 });
+  const { data: metrics } = useResource<Metrics>("/api/metrics", { intervalMs: poll5000 });
 
   if (projectsLoading && !projects) return <PageSkeleton />;
 
@@ -122,19 +114,16 @@ export default function HomePage() {
   return (
     <>
       <PageHeader
-        title="Overview"
+        title="Panoramica"
         description="Progetti e stato della macchina"
         actions={
           // A Link, not window.location: the latter is a full page reload —
           // re-downloading and re-hydrating the whole app — where client-side
           // navigation is instant.
-          <Link
-            href="/projects/new"
-            className="border-border bg-surface hover:bg-surface-hover text-foreground flex items-center gap-1.5 rounded-[var(--radius)] border px-3 py-1.5 text-sm transition-colors"
-          >
+          <LinkButton href="/projects/new" variant="secondary">
             <Icon icon="solar:add-circle-linear" width={16} aria-hidden />
             Nuovo progetto
-          </Link>
+          </LinkButton>
         }
       />
 
@@ -152,21 +141,21 @@ export default function HomePage() {
         />
         <StatTile
           label="Memoria"
-          value={metrics ? formatBytes(metrics.memory.used) : "—"}
+          value={formatBytes(metrics?.memory.used)}
           hint={metrics ? `di ${formatBytes(metrics.memory.total)}` : undefined}
           percent={memoryPercent}
           icon="solar:server-linear"
         />
         <StatTile
           label="Disco"
-          value={metrics ? formatBytes(metrics.disk.used) : "—"}
+          value={formatBytes(metrics?.disk.used)}
           hint={metrics ? `di ${formatBytes(metrics.disk.total)}` : undefined}
           percent={diskPercent}
           icon="solar:ssd-square-linear"
         />
         <StatTile
           label="Uptime"
-          value={metrics ? formatUptime(metrics.uptime) : "—"}
+          value={formatUptime(metrics?.uptime)}
           icon="solar:clock-circle-linear"
         />
       </div>
