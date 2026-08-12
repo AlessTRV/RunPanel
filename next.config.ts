@@ -37,16 +37,24 @@ const devOrigins = (process.env.RUNPANEL_DEV_ORIGINS ?? "")
  * `frame-ancestors` is the only CSP directive set here on purpose. It governs
  * who may embed the page and nothing else, so it cannot break HeroUI or the
  * bundled icons — unlike `script-src`, which wants a report-only period first.
- *
- * HSTS is inert over plain HTTP, so it costs nothing on a LAN install and is
- * already in place the day the panel is put behind TLS.
  */
 const securityHeaders = [
   { key: "X-Frame-Options", value: "DENY" },
   { key: "Content-Security-Policy", value: "frame-ancestors 'none'" },
   { key: "X-Content-Type-Options", value: "nosniff" },
   { key: "Referrer-Policy", value: "no-referrer" },
-  { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains" },
+
+  // HSTS only in production builds.
+  //
+  // "Inert over plain HTTP" is true and was the reason this used to be sent
+  // unconditionally — but a development instance is not always reached over
+  // plain HTTP. Put one behind a tunnel that terminates TLS, as a panel being
+  // tried out routinely is, and `includeSubDomains` pins the operator's whole
+  // apex domain to HTTPS for two years from a server they started to poke at
+  // for ten minutes. A header with that reach does not belong to `next dev`.
+  ...(process.env.NODE_ENV === "production"
+    ? [{ key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains" }]
+    : []),
 ];
 
 const nextConfig: NextConfig = {
