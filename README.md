@@ -19,16 +19,27 @@ reclaims disk.
 - **Databases on demand** — PostgreSQL, MySQL, Redis and MongoDB provisioned as
   labelled containers with their own volumes, and their connection URL injected
   into the app automatically.
+- **Backups that restore** — scheduled dumps of every managed database, of
+  RunPanel's own store, and of project configuration and volumes, into a single
+  verifiable zip. Restoring is guided from the panel, and takes a safety copy of
+  whatever it is about to overwrite first.
+- **Comes back after a reboot** — generates and installs the systemd unit (or a
+  cron `@reboot` line), checks that Docker itself starts at boot, and brings
+  back the projects and services you marked, in order.
 - **Housekeeping** — image retention per project, orphan detection, and volume
   cleanup that asks before destroying data.
 - **Two runtimes** — PM2 for native processes, Docker for containers, on equal
   footing.
+- **Diagnostics** — one page that says what is wrong with this installation and
+  what to press to fix it.
 
 ## Requirements
 
 - Node.js 20+
-- Docker (for container runtimes and provisioned databases)
-- PM2 is installed as a dependency; no global install needed
+- Docker (for container runtimes, provisioned databases and database backups)
+- PM2, for projects with a native runtime (`node`, `static`, `custom`). It is
+  **not** vendored: install it globally with `npm i -g pm2`, or keep to the
+  Docker runtimes. The Diagnostics page tells you which of the two you are in.
 
 ## Quick start
 
@@ -40,7 +51,18 @@ npm run build
 npm start
 ```
 
-Open `http://localhost:3000`. The first visit asks you to set an admin password.
+Open `http://localhost:3000`. The first visit asks you to set an admin password,
+along with the **setup token** the panel prints to its own log at startup:
+
+```
+[RunPanel] Not set up yet. Enter this token on the setup screen:
+
+    3f9c1a...
+```
+
+Until a password exists, that endpoint has to be open — the token is what stops
+whoever finds the port first from claiming the panel, and an admin here has a
+shell on the host. A restart issues a new one.
 
 ## Configuration
 
@@ -108,6 +130,14 @@ A repository can declare how it wants to be deployed:
 Panel settings win where both specify a value — the operator can see the target
 machine, the repository cannot.
 
+Some fields are **panel-only** and are ignored when they come from a repository:
+`docker.mounts`, `docker.capAdd`, `docker.network`, `docker.extraHosts` and
+`envFile.path`. The rest of the contract describes how to build and run the app,
+which is the repository's business; these describe what it may reach outside its
+own container, which is yours. Choosing a Docker runtime is a choice for
+isolation, and a `runpanel.json` must not be able to hand itself the host. When
+one tries, the deploy log names the fields it dropped.
+
 ## Architecture
 
 ```
@@ -135,9 +165,14 @@ data/                   runtime state (gitignored)
 npm run dev        # dev server
 npm run typecheck
 npm run lint
-npm test           # full suite; needs Docker
+npm test           # full suite
 npm run test:quick # skip the Docker suites
 ```
+
+The runner reports what the machine can do and skips the rest rather than
+failing: suites needing a Docker daemon, and the native-runtime suite needing a
+real PM2 (`npm i -g pm2`). Both are listed as `SKIP` in the summary, so a green
+run never hides untested ground.
 
 Postgres suites need a database:
 
@@ -157,21 +192,93 @@ name that does not exist.
 
 - Passwords hashed with bcrypt; sessions are per device and stored as a SHA-256
   of the cookie, so a database copy cannot be replayed
-- Login rate limiting survives a restart
+- First-run setup requires the token printed at boot, so an unclaimed panel
+  cannot be claimed by whoever arrives first
+- Login rate limiting survives a restart, counts atomically, and is keyed on an
+  address only where a configured proxy vouches for it
+- Every `/api` route is refused without a session by `proxy.ts` before it is
+  reached, in addition to each handler's own check
 - Project env vars and service credentials encrypted at rest (AES-256-GCM)
 - RunPanel's own configuration never reaches deployed projects
 - Webhook signatures verified with HMAC-SHA256 and a constant-time compare
-- Path traversal guarded on every file operation; ZIP uploads checked by magic
-  bytes and capped
+- File operations resolve symlinks and are confined to the project; ZIP uploads
+  are unpacked in-process, refusing traversal entries and links, capped by both
+  archive and decompressed size
+- Repository URLs must be public `https://`, and the GitHub token is only ever
+  attached to requests to GitHub
+
+### Putting it on the internet
+
+Terminate TLS in front of the panel and tell it how many proxies it is behind:
+
+```bash
+RUNPANEL_TRUSTED_PROXY_HOPS=1
+```
+
+Without it the panel cannot believe any client address — `X-Forwarded-For` is
+appended to by each hop, so the first entry is the client's own — and falls back
+to a single account-wide login limit. The session cookie is marked `Secure` in
+production builds, which browsers only accept over HTTPS or on localhost.
+
+## Backups
+
+A *policy* says what to save, how often, and how much of it to keep. Targets are
+selectors rather than fixed lists, so "every database" keeps meaning the ones
+that exist when the backup runs — including the service you create tomorrow.
+
+Every dump runs **inside the container it belongs to**, which is the only way to
+guarantee the client and the server are the same version: a `pg_dump` a major
+behind produces a file `pg_restore` refuses, and produces it without complaining.
+RunPanel's own SQLite store is captured with `VACUUM INTO` and then verified with
+`PRAGMA integrity_check`, never copied — a copy taken under WAL silently omits
+the most recent writes.
+
+The archive is a plain zip with a `manifest.json` and a `checksums.txt` in
+`sha256sum -c` format, so it can be verified and unpacked without RunPanel. Env
+vars and service credentials inside it are re-encrypted with this panel's key;
+including the key itself is a separate, explicit choice.
+
+| | |
+|---|---|
+| Schedules | five-field cron plus the `@daily` family, in the timezone you pick |
+| Retention | count, age and total size, together — the newest good archive is never collected |
+| Restore | guided, with an automatic pre-restore backup that aborts the restore if it fails |
+| Where | `data/backups/archives/<year>/<month>`, 0600 |
+
+The panel's own store is the one thing not restored live: a file this process
+has open cannot be swapped underneath it, so the restored database is staged and
+put into service at the next boot, with the previous one kept beside it.
+
+## Starting at boot
+
+The Autostart page reports what this host already does and generates what it
+does not: a systemd unit with absolute paths, ordered after `docker.service` and
+requiring it, or a supervised `@reboot` script when systemd is not available. If
+RunPanel runs as root it installs it; otherwise it renders a single block to
+paste. It never runs `systemctl start` — that would put a second panel on the
+port next to the running one.
+
+It also checks the things that make autostart useless when they are missing:
+whether Docker itself is enabled at boot, and whether `pm2 save` has ever been
+run — without it, PM2 brings back nothing after a reboot even when the panel
+comes back.
+
+Inside the panel, each project and service has a switch, an order, a delay, and
+whether to wait for it to answer before starting the next one. The reconciler
+that applies this at boot is a **repair** pass: it waits for Docker's own
+restarts to settle and starts only what is still down, and it never triggers a
+build.
 
 ## Known gaps
 
-- **Docker Compose is not supported.** A repository with only a
-  `docker-compose.yml` cannot be deployed yet.
-- **No registry authentication**, so private images cannot be pulled.
 - **Light theme** is not shipped; the token layer is structured for it.
 - Deploy presets exist (`services/deploy-presets`) but are not offered in the
   wizard yet.
+- Backups only go to local disk. The `Destination` interface is the seam for
+  anything else; adding one is a new file under `services/backup/destinations`.
+- Restoring RunPanel's own **Postgres** store is refused from the panel: the
+  archive carries the dump and the exact `pg_restore` command, to be run with
+  the panel stopped.
 
 ## License
 
