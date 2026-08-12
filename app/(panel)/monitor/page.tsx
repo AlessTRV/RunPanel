@@ -45,6 +45,8 @@ interface ProjectInfo {
 interface MonitorData {
   server: { cpu: number; memory: { total: number; used: number }; uptime: number };
   projects: ProjectInfo[];
+  /** Services belonging to no project, which have no project row to nest under. */
+  services: ServiceInfo[];
 }
 
 function fmtMem(bytes: number | undefined): string {
@@ -177,6 +179,8 @@ export default function MonitorPage() {
     ? (data.server.memory.used / data.server.memory.total) * 100
     : 0;
 
+  const standalone = data.services ?? [];
+
   return (
     <>
       <PageHeader title="Monitor" description="Processi e servizi in esecuzione su questo host" />
@@ -193,7 +197,7 @@ export default function MonitorPage() {
         <StatTile label="Uptime" value={fmtUptime(data.server.uptime)} icon="solar:clock-circle-linear" />
       </div>
 
-      {data.projects.length === 0 ? (
+      {data.projects.length === 0 && standalone.length === 0 ? (
         <Panel>
           <EmptyState
             icon="solar:widget-2-linear"
@@ -251,6 +255,29 @@ export default function MonitorPage() {
             );
           })}
         </Panel>
+      )}
+
+      {/* Services with no project have no row to nest under, and used to be
+          filtered out of this page entirely — a running container with no
+          CPU or memory reading anywhere in the panel. */}
+      {standalone.length > 0 && (
+        <>
+          <h2 className="text-muted mt-6 mb-2 text-[11px] font-medium">Servizi autonomi</h2>
+          <Panel padding="flush" className="divide-border divide-y overflow-hidden">
+            {standalone.map((service) => (
+              <Row
+                key={service.id}
+                label={service.name}
+                sublabel={`${service.type} · :${service.port}`}
+                status={service.status}
+                cpu={service.cpu}
+                memory={service.memory}
+                uptime={service.uptime}
+                href={`/services/${service.id}`}
+              />
+            ))}
+          </Panel>
+        </>
       )}
     </>
   );

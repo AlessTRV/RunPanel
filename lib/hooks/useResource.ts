@@ -27,6 +27,12 @@ interface Result<T> {
  *    responses could land out of order.
  *
  * Both are handled here once instead of in every page.
+ *
+ * A third one is handled here too: a poll that returns the same data no longer
+ * publishes it. `setData` on every tick meant a new object identity every few
+ * seconds, so the whole page re-rendered while nothing had changed — and every
+ * `memo()` on a row component was dead weight, since its prop was never the
+ * same object twice.
  */
 export function useResource<T>(url: string | null, options: Options = {}): Result<T> {
   const { intervalMs = 0, enabled = true } = options;
@@ -37,6 +43,8 @@ export function useResource<T>(url: string | null, options: Options = {}): Resul
 
   const inFlight = useRef(false);
   const generation = useRef(0);
+  /** Serialised last payload. Null until the first response arrives. */
+  const published = useRef<string | null>(null);
 
   const load = useCallback(
     (signal?: AbortSignal) => {
@@ -52,7 +60,18 @@ export function useResource<T>(url: string | null, options: Options = {}): Resul
         .then((json) => {
           // Ignore a response that a newer request has already superseded.
           if (mine !== generation.current) return;
-          setData(json);
+
+          // Only hand out a new object when the bytes actually differ. The
+          // comparison costs a stringify of a few KB; the re-render it avoids
+          // costs the whole subtree.
+          const serialized = JSON.stringify(json);
+          if (serialized !== published.current) {
+            published.current = serialized;
+            setData(json);
+          }
+
+          // React bails out when the value is unchanged, so these are free on
+          // a poll that changed nothing.
           setError(null);
           setLoading(false);
         })
@@ -71,6 +90,11 @@ export function useResource<T>(url: string | null, options: Options = {}): Resul
 
   useEffect(() => {
     if (!url || !enabled) return;
+
+    // `loading` was derived once, on first render. A url that only becomes
+    // known later — a tab that mounts before its id is resolved — then showed
+    // the empty state instead of the skeleton while its first request ran.
+    if (published.current === null) setLoading(true);
 
     const controller = new AbortController();
     load(controller.signal);

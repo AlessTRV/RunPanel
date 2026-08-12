@@ -7,10 +7,12 @@ import { Icon } from "@iconify/react";
 import { toast } from "sonner";
 import { useProjectStream } from "@/lib/hooks/useProjectStream";
 import { useResource } from "@/lib/hooks/useResource";
+import { useLineBuffer } from "@/lib/hooks/useLineBuffer";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Panel } from "@/components/ui/Panel";
 import { PageSkeleton } from "@/components/ui/Skeletons";
 import type { LogLine } from "@/components/ui/LogViewer";
+import { parseContractJson } from "@/lib/deploy-contract";
 import { cn } from "@/lib/utils";
 
 import { ProjectHeader } from "./_components/ProjectHeader";
@@ -41,11 +43,6 @@ function toLine(text: string, stream: LogLine["stream"] = "stdout"): LogLine {
   return { id: ++lineSeq, text, stream };
 }
 
-function appendCapped(lines: LogLine[], next: LogLine): LogLine[] {
-  const out = [...lines, next];
-  return out.length > MAX_LOG_LINES ? out.slice(out.length - MAX_LOG_LINES) : out;
-}
-
 export default function ProjectDetailPage() {
   const params = useParams();
   const router = useRouter();
@@ -61,10 +58,11 @@ export default function ProjectDetailPage() {
   const [loading, setLoading] = useState(true);
   const [deploying, setDeploying] = useState(false);
 
-  const [processLog, setProcessLog] = useState<LogLine[]>([]);
-  const [deployLog, setDeployLog] = useState<LogLine[]>([]);
-
-  const [termLines, setTermLines] = useState<string[]>([]);
+  // Batched: a build emits faster than React can usefully re-render, and each
+  // of these holds up to MAX_LOG_LINES rows.
+  const processLog = useLineBuffer<LogLine>(MAX_LOG_LINES);
+  const deployLog = useLineBuffer<LogLine>(MAX_LOG_LINES);
+  const termLines = useLineBuffer<LogLine>(MAX_LOG_LINES);
   const [shellActive, setShellActive] = useState(false);
 
   const [renameOpen, setRenameOpen] = useState(tabParam === "settings");
@@ -104,16 +102,18 @@ export default function ProjectDetailPage() {
   const { connected } = useProjectStream(projectId, (event) => {
     switch (event.type) {
       case "deploy:log":
-        setDeployLog((prev) => appendCapped(prev, toLine(event.line)));
+        deployLog.push(toLine(event.line));
         break;
       case "process:log":
-        setProcessLog((prev) => appendCapped(prev, toLine(event.line, event.stream)));
+        processLog.push(toLine(event.line, event.stream));
+        break;
+      case "process:reset":
+        // A new run starts from an empty log on the server; the buffer here has
+        // to follow, or the view keeps showing output the files no longer have.
+        processLog.reset();
         break;
       case "terminal:output":
-        setTermLines((prev) => {
-          const out = [...prev, event.text];
-          return out.length > MAX_LOG_LINES ? out.slice(out.length - MAX_LOG_LINES) : out;
-        });
+        termLines.push(toLine(event.text));
         break;
       case "terminal:closed":
         setShellActive(false);
@@ -121,7 +121,7 @@ export default function ProjectDetailPage() {
       case "deploy:status": {
         const previous = prevStatus.current;
         prevStatus.current = event.status;
-        if (event.status === "building") setDeployLog([]);
+        if (event.status === "building") deployLog.reset();
         if (previous !== "running" && event.status === "running") toast.success("Deploy completato");
         if (event.status === "failed") toast.error(event.message ?? "Deploy fallito");
         void refreshProject();
@@ -140,15 +140,20 @@ export default function ProjectDetailPage() {
   const processInfo = statusData?.process ?? null;
 
   // Seed the process log from the tail; the stream carries it from there.
+  //
+  // Depends on `reset` rather than on the buffer: the buffer object is rebuilt
+  // every render, so listing it here would refetch the tail on every log line.
+  // `reset` is stable.
+  const resetProcessLog = processLog.reset;
   useEffect(() => {
     if (activeTab !== "logs") return;
     const controller = new AbortController();
     fetch(`/api/projects/${projectId}/logs?source=process`, { signal: controller.signal })
       .then((res) => (res.ok ? res.json() : { logs: [] }))
-      .then((data: { logs?: string[] }) => setProcessLog((data.logs ?? []).map((l) => toLine(l))))
+      .then((data: { logs?: string[] }) => resetProcessLog((data.logs ?? []).map((l) => toLine(l))))
       .catch(() => {});
     return () => controller.abort();
-  }, [activeTab, projectId]);
+  }, [activeTab, projectId, resetProcessLog]);
 
   // Tab data is fetched by the shared hook, which owns its own loading flag —
   // so there is no effect here setting one synchronously. Passing `null` as the
@@ -163,6 +168,13 @@ export default function ProjectDetailPage() {
 
   const { data: envData, loading: envLoading } = useResource<EnvVar[]>(
     activeTab === "env" ? `/api/projects/${projectId}/env?reveal=true` : null
+  );
+
+  // The env tab explains which prefixes reach the build, and the project can
+  // have redefined them in its contract.
+  const buildEnvPrefixes = useMemo(
+    () => parseContractJson(project?.builder_config).buildEnvPrefixes,
+    [project?.builder_config]
   );
 
   async function handleDeploy(mode: "deploy" | "rebuild") {
@@ -266,7 +278,7 @@ export default function ProjectDetailPage() {
           particular used to render on every page load regardless. */}
       {activeTab === "logs" && (
         <div className="space-y-6">
-          <LogsTab deployLog={deployLog} processLog={processLog} connected={connected} />
+          <LogsTab deployLog={deployLog.lines} processLog={processLog.lines} connected={connected} />
           <FileManager projectId={projectId} runtimeType={project.runtime_type} />
         </div>
       )}
@@ -283,6 +295,7 @@ export default function ProjectDetailPage() {
           key={envData ? "loaded" : "loading"}
           projectId={projectId}
           runtimeType={project.runtime_type}
+          buildEnvPrefixes={buildEnvPrefixes}
           initialVars={envData ?? []}
           loading={envLoading}
         />
@@ -291,10 +304,10 @@ export default function ProjectDetailPage() {
       {activeTab === "terminal" && (
         <TerminalTab
           projectId={projectId}
-          lines={termLines}
+          lines={termLines.lines}
           active={shellActive}
           onActiveChange={setShellActive}
-          onLocalEcho={(text) => setTermLines((prev) => [...prev, text])}
+          onLocalEcho={(text) => termLines.push(toLine(text))}
         />
       )}
 

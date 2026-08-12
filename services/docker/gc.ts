@@ -1,6 +1,8 @@
-import { getDb } from "@/lib/db";
+import { getDb, rowCount } from "@/lib/db";
+import { pruneRateLimits } from "@/lib/rate-limit";
 import { dockerTry, isDockerAvailable, lines } from "./cli";
-import { LABEL_PROJECT, ownedFilters, parseLabels } from "./labels";
+import { LABEL_KIND, LABEL_PROJECT, ownedFilters, parseLabels } from "./labels";
+import { serviceVolumeNames } from "../service-provisioner";
 import {
   listOwnedImages,
   pruneBuildCache,
@@ -56,6 +58,43 @@ async function knownSlugs(): Promise<Set<string>> {
 }
 
 /**
+ * The containers and volumes belonging to a service row that still exists.
+ *
+ * Needed because a service with no project carries no `runpanel.project` label,
+ * and the project rule below reads a missing label as "not ours to judge". That
+ * is the right default — but it also meant a standalone service whose row went
+ * away (a Docker removal that failed and was swallowed, a hand-edited store)
+ * left a container and a database volume that nothing could ever reclaim, on a
+ * page whose whole purpose is reclaiming things.
+ */
+async function knownServiceResources(): Promise<{ containers: Set<string>; volumes: Set<string> }> {
+  const db = await getDb();
+  const services = await db
+    .selectFrom("services")
+    .leftJoin("projects", "projects.id", "services.project_id")
+    .select(["services.name", "services.type", "services.container_name", "projects.slug"])
+    .execute();
+
+  const containers = new Set<string>();
+  const volumes = new Set<string>();
+
+  for (const service of services) {
+    containers.add(service.container_name);
+    // Derived rather than recorded, and generously: erring towards "known"
+    // leaks disk, erring towards "orphan" offers a live database for deletion.
+    for (const name of serviceVolumeNames({
+      type: service.type,
+      name: service.name,
+      projectSlug: service.slug,
+    })) {
+      volumes.add(name);
+    }
+  }
+
+  return { containers, volumes };
+}
+
+/**
  * Resources RunPanel owns whose project no longer exists in the store.
  *
  * Read-only: this is what the Storage page shows before anyone presses a
@@ -65,8 +104,24 @@ export async function findOrphans(): Promise<OrphanReport> {
   const empty: OrphanReport = { containers: [], images: [], volumes: [], networks: [] };
   if (!(await isDockerAvailable())) return empty;
 
-  const slugs = await knownSlugs();
+  const [slugs, knownService] = await Promise.all([knownSlugs(), knownServiceResources()]);
   const orphaned = (slug: string | null) => slug !== null && !slugs.has(slug);
+
+  /**
+   * A resource with no project label is judged by its service instead — but
+   * only when it says it is a service. Anything else with no project stays out
+   * of the report: a false "known" wastes disk, a false "orphan" puts a live
+   * database in a delete-everything button.
+   */
+  const orphanedResource = (
+    name: string,
+    labels: Record<string, string>,
+    known: Set<string>
+  ): boolean => {
+    const project = labels[LABEL_PROJECT] ?? null;
+    if (project !== null) return orphaned(project);
+    return labels[LABEL_KIND] === "service" && !known.has(name);
+  };
 
   // Every docker CLI call costs hundreds of milliseconds, so these run
   // concurrently and each resource type is listed exactly once — labels come
@@ -81,9 +136,9 @@ export async function findOrphans(): Promise<OrphanReport> {
   const containers = lines(containersOut?.stdout ?? "")
     .map((line) => {
       const [name, labels] = line.split("\t");
-      return { name, project: parseLabels(labels)[LABEL_PROJECT] ?? null };
+      return { name, labels: parseLabels(labels) };
     })
-    .filter((c) => orphaned(c.project))
+    .filter((c) => orphanedResource(c.name, c.labels, knownService.containers))
     .map((c) => c.name);
 
   const images = ownedImages
@@ -98,9 +153,9 @@ export async function findOrphans(): Promise<OrphanReport> {
   const volumes = lines(volumesOut?.stdout ?? "")
     .map((line) => {
       const [name, labels] = line.split("\t");
-      return { name, project: parseLabels(labels)[LABEL_PROJECT] ?? null };
+      return { name, labels: parseLabels(labels) };
     })
-    .filter((v) => orphaned(v.project))
+    .filter((v) => orphanedResource(v.name, v.labels, knownService.volumes))
     .map((v) => v.name);
 
   const networks = lines(networksOut?.stdout ?? "").filter((name) => {
@@ -183,12 +238,81 @@ export async function sweep(
  */
 const GC_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
+/** History worth keeping for a panel nobody is auditing. */
+const DEPLOYMENT_RETENTION_DAYS = 90;
+const WEBHOOK_RETENTION_DAYS = 30;
+
+/**
+ * The rows nothing else collects.
+ *
+ * Three tables here only ever grew. `deployments` gains a row per push and is
+ * read with a `GROUP BY` over the whole table on an endpoint polled every 5
+ * seconds; `webhook_deliveries` is written and never read back; `rate_limits`
+ * keys on a client address, so every distinct one left something behind.
+ *
+ * The newest deployment of each project is always kept, however old. A project
+ * that last shipped a year ago should still be able to say when.
+ */
+async function pruneStore(): Promise<void> {
+  const db = await getDb();
+  const cutoff = (days: number) =>
+    new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+
+  const rateLimits = await pruneRateLimits();
+
+  // One small query per project rather than a correlated subquery. Ids are
+  // random nanoids, so `max(id)` is not the newest row — it is alphabetical
+  // noise — and this runs every six hours over a handful of projects.
+  const owners = await db.selectFrom("deployments").select("project_id").distinct().execute();
+  const keep: string[] = [];
+  for (const { project_id } of owners) {
+    const newest = await db
+      .selectFrom("deployments")
+      .select("id")
+      .where("project_id", "=", project_id)
+      .orderBy("started_at", "desc")
+      .limit(1)
+      .executeTakeFirst();
+    if (newest) keep.push(newest.id);
+  }
+
+  let deployments = db
+    .deleteFrom("deployments")
+    .where("started_at", "<", cutoff(DEPLOYMENT_RETENTION_DAYS));
+  if (keep.length > 0) deployments = deployments.where("id", "not in", keep);
+
+  const deployed = rowCount(await deployments.executeTakeFirst());
+
+  const webhooks = rowCount(
+    await db
+      .deleteFrom("webhook_deliveries")
+      .where("received_at", "<", cutoff(WEBHOOK_RETENTION_DAYS))
+      .executeTakeFirst()
+  );
+
+  if (rateLimits + deployed + webhooks > 0) {
+    console.log(
+      `[gc] Store: ${deployed} deployment(s), ${webhooks} webhook delivery(ies), ` +
+        `${rateLimits} rate-limit window(s)`
+    );
+  }
+}
+
 const globalRef = globalThis as typeof globalThis & { __runpanelGcTimer?: NodeJS.Timeout };
 
 export function startGcScheduler(): void {
   if (globalRef.__runpanelGcTimer) return;
 
   const tick = async () => {
+    // Store housekeeping rides along on this timer rather than starting a
+    // second one, and goes first: it has nothing to do with Docker, so a host
+    // where the daemon is down must not be a host where it never runs.
+    try {
+      await pruneStore();
+    } catch (err) {
+      console.error("[gc] Store housekeeping failed:", err);
+    }
+
     try {
       const result = await sweep({ removeOrphans: false });
       if (result.reclaimedBytes > 0 || result.prunedImageTags.length > 0) {

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@heroui/react";
 import { Icon } from "@iconify/react";
+import type { LogLine } from "@/components/ui/LogViewer";
 
 /**
  * A shell inside the project's container.
@@ -20,7 +21,7 @@ export function TerminalTab({
   onLocalEcho,
 }: {
   projectId: string;
-  lines: string[];
+  lines: LogLine[];
   active: boolean;
   onActiveChange: (active: boolean) => void;
   onLocalEcho: (text: string) => void;
@@ -102,9 +103,12 @@ export function TerminalTab({
         {lines.length === 0 ? (
           <p className="text-muted">Avvia la shell per aprire un terminale dentro il container.</p>
         ) : (
-          lines.map((line, i) => (
-            <span key={i} className="text-foreground/85 break-all whitespace-pre-wrap">
-              {line}
+          // Keyed by id, not index: this buffer is trimmed from the FRONT, so
+          // an index key shifts under every row and React rewrites the whole
+          // list. Same mistake LogViewer documents having fixed.
+          lines.map((line) => (
+            <span key={line.id} className="text-foreground/85 break-all whitespace-pre-wrap">
+              {line.text}
             </span>
           ))
         )}

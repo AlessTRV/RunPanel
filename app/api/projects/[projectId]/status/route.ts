@@ -18,13 +18,19 @@ export async function GET(_request: NextRequest, { params }: Params) {
     .executeTakeFirst();
 
   if (!project) {
-    return NextResponse.json({ error: "Project not found" }, { status: 404 });
+    return NextResponse.json({ error: "Progetto non trovato" }, { status: 404 });
   }
 
+  // Asking the driver about a project that is not up costs a pm2/docker spawn to
+  // be told what the row already says. This endpoint is polled every 5 seconds
+  // per open project page, so it was the single most expensive thing the panel
+  // did while idle. /api/monitor has always guarded this; here it did not.
   let processInfo = null;
-  try {
-    processInfo = await processManager.status(project.slug, project.runtime_type);
-  } catch { /* ignore */ }
+  if (project.status === "running" || project.status === "deploying") {
+    try {
+      processInfo = await processManager.status(project.slug, project.runtime_type);
+    } catch { /* a driver that cannot answer is reported as no process info */ }
+  }
 
   return NextResponse.json({
     status: project.status,

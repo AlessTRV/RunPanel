@@ -81,6 +81,11 @@ async function createDialect(): Promise<Dialect> {
     sqlite.pragma("journal_mode = WAL");
     sqlite.pragma("foreign_keys = ON");
     sqlite.pragma("busy_timeout = 5000");
+    // The pairing WAL is meant to have. The default `FULL` fsyncs on every
+    // commit, and this store commits constantly — a session's `last_seen_at`,
+    // a run's heartbeat, each deploy status change. With WAL, `NORMAL` still
+    // survives a process crash; only a power cut can cost the last commits.
+    sqlite.pragma("synchronous = NORMAL");
 
     return new SqliteDialect({ database: sqlite });
   }
@@ -95,8 +100,15 @@ async function createDialect(): Promise<Dialect> {
       ? undefined
       : { rejectUnauthorized: dbConfig.ssl === "require" };
 
+  /**
+   * Without these two, a request that arrives when every connection is busy
+   * waits forever instead of failing, and a connection is kept open long after
+   * the burst that needed it.
+   */
+  const timeouts = { idleTimeoutMillis: 30_000, connectionTimeoutMillis: 10_000 };
+
   const pool = dbConfig.connectionString
-    ? new Pool({ connectionString: dbConfig.connectionString, max: dbConfig.poolMax, ssl })
+    ? new Pool({ connectionString: dbConfig.connectionString, max: dbConfig.poolMax, ssl, ...timeouts })
     : new Pool({
         host: dbConfig.host,
         port: dbConfig.port,
@@ -105,7 +117,21 @@ async function createDialect(): Promise<Dialect> {
         database: dbConfig.database,
         max: dbConfig.poolMax,
         ssl,
+        ...timeouts,
       });
+
+  /**
+   * Required, not defensive.
+   *
+   * `pg` emits `error` on the Pool when a client that is sitting IDLE dies —
+   * the database restarted, a firewall dropped the connection. An `error` event
+   * with no listener is an unhandled exception, so without this line a routine
+   * Postgres restart takes the panel down with it. Kysely retries on the next
+   * query; the pool discards the dead client by itself.
+   */
+  pool.on("error", (err) => {
+    console.error("[db] Idle Postgres client failed:", err.message);
+  });
 
   return new PostgresDialect({ pool });
 }
@@ -148,12 +174,38 @@ async function recoverFromCrash(db: Kysely<Database>): Promise<void> {
     .where("status", "=", "deploying")
     .executeTakeFirst();
 
+  // A half-written archive is not a backup, and a restore that stopped partway
+  // is the state an operator most needs to see. Both are left claiming to be in
+  // flight, and nothing will ever come back to finish them.
+  const backups = await db
+    .updateTable("backup_runs")
+    .set({
+      status: "failed",
+      error_message: "Server restarted during backup",
+      finished_at: nowIso(),
+    })
+    .where("status", "=", "running")
+    .executeTakeFirst();
+
+  const restores = await db
+    .updateTable("restore_runs")
+    .set({
+      status: "failed",
+      error_message: "Server restarted during restore",
+      finished_at: nowIso(),
+    })
+    .where("status", "=", "running")
+    .executeTakeFirst();
+
   const deployCount = rowCount(deployments);
   const projectCount = rowCount(projects);
-  if (deployCount > 0 || projectCount > 0) {
+  const backupCount = rowCount(backups);
+  const restoreCount = rowCount(restores);
+  if (deployCount > 0 || projectCount > 0 || backupCount > 0 || restoreCount > 0) {
     console.log(
       `[RunPanel] Crash recovery: ${deployCount} deployment(s) marked failed, ` +
-        `${projectCount} project(s) reset to stopped`
+        `${projectCount} project(s) reset to stopped, ` +
+        `${backupCount} backup(s) and ${restoreCount} restore(s) marked failed`
     );
   }
 }

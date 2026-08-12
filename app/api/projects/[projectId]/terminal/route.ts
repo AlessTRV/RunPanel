@@ -4,20 +4,46 @@ import { getDb } from "@/lib/db";
 import { spawn, type ChildProcess } from "child_process";
 import { projectEvents } from "@/services/events";
 
-// Store active shell sessions with last activity timestamp
-const sessions = new Map<string, { proc: ChildProcess; buffer: string[]; lastActivity: number }>();
+interface ShellSession {
+  proc: ChildProcess;
+  buffer: string[];
+  lastActivity: number;
+}
 
-// Auto-cleanup: kill sessions idle for more than 10 minutes
+/**
+ * Live shells, and the timer that reaps them.
+ *
+ * Both hang off `globalThis`, like the database handle and the housekeeping
+ * schedulers do, and for the same reason with an extra edge: this module owns
+ * running `docker exec` processes. Re-evaluated on a dev reload, a plain module
+ * constant gave the new copy an empty Map — the shells from before were still
+ * running with nothing left holding a reference — and started a second reaper
+ * that would never see them either.
+ *
+ * `unref()` because a cleanup timer must never be the reason the process
+ * refuses to exit.
+ */
 const SESSION_TIMEOUT_MS = 10 * 60 * 1000;
-setInterval(() => {
-  const now = Date.now();
-  for (const [key, session] of sessions) {
-    if (now - session.lastActivity > SESSION_TIMEOUT_MS) {
-      try { session.proc.kill(); } catch { /* ignore */ }
-      sessions.delete(key);
+
+const globalRef = globalThis as typeof globalThis & {
+  __runpanelShellSessions?: Map<string, ShellSession>;
+  __runpanelShellReaper?: NodeJS.Timeout;
+};
+
+const sessions = (globalRef.__runpanelShellSessions ??= new Map<string, ShellSession>());
+
+if (!globalRef.__runpanelShellReaper) {
+  globalRef.__runpanelShellReaper = setInterval(() => {
+    const now = Date.now();
+    for (const [key, session] of sessions) {
+      if (now - session.lastActivity > SESSION_TIMEOUT_MS) {
+        try { session.proc.kill(); } catch { /* ignore */ }
+        sessions.delete(key);
+      }
     }
-  }
-}, 60_000);
+  }, 60_000);
+  globalRef.__runpanelShellReaper.unref?.();
+}
 
 type Params = { params: Promise<{ projectId: string }> };
 
@@ -38,12 +64,12 @@ export async function POST(request: NextRequest, { params }: Params) {
     .executeTakeFirst();
 
   if (!project) {
-    return NextResponse.json({ error: "Project not found" }, { status: 404 });
+    return NextResponse.json({ error: "Progetto non trovato" }, { status: 404 });
   }
 
   // Only allow terminal for Docker projects
   if (project.runtime_type !== "docker") {
-    return NextResponse.json({ error: "Terminal is only available for Docker containers" }, { status: 400 });
+    return NextResponse.json({ error: "Il terminale è disponibile solo per i progetti che girano in un container Docker" }, { status: 400 });
   }
 
   const containerName = `runpanel-${project.slug}`;
@@ -110,7 +136,7 @@ export async function POST(request: NextRequest, { params }: Params) {
     return NextResponse.json({ status: "ok" });
   }
 
-  return NextResponse.json({ error: "Invalid action" }, { status: 400 });
+  return NextResponse.json({ error: "Azione non valida" }, { status: 400 });
 }
 
 // GET: Poll for output

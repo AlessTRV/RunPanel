@@ -2,6 +2,9 @@ import type { Migration, MigrationProvider } from "kysely/migration";
 import * as initial from "./001-initial";
 import * as buildLogToFile from "./002-build-log-to-file";
 import * as sessionsAndLimits from "./003-sessions-and-limits";
+import * as standaloneServices from "./004-standalone-services";
+import * as backupsAndAutostart from "./005-backups-and-autostart";
+import * as historyIndexes from "./006-history-indexes";
 
 /**
  * Migrations are registered statically rather than read from disk with
@@ -14,6 +17,9 @@ export const migrations: Record<string, Migration> = {
   "001-initial": initial,
   "002-build-log-to-file": buildLogToFile,
   "003-sessions-and-limits": sessionsAndLimits,
+  "004-standalone-services": standaloneServices,
+  "005-backups-and-autostart": backupsAndAutostart,
+  "006-history-indexes": historyIndexes,
 };
 
 export class StaticMigrationProvider implements MigrationProvider {
