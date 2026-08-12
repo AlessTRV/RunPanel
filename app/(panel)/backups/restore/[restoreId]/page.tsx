@@ -12,7 +12,8 @@ import { SkeletonBlock } from "@/components/ui/Skeletons";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useEventStream } from "@/lib/hooks/useEventStream";
 import { useResource } from "@/lib/hooks/useResource";
-import { formatDuration, formatWhen } from "../../_components/format";
+import { usePollInterval } from "@/lib/hooks/usePollingInterval";
+import { formatDuration, formatWhen } from "@/lib/format";
 
 interface RestoreDetail {
   id: string;
@@ -33,11 +34,12 @@ type OpsEvent =
   | { type: "restore:status"; status: string; message?: string };
 
 export default function RestorePage({ params }: { params: Promise<{ restoreId: string }> }) {
+  const poll3000 = usePollInterval(3000);
   const { restoreId } = use(params);
 
   const { data, loading, error, refresh } = useResource<RestoreDetail>(
     `/api/backups/restore/${restoreId}`,
-    { intervalMs: 3000 }
+    { intervalMs: poll3000 }
   );
 
   const running = data?.status === "running";

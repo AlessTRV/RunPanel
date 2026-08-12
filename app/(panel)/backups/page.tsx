@@ -10,19 +10,20 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { LinkButton } from "@/components/ui/LinkButton";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { DeleteButton } from "@/components/ui/DangerAction";
+import { DestinationForm } from "./_components/DestinationForm";
 import { Hint } from "@/components/ui/Hint";
 import { SkeletonBlock } from "@/components/ui/Skeletons";
 import { StatTile } from "@/components/ui/StatTile";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useResource } from "@/lib/hooks/useResource";
-import { formatBytes } from "@/lib/utils";
-import { formatDuration, formatRelative, formatWhen, triggerLabel } from "./_components/format";
+import { usePollInterval } from "@/lib/hooks/usePollingInterval";
+import { formatBytes, formatDuration, formatRelative, formatWhen } from "@/lib/format";
+import { triggerLabel } from "./_components/format";
 import {
   describeTarget,
   type DestinationView,
   type PolicyView,
-  type RunView,
   type RunsResponse,
   type TargetCatalog,
 } from "./_components/types";
@@ -46,11 +47,13 @@ const NIGHTLY_PRESET = {
 };
 
 export default function BackupsPage() {
+  const poll20000 = usePollInterval(20000);
+  const poll5000 = usePollInterval(5000);
   const router = useRouter();
 
-  const runs = useResource<RunsResponse>("/api/backups/runs?limit=25", { intervalMs: 5000 });
+  const runs = useResource<RunsResponse>("/api/backups/runs?limit=25", { intervalMs: poll5000 });
   const policies = useResource<{ policies: PolicyView[] }>("/api/backups/policies", {
-    intervalMs: 20_000,
+    intervalMs: poll20000,
   });
   const destinations = useResource<{ destinations: DestinationView[] }>(
     "/api/backups/destinations"
@@ -58,8 +61,7 @@ export default function BackupsPage() {
   const catalog = useResource<TargetCatalog>("/api/backups/targets");
 
   const [busy, setBusy] = useState<string | null>(null);
-  const [confirmRun, setConfirmRun] = useState<RunView | null>(null);
-  const [confirmPolicy, setConfirmPolicy] = useState<PolicyView | null>(null);
+  const [addingDestination, setAddingDestination] = useState(false);
 
   const overview = runs.data?.overview;
   const activeRunId = runs.data?.activeRunId ?? null;
@@ -133,18 +135,18 @@ export default function BackupsPage() {
     }
   }
 
-  async function deletePolicy(policy: PolicyView) {
-    const res = await fetch(`/api/backups/policies/${policy.id}`, { method: "DELETE" });
+  async function removePolicy(policyId: string) {
+    const res = await fetch(`/api/backups/policies/${policyId}`, { method: "DELETE" });
     if (!res.ok) {
       toast.error("Eliminazione non riuscita");
       return;
     }
-    toast.success(`"${policy.name}" eliminata. I backup già fatti restano.`);
+    toast.success("Pianificazione eliminata. I backup già fatti restano.");
     policies.refresh();
   }
 
-  async function deleteRun(run: RunView) {
-    const res = await fetch(`/api/backups/runs/${run.id}`, { method: "DELETE" });
+  async function removeRun(runId: string) {
+    const res = await fetch(`/api/backups/runs/${runId}`, { method: "DELETE" });
     const body = await res.json().catch(() => ({}));
     if (!res.ok) {
       toast.error(body.error ?? "Eliminazione non riuscita");
@@ -268,7 +270,7 @@ export default function BackupsPage() {
                         {policy.name}
                       </Link>
                       {!policy.enabled && (
-                        <span className="text-muted bg-default rounded-full px-2 py-0.5 text-[11px]">
+                        <span className="text-muted bg-default rounded-full px-2 py-0.5 text-meta">
                           disattivata
                         </span>
                       )}
@@ -310,14 +312,15 @@ export default function BackupsPage() {
                         aria-hidden
                       />
                     </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onPress={() => setConfirmPolicy(policy)}
-                      aria-label="Elimina"
-                    >
-                      <Icon icon="solar:trash-bin-trash-linear" width={16} aria-hidden />
-                    </Button>
+                    <DeleteButton
+                      label={`Elimina la pianificazione ${policy.name}`}
+                      confirm={{
+                        title: `Eliminare "${policy.name}"?`,
+                        description:
+                          "Gli archivi già creati restano e si possono ancora ripristinare. Da adesso non ne verranno creati altri da questa pianificazione.",
+                      }}
+                      onConfirm={() => removePolicy(policy.id)}
+                    />
                   </div>
                 </li>
               ))}
@@ -381,15 +384,16 @@ export default function BackupsPage() {
                       </LinkButton>
                     )}
                     <LinkButton href={`/backups/runs/${run.id}`}>Dettagli</LinkButton>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onPress={() => setConfirmRun(run)}
+                    <DeleteButton
+                      label="Elimina questo backup"
                       isDisabled={run.status === "running"}
-                      aria-label="Elimina"
-                    >
-                      <Icon icon="solar:trash-bin-trash-linear" width={16} aria-hidden />
-                    </Button>
+                      confirm={{
+                        title: "Eliminare questo backup?",
+                        description:
+                          "L'archivio viene cancellato dal disco. Se è l'ultimo riuscito, resti senza un punto di ripristino.",
+                      }}
+                      onConfirm={() => removeRun(run.id)}
+                    />
                   </div>
                 </li>
               ))}
@@ -401,7 +405,13 @@ export default function BackupsPage() {
           <div className="p-4 sm:p-5">
             <PanelHeader
               title="Destinazioni"
-              description="Dove finiscono gli archivi. Al momento solo il disco di questa macchina."
+              description="Dove finiscono gli archivi"
+              actions={
+                <Button size="sm" variant="secondary" onPress={() => setAddingDestination(true)}>
+                  <Icon icon="solar:add-circle-linear" width={16} aria-hidden />
+                  Aggiungi
+                </Button>
+              }
             />
           </div>
           <ul className="divide-border divide-y">
@@ -428,6 +438,12 @@ export default function BackupsPage() {
           </ul>
         </Panel>
 
+        <DestinationForm
+          isOpen={addingDestination}
+          onOpenChange={setAddingDestination}
+          onCreated={destinations.refresh}
+        />
+
         <Hint tone="warn" title="Gli archivi contengono segreti">
           Le variabili d&apos;ambiente e le credenziali dei servizi vengono salvate cifrate con la
           chiave di questo pannello, e i file stanno in <code>data/backups</code> con permessi 0600.
@@ -436,29 +452,6 @@ export default function BackupsPage() {
         </Hint>
       </div>
 
-      <ConfirmDialog
-        isOpen={confirmPolicy !== null}
-        onOpenChange={(open) => !open && setConfirmPolicy(null)}
-        destructive
-        title={`Eliminare "${confirmPolicy?.name}"?`}
-        description="La pianificazione sparisce, gli archivi già prodotti restano al loro posto."
-        confirmLabel="Elimina"
-        onConfirm={async () => {
-          if (confirmPolicy) await deletePolicy(confirmPolicy);
-        }}
-      />
-
-      <ConfirmDialog
-        isOpen={confirmRun !== null}
-        onOpenChange={(open) => !open && setConfirmRun(null)}
-        destructive
-        title="Eliminare questo backup?"
-        description="L'archivio viene rimosso dal disco. Non è recuperabile."
-        confirmLabel="Elimina"
-        onConfirm={async () => {
-          if (confirmRun) await deleteRun(confirmRun);
-        }}
-      />
     </>
   );
 }

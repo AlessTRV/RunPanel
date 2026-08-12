@@ -1,11 +1,11 @@
 import fs from "fs";
 import path from "path";
 import crypto from "crypto";
-import { decrypt, encrypt } from "@/lib/auth";
+import { decrypt, encrypt } from "@/lib/crypto";
 import { config } from "@/lib/config";
 import { getDb } from "@/lib/db";
 import type { ProjectsTable } from "@/lib/db/schema";
-import { formatBytes } from "@/lib/utils";
+import { formatBytes } from "@/lib/format";
 import { dockerToFile, dockerTry } from "../docker/cli";
 import { listOwnedVolumes } from "../docker/volumes";
 import type { RunContext, StagedFile } from "./types";

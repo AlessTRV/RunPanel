@@ -8,7 +8,8 @@ import type {
   BackupTrigger,
   ProjectsTable,
 } from "@/lib/db/schema";
-import { formatBytes, generateId } from "@/lib/utils";
+import { generateId } from "@/lib/utils";
+import { formatBytes } from "@/lib/format";
 import { opsEvents } from "../events";
 import { isDockerAvailable } from "../docker/cli";
 import { writeArchive } from "./archive";

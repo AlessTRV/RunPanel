@@ -62,6 +62,59 @@ export async function run({ base, dataDir }) {
   const probe = await api.call(`/api/backups/destinations/${destination.id}`, { method: "POST" });
   r.check("it verifies as writable", probe.body?.ok === true, JSON.stringify(probe.body));
 
+  // --- an S3 destination is validated before it is stored -------------------
+  //
+  // The archives carry every environment variable the panel holds, so the
+  // transport rule matters: TLS towards anything public, plain HTTP tolerated
+  // only towards an address that cannot leave the operator's own network. Half
+  // a configuration is refused outright — accepted, encrypted and then failing
+  // at 03:00 is the worst of the three outcomes.
+  const s3 = (config, name = `s3-${Math.random().toString(36).slice(2, 8)}`) =>
+    api.call("/api/backups/destinations", {
+      method: "POST",
+      body: JSON.stringify({ name, type: "s3", config }),
+    });
+
+  const complete = {
+    region: "auto",
+    bucket: "archivi",
+    accessKeyId: "chiave",
+    secretAccessKey: "segreto",
+  };
+
+  for (const [label, endpoint] of [
+    ["a public host over plain http", "http://s3.amazonaws.com"],
+    ["a hostname that is not a URL", "non-un-url"],
+    ["another scheme entirely", "ftp://storage.example.com"],
+  ]) {
+    const refused = await s3({ ...complete, endpoint });
+    r.check(`S3 endpoint refused: ${label}`, refused.status === 400, `${endpoint} → ${refused.status}`);
+  }
+
+  const missingKey = await s3({ endpoint: "https://s3.example.com", region: "auto", bucket: "archivi" });
+  r.check("an S3 destination without credentials is refused", missingKey.status === 400, String(missingKey.status));
+
+  const publicTls = await s3({ ...complete, endpoint: "https://s3.example.com" }, "s3-pubblico");
+  r.check("https towards a public host is accepted", publicTls.status === 201, String(publicTls.status));
+
+  const lan = await s3({ ...complete, endpoint: "http://192.168.1.50:9000" }, "s3-in-lan");
+  r.check(
+    "and plain http towards a private address too",
+    lan.status === 201,
+    `${lan.status} ${JSON.stringify(lan.body).slice(0, 120)}`
+  );
+
+  // The secret must never come back out, however the row is read.
+  const listed = await api.call("/api/backups/destinations");
+  r.check(
+    "no destination ever returns its config",
+    (listed.body?.destinations ?? []).every((row) => row.config === undefined)
+  );
+
+  for (const id of [publicTls.body?.id, lan.body?.id].filter(Boolean)) {
+    await api.call(`/api/backups/destinations/${id}`, { method: "DELETE" });
+  }
+
   // --- schedules are validated by the real parser --------------------------
   const badCron = await api.call("/api/backups/policies", {
     method: "POST",

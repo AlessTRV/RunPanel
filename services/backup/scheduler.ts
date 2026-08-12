@@ -47,16 +47,6 @@ export function startBackupScheduler(): void {
   globalRef.__runpanelBackupFirstTick.unref?.();
 }
 
-export function stopBackupScheduler(): void {
-  if (globalRef.__runpanelBackupTimer) {
-    clearInterval(globalRef.__runpanelBackupTimer);
-    globalRef.__runpanelBackupTimer = undefined;
-  }
-  if (globalRef.__runpanelBackupFirstTick) {
-    clearTimeout(globalRef.__runpanelBackupFirstTick);
-    globalRef.__runpanelBackupFirstTick = undefined;
-  }
-}
 
 export interface TickResult {
   due: number;

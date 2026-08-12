@@ -2,12 +2,12 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { AlertDialog, Button, Input, Label, TextField } from "@heroui/react";
-import { Icon } from "@iconify/react";
+import { Input, Label, TextField } from "@heroui/react";
+import { FormDialog } from "@/components/ui/FormDialog";
 import { toast } from "sonner";
 import { Hint } from "@/components/ui/Hint";
 import { useResource } from "@/lib/hooks/useResource";
-import { formatBytes } from "@/lib/utils";
+import { formatBytes } from "@/lib/format";
 import type { ArtifactView, TargetCatalog } from "./types";
 
 /**
@@ -65,7 +65,6 @@ export function RestoreDialog({
   );
   const [skipSafety, setSkipSafety] = useState(false);
   const [confirmText, setConfirmText] = useState("");
-  const [pending, setPending] = useState(false);
 
   const selected = restorable.filter((artifact) => choices[artifact.id]?.action === "restore");
   // The name the operator has to type: the first thing that will be overwritten.
@@ -98,56 +97,46 @@ export function RestoreDialog({
       return;
     }
 
-    setPending(true);
-    try {
-      const res = await fetch("/api/backups/restore", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          runId,
-          confirm: confirmText.trim(),
-          skipSafetyBackup: skipSafety,
-          targets: restorable.map((artifact) => ({
-            artifactId: artifact.id,
-            action: choices[artifact.id]?.action ?? "skip",
-            ...(choices[artifact.id]?.targetId
-              ? { targetId: choices[artifact.id].targetId }
-              : {}),
-          })),
-        }),
-      });
+    const res = await fetch("/api/backups/restore", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        runId,
+        confirm: confirmText.trim(),
+        skipSafetyBackup: skipSafety,
+        targets: restorable.map((artifact) => ({
+          artifactId: artifact.id,
+          action: choices[artifact.id]?.action ?? "skip",
+          ...(choices[artifact.id]?.targetId ? { targetId: choices[artifact.id].targetId } : {}),
+        })),
+      }),
+    });
 
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        toast.error(body.error ?? "Avvio del ripristino non riuscito");
-        return;
-      }
-
-      toast.success("Ripristino avviato");
-      onOpenChange(false);
-      router.push(`/backups/restore/${body.restoreId}`);
-    } catch {
-      toast.error("Avvio del ripristino non riuscito");
-    } finally {
-      setPending(false);
+    const body = await res.json().catch(() => ({}));
+    // Thrown rather than returned: FormDialog keeps the dialog open and the
+    // choices intact when the submit rejects, which is the whole point of a
+    // form that took a minute to fill in.
+    if (!res.ok) {
+      toast.error(body.error ?? "Avvio del ripristino non riuscito");
+      throw new Error(body.error ?? "restore failed");
     }
+
+    toast.success("Ripristino avviato");
+    router.push(`/backups/restore/${body.restoreId}`);
   }
 
   return (
-    <AlertDialog.Backdrop
+    <FormDialog
       isOpen={isOpen}
-      onOpenChange={(open) => {
-        if (pending) return;
-        onOpenChange(open);
-      }}
+      onOpenChange={onOpenChange}
+      wide
+      destructive
+      title="Ripristinare da questo backup"
+      submitLabel="Ripristina"
+      isSubmitDisabled={!confirmed || selected.length === 0}
+      onSubmit={submit}
     >
-      <AlertDialog.Container>
-        <AlertDialog.Dialog className="max-w-2xl">
-          <AlertDialog.Header>
-            <AlertDialog.Heading>Ripristinare da questo backup</AlertDialog.Heading>
-          </AlertDialog.Header>
-
-          <AlertDialog.Body>
+      <>
             <p className="text-muted text-sm">
               Scegli cosa rimettere e dove. Quello che c&apos;è adesso al posto scelto viene
               sovrascritto.
@@ -252,24 +241,7 @@ export function RestoreDialog({
                 )}
               </div>
             )}
-          </AlertDialog.Body>
-
-          <AlertDialog.Footer className="justify-end gap-2">
-            <Button variant="ghost" isDisabled={pending} onPress={() => onOpenChange(false)}>
-              Annulla
-            </Button>
-            <Button
-              variant="danger"
-              isPending={pending}
-              isDisabled={!confirmed || selected.length === 0}
-              onPress={submit}
-            >
-              <Icon icon="solar:restart-linear" width={16} aria-hidden />
-              Ripristina
-            </Button>
-          </AlertDialog.Footer>
-        </AlertDialog.Dialog>
-      </AlertDialog.Container>
-    </AlertDialog.Backdrop>
+      </>
+    </FormDialog>
   );
 }

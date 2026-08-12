@@ -119,46 +119,5 @@ async function forget(run: Candidate): Promise<boolean> {
   return true;
 }
 
-/**
- * Archives on disk that no row points at any more — the residue of a database
- * restored from an older snapshot, or of a row deleted by hand.
- *
- * Reported, not deleted. The panel's rule for orphaned Docker resources is that
- * a human decides, and an orphaned archive is if anything more valuable than an
- * orphaned image.
- */
-export async function findOrphanArchives(): Promise<string[]> {
-  const fs = await import("fs");
-  const path = await import("path");
-  const { config } = await import("@/lib/config");
-
-  const root = config.backupArchivesDir;
-  if (!fs.existsSync(root)) return [];
-
-  const db = await getDb();
-  const rows = await db.selectFrom("backup_runs").select("archive_path").execute();
-  const known = new Set(rows.map((row) => row.archive_path).filter(Boolean) as string[]);
-
-  const orphans: string[] = [];
-  const walk = (dir: string) => {
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      const full = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        walk(full);
-        continue;
-      }
-      if (!entry.name.endsWith(".zip")) continue;
-      const relative = path.relative(config.backupsDir, full).split(path.sep).join("/");
-      if (!known.has(relative)) orphans.push(relative);
-    }
-  };
-
-  try {
-    walk(root);
-  } catch {
-    /* an unreadable tree is a diagnostics problem, not a sweep failure */
-  }
-  return orphans;
-}
 
 export type { BackupRunsTable };

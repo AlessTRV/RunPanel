@@ -1,11 +1,12 @@
 import fs from "fs";
 import path from "path";
-import { decrypt, encrypt } from "@/lib/auth";
+import { decrypt, encrypt } from "@/lib/crypto";
 import { config } from "@/lib/config";
 import { getDb, nowIso } from "@/lib/db";
 import type { ProjectsTable, ServicesTable } from "@/lib/db/schema";
 import { getEnv } from "@/lib/env";
-import { formatBytes, generateId } from "@/lib/utils";
+import { generateId } from "@/lib/utils";
+import { formatBytes } from "@/lib/format";
 import { docker, dockerFromFile, dockerTry } from "../docker/cli";
 import { opsEvents } from "../events";
 import { processManager } from "../process-manager";
@@ -56,9 +57,6 @@ export class RestoreBusyError extends Error {
 
 const globalRef = globalThis as typeof globalThis & { __runpanelRestoreActive?: string | null };
 
-export function activeRestoreId(): string | null {
-  return globalRef.__runpanelRestoreActive ?? null;
-}
 
 /** Where an artifact is unpacked before it is fed to an engine. */
 function restoreStaging(restoreId: string): string {
@@ -276,37 +274,6 @@ async function loadArtifacts(request: RestoreRequest): Promise<Map<string, Resto
   throw new Error("Il ripristino da archivio caricato richiede prima un'ispezione");
 }
 
-/**
- * What an uploaded archive contains, read from its own manifest.
- *
- * Used by the wizard's inspect step so the operator maps real entries onto real
- * targets rather than guessing.
- */
-export async function inspectArchive(file: string): Promise<{
-  artifacts: RestorableArtifact[];
-  entries: string[];
-}> {
-  const { readArchiveManifest } = await import("./archive-read");
-  const manifest = await readArchiveManifest(file);
-  const entries = (await listArchiveEntries(file)).map((entry) => entry.entryPath);
-
-  if (!manifest) return { artifacts: [], entries };
-
-  return {
-    artifacts: manifest.artifacts
-      .filter((artifact) => artifact.status === "ok")
-      .map((artifact, index) => ({
-        id: `${index}`,
-        kind: artifact.kind,
-        refId: artifact.refId,
-        refName: artifact.refName,
-        entryPath: artifact.entryPath,
-        bytes: artifact.bytes,
-        meta: (artifact.meta ?? {}) as Record<string, unknown>,
-      })),
-    entries,
-  };
-}
 
 // --- The safety copy ---------------------------------------------------------
 

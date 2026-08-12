@@ -15,7 +15,15 @@ export async function POST(request: NextRequest) {
   const denied = await requireAuth();
   if (denied) return denied;
 
-  const parsed = cronPreviewSchema.safeParse(await request.json());
+  // A malformed body is a bad request, not a 500.
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Richiesta non valida" }, { status: 400 });
+  }
+
+  const parsed = cronPreviewSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json(
       { error: parsed.error.issues[0]?.message ?? "Espressione non valida" },

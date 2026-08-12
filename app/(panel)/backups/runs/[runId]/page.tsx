@@ -13,9 +13,10 @@ import { SkeletonBlock } from "@/components/ui/Skeletons";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useEventStream } from "@/lib/hooks/useEventStream";
 import { useResource } from "@/lib/hooks/useResource";
-import { formatBytes } from "@/lib/utils";
+import { usePollInterval } from "@/lib/hooks/usePollingInterval";
+import { formatBytes, formatDuration, formatWhen } from "@/lib/format";
 import { RestoreDialog } from "../../_components/RestoreDialog";
-import { formatDuration, formatWhen, triggerLabel } from "../../_components/format";
+import { triggerLabel } from "../../_components/format";
 import type { ArtifactView, RunDetail } from "../../_components/types";
 
 type OpsEvent =
@@ -33,11 +34,12 @@ const KIND_LABELS: Record<string, string> = {
 };
 
 export default function BackupRunPage({ params }: { params: Promise<{ runId: string }> }) {
+  const poll4000 = usePollInterval(4000);
   const { runId } = use(params);
 
   const { data, loading, error, refresh } = useResource<RunDetail>(
     `/api/backups/runs/${runId}`,
-    { intervalMs: 4000 }
+    { intervalMs: poll4000 }
   );
 
   const [restoreOpen, setRestoreOpen] = useState(false);
@@ -160,7 +162,7 @@ export default function BackupRunPage({ params }: { params: Promise<{ runId: str
             />
             <Field label="Elementi" value={`${ok.length} ok, ${failed.length} falliti, ${skipped.length} saltati`} />
             {data.checksum && (
-              <Field label="sha256" value={<code className="text-[11px]">{data.checksum.slice(0, 16)}…</code>} />
+              <Field label="sha256" value={<code className="text-meta">{data.checksum.slice(0, 16)}…</code>} />
             )}
           </div>
 

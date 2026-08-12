@@ -3,7 +3,7 @@ import path from "path";
 import type { ServicesTable } from "@/lib/db/schema";
 import { docker, dockerToFile, dockerTry } from "../docker/cli";
 import { databaseAdmin, execArgs, serviceTarget, type ServiceTarget } from "../service-databases";
-import { formatBytes } from "@/lib/utils";
+import { formatBytes } from "@/lib/format";
 import type { RunContext, StagedFile } from "./types";
 
 /**

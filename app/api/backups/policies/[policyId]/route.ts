@@ -23,7 +23,15 @@ export async function PUT(request: NextRequest, { params }: Params) {
   if (denied) return denied;
 
   const { policyId } = await params;
-  const parsed = updateBackupPolicySchema.safeParse(await request.json());
+  // A malformed body is a bad request, not a 500.
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Richiesta non valida" }, { status: 400 });
+  }
+
+  const parsed = updateBackupPolicySchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json(
       { error: "Dati non validi", details: parsed.error.issues },

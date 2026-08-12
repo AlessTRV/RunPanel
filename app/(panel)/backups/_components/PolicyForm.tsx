@@ -5,11 +5,13 @@ import { useRouter } from "next/navigation";
 import { Button, Input, Label, TextField } from "@heroui/react";
 import { Icon } from "@iconify/react";
 import { toast } from "sonner";
+import { MSG } from "@/lib/copy";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
+import { Section } from "@/components/ui/Section";
 import { Code, FieldHint, Hint } from "@/components/ui/Hint";
+import { Segmented, SegmentedMulti } from "@/components/ui/Segmented";
 import { useResource } from "@/lib/hooks/useResource";
-import { cn } from "@/lib/utils";
-import { formatWhen } from "./format";
+import { formatWhen } from "@/lib/format";
 import type {
   BackupTarget,
   DestinationView,
@@ -106,14 +108,18 @@ function initialSelection(policy?: PolicyView): Selection {
   return selection;
 }
 
-function segment(active: boolean): string {
-  return cn(
-    "rounded-[var(--radius)] border px-3 py-1.5 text-xs transition-colors",
-    active
-      ? "border-accent bg-accent/10 text-foreground font-medium"
-      : "border-border text-muted hover:bg-surface-hover"
-  );
-}
+/**
+ * The three answers every scope question in this form takes.
+ *
+ * Defined once because "Tutti / Solo alcuni / Nessuno" appeared twice with the
+ * same words and separate code, and a form that asks the same question twice
+ * should visibly be asking the same question.
+ */
+const SCOPE_OPTIONS = [
+  { value: "all" as Scope, label: "Tutti" },
+  { value: "some" as Scope, label: "Solo alcuni" },
+  { value: "none" as Scope, label: "Nessuno" },
+];
 
 export function PolicyForm({ policy }: Props) {
   const router = useRouter();
@@ -145,6 +151,31 @@ export function PolicyForm({ policy }: Props) {
 
   const [preview, setPreview] = useState<{ description: string; occurrences: string[] } | null>(null);
   const [cronError, setCronError] = useState<string | null>(null);
+
+  /**
+   * What a closed section is set to. Without these, collapsing one would hide
+   * the answer along with the controls, which is hiding information rather
+   * than reducing it.
+   */
+  const scopeWord = (scope: Scope) =>
+    scope === "all" ? "tutti" : scope === "some" ? "alcuni" : "nessuno";
+
+  const contentSummary = [
+    `database: ${scopeWord(databaseScope)}`,
+    `progetti: ${scopeWord(projectScope)}`,
+    includePanel ? "store del pannello" : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  const retentionSummary =
+    [
+      retentionCount ? `${retentionCount} archivi` : null,
+      retentionDays ? `${retentionDays} giorni` : null,
+      retentionGb ? `${retentionGb} GB` : null,
+    ]
+      .filter(Boolean)
+      .join(" · ") || "nessun limite";
   const [saving, setSaving] = useState(false);
 
   // Falls back to the first destination as soon as the list arrives, without an
@@ -281,14 +312,14 @@ export function PolicyForm({ policy }: Props) {
 
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
-        toast.error(body.error ?? body.details?.[0]?.message ?? "Salvataggio non riuscito");
+        toast.error(body.error ?? body.details?.[0]?.message ?? MSG.saveFailed);
         return;
       }
 
       toast.success(policy ? "Pianificazione aggiornata" : "Pianificazione creata");
       router.push("/backups");
     } catch {
-      toast.error("Salvataggio non riuscito");
+      toast.error(MSG.saveFailed);
     } finally {
       setSaving(false);
     }
@@ -334,18 +365,16 @@ export function PolicyForm({ policy }: Props) {
           description="Scegli un intervallo, oppure scrivi un'espressione cron a cinque campi."
         />
 
-        <div className="mt-4 flex flex-wrap gap-2">
-          {SCHEDULE_PRESETS.map((preset) => (
-            <button
-              key={preset.label}
-              type="button"
-              aria-pressed={cron === preset.cron}
-              className={segment(cron === preset.cron)}
-              onClick={() => setCron(preset.cron)}
-            >
-              {preset.label}
-            </button>
-          ))}
+        <div className="mt-4">
+          <Segmented
+            label="Con che frequenza"
+            value={cron}
+            onChange={setCron}
+            options={SCHEDULE_PRESETS.map((preset) => ({
+              value: preset.cron,
+              label: preset.label,
+            }))}
+          />
         </div>
 
         <div className="mt-4 grid gap-4 sm:grid-cols-2">
@@ -378,24 +407,27 @@ export function PolicyForm({ policy }: Props) {
         )}
       </Panel>
 
-      <Panel>
-        <PanelHeader title="Cosa salvare" />
+      {/*
+        A schedule is four decisions — what to call it, when, what goes in, how
+        much to keep — and the form should look like four. It looked like five
+        equal panels with about fifteen pill controls between them, all open at
+        once, so the shape of the decision was invisible.
+
+        The two that have a defensible default are sections: they say what they
+        are currently set to, and open only if that is not what you want.
+      */}
+      <Section title="Cosa salvare" summary={contentSummary} defaultExpanded={!policy}>
 
         {/* Databases */}
         <div className="mt-4">
           <p className="text-foreground text-sm font-medium">Database gestiti</p>
-          <div className="mt-2 flex flex-wrap gap-2">
-            {(["all", "some", "none"] as Scope[]).map((scope) => (
-              <button
-                key={scope}
-                type="button"
-                aria-pressed={databaseScope === scope}
-                className={segment(databaseScope === scope)}
-                onClick={() => setDatabaseScope(scope)}
-              >
-                {scope === "all" ? "Tutti" : scope === "some" ? "Solo alcuni" : "Nessuno"}
-              </button>
-            ))}
+          <div className="mt-2">
+            <Segmented
+              label="Quali database salvare"
+              value={databaseScope}
+              onChange={setDatabaseScope}
+              options={SCOPE_OPTIONS}
+            />
           </div>
 
           {databaseScope === "all" && (
@@ -442,7 +474,7 @@ export function PolicyForm({ policy }: Props) {
                             {database}
                           </label>
                         ))}
-                        <span className="text-muted text-[11px]">
+                        <span className="text-muted text-meta">
                           {databases?.length
                             ? "solo i database spuntati"
                             : "nessuno spuntato: salva l'intero server, ruoli compresi"}
@@ -495,40 +527,27 @@ export function PolicyForm({ policy }: Props) {
         {/* Projects */}
         <div className="border-border mt-5 border-t pt-4">
           <p className="text-foreground text-sm font-medium">Progetti</p>
-          <div className="mt-2 flex flex-wrap gap-2">
-            {(["all", "some", "none"] as Scope[]).map((scope) => (
-              <button
-                key={scope}
-                type="button"
-                aria-pressed={projectScope === scope}
-                className={segment(projectScope === scope)}
-                onClick={() => setProjectScope(scope)}
-              >
-                {scope === "all" ? "Tutti" : scope === "some" ? "Solo alcuni" : "Nessuno"}
-              </button>
-            ))}
+          <div className="mt-2">
+            <Segmented
+              label="Quali progetti salvare"
+              value={projectScope}
+              onChange={setProjectScope}
+              options={SCOPE_OPTIONS}
+            />
           </div>
 
           {projectScope !== "none" && (
             <>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {(Object.keys(INCLUDE_LABELS) as ProjectInclude[]).map((include) => (
-                  <button
-                    key={include}
-                    type="button"
-                    aria-pressed={projectInclude.includes(include)}
-                    className={segment(projectInclude.includes(include))}
-                    onClick={() =>
-                      setProjectInclude((current) =>
-                        current.includes(include)
-                          ? current.filter((entry) => entry !== include)
-                          : [...current, include]
-                      )
-                    }
-                  >
-                    {INCLUDE_LABELS[include]}
-                  </button>
-                ))}
+              <div className="mt-3">
+                <SegmentedMulti
+                  label="Cosa salvare di ogni progetto"
+                  values={projectInclude}
+                  onChange={setProjectInclude}
+                  options={(Object.keys(INCLUDE_LABELS) as ProjectInclude[]).map((include) => ({
+                    value: include,
+                    label: INCLUDE_LABELS[include],
+                  }))}
+                />
               </div>
               <FieldHint>
                 Il repository è escluso di serie perché ce l&apos;ha già GitHub — tranne per i
@@ -562,7 +581,7 @@ export function PolicyForm({ policy }: Props) {
                     </span>
                   )}
                   {project.sourceType === "upload" && (
-                    <span className="text-muted text-[11px]">da ZIP</span>
+                    <span className="text-muted text-meta">da ZIP</span>
                   )}
                 </label>
               ))}
@@ -571,18 +590,18 @@ export function PolicyForm({ policy }: Props) {
         </div>
 
         {targets.length === 0 && (
-          <Hint tone="warn" className="mt-4">
+          <Hint tone="warn">
             Così com&apos;è, questa pianificazione non salverebbe niente.
           </Hint>
         )}
-      </Panel>
+      </Section>
 
-      <Panel>
-        <PanelHeader
-          title="Quanto tenerne"
-          description="I limiti si applicano insieme. L'archivio riuscito più recente non viene mai cancellato, qualunque cosa dicano i numeri."
-        />
-        <div className="mt-4 grid gap-4 sm:grid-cols-3">
+      <Section title="Quanto tenerne" summary={retentionSummary}>
+        <FieldHint>
+          I limiti si applicano insieme. L&apos;archivio riuscito più recente non viene mai
+          cancellato, qualunque cosa dicano i numeri.
+        </FieldHint>
+        <div className="grid gap-4 sm:grid-cols-3">
           <TextField value={retentionCount} onChange={setRetentionCount}>
             <Label>Quanti archivi</Label>
             <Input inputMode="numeric" placeholder="7" />
@@ -596,7 +615,7 @@ export function PolicyForm({ policy }: Props) {
             <Input inputMode="numeric" placeholder="nessun limite" />
           </TextField>
         </div>
-      </Panel>
+      </Section>
 
       <div className="flex items-center gap-2">
         <Button onPress={save} isPending={saving}>
