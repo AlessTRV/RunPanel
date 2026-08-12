@@ -84,7 +84,15 @@ export async function PUT(request: NextRequest) {
   const denied = await requireAuth();
   if (denied) return denied;
 
-  const parsed = autostartUpdateSchema.safeParse(await request.json());
+  // A malformed body is a bad request, not a 500 with a stack trace.
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Richiesta non valida" }, { status: 400 });
+  }
+
+  const parsed = autostartUpdateSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json(
       { error: "Dati non validi", details: parsed.error.issues },
@@ -94,28 +102,34 @@ export async function PUT(request: NextRequest) {
 
   const db = await getDb();
 
-  for (const entry of parsed.data.entries) {
-    const columns = autostartColumns({
-      autostart: entry.autostart,
-      order: entry.order,
-      delaySeconds: entry.delaySeconds,
-      waitHealthy: entry.waitHealthy,
-    });
+  // In a transaction because boot order is a RELATION between rows, not a set
+  // of independent values. Saving five entries and failing on the sixth used to
+  // leave a configuration nobody chose — half the new order, half the old — and
+  // the page would then show it as if it were what had been asked for.
+  await db.transaction().execute(async (trx) => {
+    for (const entry of parsed.data.entries) {
+      const columns = autostartColumns({
+        autostart: entry.autostart,
+        order: entry.order,
+        delaySeconds: entry.delaySeconds,
+        waitHealthy: entry.waitHealthy,
+      });
 
-    if (entry.kind === "service") {
-      await db
-        .updateTable("services")
-        .set({ ...columns, updated_at: nowIso() })
-        .where("id", "=", entry.id)
-        .execute();
-    } else {
-      await db
-        .updateTable("projects")
-        .set({ ...columns, updated_at: nowIso() })
-        .where("id", "=", entry.id)
-        .execute();
+      if (entry.kind === "service") {
+        await trx
+          .updateTable("services")
+          .set({ ...columns, updated_at: nowIso() })
+          .where("id", "=", entry.id)
+          .execute();
+      } else {
+        await trx
+          .updateTable("projects")
+          .set({ ...columns, updated_at: nowIso() })
+          .where("id", "=", entry.id)
+          .execute();
+      }
     }
-  }
+  });
 
   return NextResponse.json({ ok: true, updated: parsed.data.entries.length });
 }

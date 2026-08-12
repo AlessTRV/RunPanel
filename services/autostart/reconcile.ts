@@ -75,11 +75,6 @@ export function startAutostartReconciler(): void {
   globalRef.__runpanelAutostartTimer.unref?.();
 }
 
-export function stopAutostartReconciler(): void {
-  if (!globalRef.__runpanelAutostartTimer) return;
-  clearTimeout(globalRef.__runpanelAutostartTimer);
-  globalRef.__runpanelAutostartTimer = undefined;
-}
 
 interface Candidate {
   kind: AutostartKind;

@@ -14,7 +14,15 @@ export async function POST(request: NextRequest) {
   const denied = await requireAuth();
   if (denied) return denied;
 
-  const parsed = autostartInstallSchema.safeParse(await request.json());
+  // A malformed body is a bad request, not a 500.
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Richiesta non valida" }, { status: 400 });
+  }
+
+  const parsed = autostartInstallSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json(
       { error: "Dati non validi", details: parsed.error.issues },

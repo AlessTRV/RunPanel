@@ -4,15 +4,19 @@ import { useMemo, useState } from "react";
 import { Button } from "@heroui/react";
 import { Icon } from "@iconify/react";
 import { toast } from "sonner";
+import { MSG } from "@/lib/copy";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
+import { Section } from "@/components/ui/Section";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Code, Hint } from "@/components/ui/Hint";
 import { SkeletonBlock } from "@/components/ui/Skeletons";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useResource } from "@/lib/hooks/useResource";
+import { usePollInterval } from "@/lib/hooks/usePollingInterval";
 import { cn } from "@/lib/utils";
-import { formatWhen } from "../backups/_components/format";
+import { formatWhen } from "@/lib/format";
+import { CommandBlock } from "@/components/ui/CommandBlock";
 import type { AutostartData, AutostartEntry } from "./_components/types";
 
 const METHOD_LABELS: Record<string, string> = {
@@ -23,8 +27,9 @@ const METHOD_LABELS: Record<string, string> = {
 };
 
 export default function AutostartPage() {
+  const poll15000 = usePollInterval(15000);
   const { data, loading, refresh } = useResource<AutostartData>("/api/autostart", {
-    intervalMs: 15_000,
+    intervalMs: poll15000,
   });
 
   const [edits, setEdits] = useState<Record<string, Partial<AutostartEntry>>>({});
@@ -65,7 +70,7 @@ export default function AutostartPage() {
         }),
       });
       if (!res.ok) {
-        toast.error("Salvataggio non riuscito");
+        toast.error(MSG.saveFailed);
         return;
       }
       toast.success("Preferenze di avvio salvate");
@@ -163,11 +168,40 @@ export default function AutostartPage() {
 
   const probe = data?.probe;
 
+  /**
+   * The one sentence this page exists to say.
+   *
+   * Derived from the probe rather than written per case, so it cannot drift
+   * from the facts in the section below it. The count is what makes it useful:
+   * "sì, riparte" is reassuring and useless if nothing is marked to come back.
+   */
+  const willReturn = data?.entries.filter((entry) => entry.autostart).length ?? 0;
+  const panelReturns =
+    probe?.environment.containerised ||
+    probe?.systemd.enabled ||
+    Boolean(data?.stored);
+
+  const verdict = panelReturns
+    ? {
+        title: "Dopo un riavvio il pannello torna su",
+        detail:
+          willReturn === 0
+            ? "Ma nessun progetto o servizio è marcato per ripartire: sceglili qui sotto."
+            : `E con lui ${willReturn} ${willReturn === 1 ? "elemento" : "elementi"}, nell'ordine che hai scelto.`,
+      }
+    : {
+        title: "Dopo un riavvio il pannello resta giù",
+        detail:
+          probe?.recommended === "manual"
+            ? "Questa macchina non offre né systemd né cron: va avviato a mano."
+            : "Attiva l'avvio al boot, altrimenti niente di quello che c'è qui sotto riparte.",
+      };
+
   return (
     <>
       <PageHeader
         title="Avvio automatico"
-        description="Che cosa succede dopo un riavvio della macchina: se torna su il pannello, e che cosa riporta su lui."
+        description="Se riavvii la macchina, cosa torna su"
         actions={
           dirty ? (
             <Button size="sm" onPress={save} isPending={busy === "save"}>
@@ -179,10 +213,18 @@ export default function AutostartPage() {
       />
 
       <div className="space-y-4">
+        {/*
+          The verdict, in one sentence, before anything else.
+
+          This page reported six facts about systemd, cron, Docker and PM2 in a
+          two-column grid and left the reader to work out the answer to the only
+          question they had. The facts are still here — one click away, in a
+          section that names what they add up to.
+        */}
         <Panel>
           <PanelHeader
-            title="Avvio del pannello"
-            description={probe?.recommendedReason}
+            title={verdict.title}
+            description={verdict.detail}
             actions={
               probe?.recommended === "systemd" || probe?.recommended === "cron" ? (
                 <div className="flex items-center gap-2">
@@ -214,7 +256,10 @@ export default function AutostartPage() {
             }
           />
 
-          <dl className="mt-4 grid gap-3 sm:grid-cols-2">
+        </Panel>
+
+        <Section title="Dettagli del boot" summary={probe?.recommendedReason}>
+          <dl className="grid gap-3 sm:grid-cols-2">
             <Row
               label="Metodo"
               value={METHOD_LABELS[probe?.recommended ?? "manual"]}
@@ -300,7 +345,7 @@ export default function AutostartPage() {
           </dl>
 
           {probe?.environment.containerised && (
-            <Hint tone="info" className="mt-4" title="Il pannello gira dentro un container">
+            <Hint tone="info" title="Il pannello gira dentro un container">
               Qui non serve una unit systemd: a riportarlo su è Docker. Assicurati che il container
               abbia <Code>--restart unless-stopped</Code>
               {probe.selfContainer.restartPolicy
@@ -310,19 +355,19 @@ export default function AutostartPage() {
           )}
 
           {probe?.pm2.available && !probe.pm2.dumpSaved && (
-            <Hint tone="warn" className="mt-4" title="Le app PM2 non tornerebbero su">
+            <Hint tone="warn" title="Le app PM2 non tornerebbero su">
               PM2 fa girare i progetti con runtime nativo, e riporta su solo quello che è stato
               salvato con <Code>pm2 save</Code>. Senza, dopo un riavvio il pannello torna e le app no.
             </Hint>
           )}
 
           {plan && (
-            <div className="mt-4">
+            <div>
               <p className="text-muted mb-2 text-xs">{plan.reason}</p>
               <CommandBlock commands={plan.commands} />
             </div>
           )}
-        </Panel>
+        </Section>
 
         {mismatched.length > 0 && (
           <Hint tone="warn" title="La restart policy non corrisponde">
@@ -549,25 +594,3 @@ function Group({
   );
 }
 
-function CommandBlock({ commands }: { commands: string[] }) {
-  const text = commands.join("\n\n");
-  return (
-    <div className="border-border bg-surface-secondary relative rounded-[var(--radius)] border">
-      <Button
-        size="sm"
-        variant="ghost"
-        className="absolute top-2 right-2"
-        onPress={() => {
-          void navigator.clipboard.writeText(text);
-          toast.success("Comandi copiati");
-        }}
-      >
-        <Icon icon="solar:copy-linear" width={15} aria-hidden />
-        Copia
-      </Button>
-      <pre className="text-muted overflow-x-auto p-3 pr-24 text-[11px] leading-relaxed whitespace-pre">
-        {text}
-      </pre>
-    </div>
-  );
-}
