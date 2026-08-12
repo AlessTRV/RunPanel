@@ -7,6 +7,9 @@ import { Button, Input, Label, TextField } from "@heroui/react";
 import { Icon } from "@iconify/react";
 import { toast } from "sonner";
 import { useResource } from "@/lib/hooks/useResource";
+import { Segmented } from "@/components/ui/Segmented";
+import { InfoTip } from "@/components/ui/Tooltip";
+import { formatRelative } from "@/lib/format";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { Code, FieldHint, Hint } from "@/components/ui/Hint";
 import { PortHint, ServiceLinkHint } from "@/components/DeployHints";
@@ -25,16 +28,6 @@ interface GhRepo {
   language: string | null;
   private: boolean;
   updated_at: string;
-}
-
-function relativeTime(iso: string): string {
-  const days = Math.floor((Date.now() - Date.parse(iso)) / 86_400_000);
-  if (!Number.isFinite(days)) return "";
-  if (days <= 0) return "oggi";
-  if (days === 1) return "ieri";
-  if (days < 30) return `${days}g fa`;
-  if (days < 365) return `${Math.floor(days / 30)}m fa`;
-  return `${Math.floor(days / 365)}a fa`;
 }
 
 const RUNTIMES: { id: RuntimeType; label: string; hint: string; icon: string }[] = [
@@ -96,6 +89,9 @@ export function AppForm({
   const [sourceUrl, setSourceUrl] = useState("");
   const [branch, setBranch] = useState("main");
   const [runtime, setRuntime] = useState<RuntimeType>("node");
+  // Null means "let RunPanel look at the repository", which is what it has
+  // always done — the picker adds the ability to say otherwise.
+  const [presetId, setPresetId] = useState<string | null>(null);
   const [port, setPort] = useState("");
   const [installCmd, setInstallCmd] = useState("");
   const [buildCmd, setBuildCmd] = useState("");
@@ -105,6 +101,11 @@ export function AppForm({
   const [selectedRepo, setSelectedRepo] = useState<GhRepo | null>(null);
   const [manualUrl, setManualUrl] = useState(false);
   const zipInputRef = useRef<HTMLInputElement>(null);
+
+  const { data: presetData } = useResource<{
+    presets: { id: string; label: string; description: string; runtime: RuntimeType }[];
+  }>("/api/presets");
+  const presets = presetData?.presets ?? [];
 
   const { data: repoData, loading: reposLoading } = useResource<{
     connected?: boolean;
@@ -158,6 +159,9 @@ export function AppForm({
           sourceBranch: branch || "main",
           runtimeType: runtime,
           port: port ? Number.parseInt(port, 10) : null,
+          // Applied server-side: the preset's contract lives with its `detect`
+          // function, which reads the filesystem and cannot cross to a browser.
+          presetId,
           builderConfig: {
             version: 1,
             commands: {
@@ -171,7 +175,7 @@ export function AppForm({
 
       if (!res.ok) {
         const data = await res.json();
-        toast.error(data.error ?? "Configurazione fallita");
+        toast.error(data.error ?? "Configurazione non riuscita");
         return;
       }
 
@@ -277,10 +281,10 @@ export function AppForm({
                             <Icon icon="solar:lock-linear" width={13} className="text-muted shrink-0" aria-label="privato" />
                           )}
                           {repo.language && (
-                            <span className="text-muted shrink-0 font-mono text-[11px]">{repo.language}</span>
+                            <span className="text-muted shrink-0 font-mono text-meta">{repo.language}</span>
                           )}
-                          <span className="text-muted shrink-0 text-[11px] tabular-nums">
-                            {relativeTime(repo.updated_at)}
+                          <span className="text-muted shrink-0 text-meta tabular-nums">
+                            {formatRelative(repo.updated_at)}
                           </span>
                         </button>
                       </li>
@@ -377,7 +381,49 @@ export function AppForm({
       </Panel>
 
       <Panel className="space-y-4">
-        <PanelHeader title="Runtime" description="Come viene costruita e avviata" />
+        <PanelHeader
+          title="Runtime"
+          description="Come viene costruita e avviata"
+          actions={
+            <InfoTip title="Preset">
+              Un preset è una configurazione già pronta per una forma di repository comune.
+              RunPanel ne rileva uno da solo guardando i file al primo deploy; sceglierlo qui serve
+              quando il repository non è ancora stato clonato, o quando la sua forma non è
+              riconoscibile dall&apos;esterno.
+            </InfoTip>
+          }
+        />
+
+        {presets.length > 0 && (
+          <div>
+            <span className="text-muted mb-2 block text-sm font-medium">Preset</span>
+            <Segmented
+              label="Preset di deploy"
+              value={presetId ?? "auto"}
+              onChange={(id) => {
+                if (id === "auto") {
+                  setPresetId(null);
+                  return;
+                }
+                setPresetId(id);
+                const chosen = presets.find((preset) => preset.id === id);
+                // Picking a preset picks its runtime: they are not independent
+                // choices, and letting them disagree is how a Dockerfile preset
+                // ends up on a PM2 project.
+                if (chosen) setRuntime(chosen.runtime);
+              }}
+              options={[
+                { value: "auto", label: "Rileva da solo" },
+                ...presets.map((preset) => ({ value: preset.id, label: preset.label })),
+              ]}
+            />
+            <FieldHint>
+              {presetId
+                ? presets.find((preset) => preset.id === presetId)?.description
+                : "RunPanel guarda i file del repository e sceglie la configurazione che gli somiglia."}
+            </FieldHint>
+          </div>
+        )}
 
         <div className="grid gap-2 sm:grid-cols-3">
           {RUNTIMES.map((r) => (
@@ -395,7 +441,7 @@ export function AppForm({
                 <Icon icon={r.icon} width={16} className="text-muted" aria-hidden />
                 {r.label}
               </span>
-              <span className="text-muted mt-1 block text-[11px]">{r.hint}</span>
+              <span className="text-muted mt-1 block text-meta">{r.hint}</span>
             </button>
           ))}
         </div>

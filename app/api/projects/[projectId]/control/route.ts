@@ -4,7 +4,7 @@ import { getDb, nowIso } from "@/lib/db";
 import { controlActionSchema } from "@/lib/validation";
 import { processManager } from "@/services/process-manager";
 import { projectEvents } from "@/services/events";
-import { decrypt } from "@/lib/auth";
+import { decrypt } from "@/lib/crypto";
 
 type Params = { params: Promise<{ projectId: string }> };
 
@@ -28,7 +28,7 @@ async function startFromDeploy(
     .executeTakeFirst();
 
   if (!lastDeploy?.start_cmd || !lastDeploy.artifact_dir) {
-    return { error: "No previous successful deployment found. Deploy the project first." };
+    return { error: "Non c'è nessun deploy riuscito da riavviare. Fai prima un deploy." };
   }
 
   const envRows = await db
@@ -68,7 +68,13 @@ export async function POST(request: NextRequest, { params }: Params) {
   if (denied) return denied;
 
   const { projectId } = await params;
-  const body = await request.json();
+  // A malformed body is a bad request, not a 500.
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Richiesta non valida" }, { status: 400 });
+  }
   const parsed = controlActionSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json({ error: "Azione non valida" }, { status: 400 });

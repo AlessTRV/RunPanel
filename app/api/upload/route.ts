@@ -35,7 +35,7 @@ export async function POST(request: NextRequest) {
   // Validate slug to prevent path traversal
   if (!isValidSlug(projectSlug)) {
     return NextResponse.json(
-      { error: "Invalid project slug" },
+      { error: "Slug del progetto non valido" },
       { status: 400 }
     );
   }
@@ -56,7 +56,7 @@ export async function POST(request: NextRequest) {
 
   if (!file.name.endsWith(".zip")) {
     return NextResponse.json(
-      { error: "Only ZIP files are supported" },
+      { error: "Sono accettati solo file ZIP" },
       { status: 400 }
     );
   }

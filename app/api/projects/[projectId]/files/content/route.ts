@@ -116,11 +116,17 @@ export async function PUT(request: NextRequest, { params }: Params) {
   if (denied) return denied;
 
   const { projectId } = await params;
-  const body = await request.json();
+  // A malformed body is a bad request, not a 500.
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Richiesta non valida" }, { status: 400 });
+  }
   const { path: filePath, content } = body as { path?: string; content?: string };
 
   if (!filePath || !isPathShapeSafe(filePath) || typeof content !== "string") {
-    return NextResponse.json({ error: "Invalid path or content" }, { status: 400 });
+    return NextResponse.json({ error: "Percorso o contenuto non validi" }, { status: 400 });
   }
 
   if (isBinary(filePath)) {
@@ -128,7 +134,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
   }
 
   if (content.length > MAX_FILE_SIZE) {
-    return NextResponse.json({ error: "Content too large (max 1MB)" }, { status: 400 });
+    return NextResponse.json({ error: "Contenuto troppo grande: il massimo è 1 MB" }, { status: 400 });
   }
 
   const db = await getDb();

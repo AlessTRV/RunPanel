@@ -39,7 +39,7 @@ export default function NewProjectPage() {
 
       const data = await res.json();
       if (!res.ok) {
-        toast.error(data.error ?? "Creazione fallita");
+        toast.error(data.error ?? "Creazione non riuscita");
         return;
       }
 
@@ -47,7 +47,7 @@ export default function NewProjectPage() {
       // anything yet.
       setProject({ id: data.id, slug: data.slug });
     } catch {
-      toast.error("Creazione fallita");
+      toast.error("Creazione non riuscita");
     } finally {
       setCreating(false);
     }
@@ -81,7 +81,7 @@ export default function NewProjectPage() {
             >
               <span
                 className={cn(
-                  "flex size-5 items-center justify-center rounded-full border font-mono text-[11px]",
+                  "flex size-5 items-center justify-center rounded-full border font-mono text-meta",
                   step > n
                     ? "border-accent text-accent"
                     : step === n

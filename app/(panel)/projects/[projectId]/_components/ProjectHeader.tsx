@@ -82,7 +82,7 @@ export function ProjectHeader({
               <Icon icon="solar:refresh-linear" width={16} aria-hidden />
               Riavvia
             </Button>
-            <Button variant="danger" size="sm" onPress={() => onControl("stop")}>
+            <Button variant="outline" size="sm" onPress={() => onControl("stop")}>
               <Icon icon="solar:stop-linear" width={16} aria-hidden />
               Ferma
             </Button>

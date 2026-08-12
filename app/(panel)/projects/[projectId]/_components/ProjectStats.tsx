@@ -2,7 +2,8 @@
 
 import { memo } from "react";
 import { StatTile } from "@/components/ui/StatTile";
-import { fmtBytes, fmtUptime, type ProcessInfo } from "./types";
+import { formatBytes, formatUptime } from "@/lib/format";
+import { type ProcessInfo } from "./types";
 
 /**
  * Memoised: this re-renders on a 5-second status poll, and there is no reason
@@ -21,12 +22,12 @@ export const ProjectStats = memo(function ProjectStats({ info }: { info: Process
       <StatTile
         icon="solar:clock-circle-linear"
         label="Uptime"
-        value={info?.uptime ? fmtUptime(info.uptime) : "—"}
+        value={formatUptime(info?.uptime)}
       />
       <StatTile
         icon="solar:server-linear"
         label="Memoria"
-        value={info?.memory ? fmtBytes(info.memory) : "—"}
+        value={formatBytes(info?.memory)}
       />
       <StatTile
         icon="solar:cpu-linear"

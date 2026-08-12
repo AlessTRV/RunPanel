@@ -4,6 +4,7 @@ import { getDb, nowIso } from "@/lib/db";
 import type { ProjectsTable } from "@/lib/db/schema";
 import { updateProjectSchema } from "@/lib/validation";
 import { deployContractSchema, normalizeContractInput } from "@/lib/deploy-contract";
+import { getPreset } from "@/services/deploy-presets";
 import { processManager } from "@/services/process-manager";
 import { removeService } from "@/services/service-provisioner";
 import { removeProjectNetwork } from "@/services/docker-network";
@@ -55,7 +56,13 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   if (denied) return denied;
 
   const { projectId } = await params;
-  const body = await request.json();
+  // A malformed body is a bad request, not a 500.
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Richiesta non valida" }, { status: 400 });
+  }
   const parsed = updateProjectSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json(
@@ -75,7 +82,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     return NextResponse.json({ error: "Progetto non trovato" }, { status: 404 });
   }
 
-  const { name, appName, sourceType, sourceUrl, sourceBranch, runtimeType, port, autoDeploy, builderConfig } =
+  const { name, appName, sourceType, sourceUrl, sourceBranch, runtimeType, port, autoDeploy, builderConfig, presetId } =
     parsed.data;
 
   const updates: Partial<ProjectsTable> = {};
@@ -94,6 +101,17 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     // discard those keys and leave the project with no commands.
     const normalized = normalizeContractInput(builderConfig);
 
+    // A hand-picked preset sits UNDER what the caller sent, never over it: the
+    // operator typing a start command has said something more specific than the
+    // preset's default, and the preset must not take it back.
+    const preset = presetId ? getPreset(presetId) : null;
+    if (preset) {
+      Object.assign(normalized, {
+        ...preset.contract,
+        ...normalized,
+      });
+    }
+
     // Validate for shape, but persist the NORMALISED INPUT rather than the
     // parsed result. Parsing fills in every default, and a stored config full
     // of defaults is indistinguishable from one the operator chose — which
@@ -101,7 +119,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     const parsed = deployContractSchema.safeParse(normalized);
     if (!parsed.success) {
       return NextResponse.json(
-        { error: "Invalid deploy configuration", details: parsed.error.issues },
+        { error: "Configurazione di deploy non valida", details: parsed.error.issues },
         { status: 400 }
       );
     }

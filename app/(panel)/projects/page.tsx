@@ -5,7 +5,9 @@ import Link from "next/link";
 import { Input } from "@heroui/react";
 import { Icon } from "@iconify/react";
 import { useResource } from "@/lib/hooks/useResource";
+import { usePollInterval } from "@/lib/hooks/usePollingInterval";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { LinkButton } from "@/components/ui/LinkButton";
 import { Panel } from "@/components/ui/Panel";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { PageSkeleton } from "@/components/ui/Skeletons";
@@ -58,8 +60,9 @@ const ProjectRow = memo(function ProjectRow({ project }: { project: Project }) {
 });
 
 export default function ProjectsPage() {
+  const poll5000 = usePollInterval(5000);
   const [search, setSearch] = useState("");
-  const { data, loading } = useResource<Project[]>("/api/projects", { intervalMs: 5000 });
+  const { data, loading } = useResource<Project[]>("/api/projects", { intervalMs: poll5000 });
 
   const projects = useMemo(() => (Array.isArray(data) ? data : []), [data]);
 
@@ -79,13 +82,10 @@ export default function ProjectsPage() {
         title="Progetti"
         description="Tutti i progetti gestiti da questo pannello"
         actions={
-          <Link
-            href="/projects/new"
-            className="border-border bg-surface hover:bg-surface-hover text-foreground flex items-center gap-1.5 rounded-[var(--radius)] border px-3 py-1.5 text-sm transition-colors"
-          >
+          <LinkButton href="/projects/new" variant="secondary">
             <Icon icon="solar:add-circle-linear" width={16} aria-hidden />
             Nuovo progetto
-          </Link>
+          </LinkButton>
         }
       />
 

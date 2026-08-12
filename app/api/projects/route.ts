@@ -64,7 +64,7 @@ export async function GET() {
     return NextResponse.json(result);
   } catch (err: unknown) {
     console.error("[api/projects] Error:", err instanceof Error ? err.message : err);
-    return NextResponse.json({ error: "Failed to load projects" }, { status: 500 });
+    return NextResponse.json({ error: "Impossibile leggere i progetti" }, { status: 500 });
   }
 }
 
@@ -72,7 +72,13 @@ export async function POST(request: NextRequest) {
   const denied = await requireAuth();
   if (denied) return denied;
 
-  const body = await request.json();
+  // A malformed body is a bad request, not a 500.
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Richiesta non valida" }, { status: 400 });
+  }
   const parsed = createProjectSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json(

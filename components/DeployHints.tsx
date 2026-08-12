@@ -108,8 +108,9 @@ export function ManagedEnvHint({ runtimeType }: { runtimeType: string }) {
       {portAlwaysSet
         ? "dalla porta del progetto (3000 se non l'hai impostata)"
         : "se il progetto ha una porta impostata"}{" "}
-      e le connection URL dei servizi collegati. Se dichiari qui una variabile con lo stesso nome,
-      vince la tua. La configurazione del pannello — a partire da{" "}
+      e le connection URL dei servizi collegati che hanno l&apos;iniezione accesa — quelle vincono
+      su una variabile dello stesso nome dichiarata qui, e si spengono dal collegamento. La
+      configurazione del pannello — a partire da{" "}
       <Code>RUNPANEL_SECRET</Code>, la chiave con cui questi valori sono cifrati, e dal suo{" "}
       <Code>DATABASE_URL</Code> — viene invece tolta dall&apos;ambiente prima di consegnarlo al
       progetto: nessuna app deployata la vede.
@@ -134,8 +135,8 @@ export function ServiceLinkHint({ projectId }: { projectId?: string }) {
       )}{" "}
       e al deploy successivo la sua connection URL entra nell&apos;ambiente dell&apos;app da sola:{" "}
       <Code>DATABASE_URL</Code> per PostgreSQL e MySQL, <Code>REDIS_URL</Code> per Redis,{" "}
-      <Code>MONGODB_URL</Code> per MongoDB. Niente password da copiare, e l&apos;host giusto viene
-      scelto in base al runtime.
+      <Code>MONGODB_URL</Code> per MongoDB. Niente password da copiare. Il collegamento ha un
+      interruttore: spento, il progetto torna a usare le tue variabili.
     </Hint>
   );
 }

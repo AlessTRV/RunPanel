@@ -7,7 +7,8 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { Panel } from "@/components/ui/Panel";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { SkeletonBlock } from "@/components/ui/Skeletons";
-import { fmtDuration, type Deployment } from "./types";
+import { formatDurationBetween } from "@/lib/format";
+import { type Deployment } from "./types";
 
 const DeploymentCard = memo(function DeploymentCard({ deployment }: { deployment: Deployment }) {
   const [buildLog, setBuildLog] = useState<string | null>(null);
@@ -52,7 +53,7 @@ const DeploymentCard = memo(function DeploymentCard({ deployment }: { deployment
               )}
               {new Date(deployment.started_at).toLocaleString()}
               {deployment.finished_at &&
-                ` · ${fmtDuration(deployment.started_at, deployment.finished_at)}`}
+                ` · ${formatDurationBetween(deployment.started_at, deployment.finished_at)}`}
             </p>
           </div>
         </div>
@@ -73,10 +74,18 @@ const DeploymentCard = memo(function DeploymentCard({ deployment }: { deployment
         </Button>
       </div>
 
+      {/*
+        This field can be a raw `docker build` stderr dump. Rendered as prose it
+        read like the panel talking; under a label, in mono, it reads as what it
+        is — the output of the thing that failed.
+      */}
       {deployment.error_message && (
-        <p className="bg-danger/10 text-danger mt-3 rounded-[var(--radius)] px-3 py-2 text-sm">
-          {deployment.error_message}
-        </p>
+        <div className="bg-danger/10 mt-3 rounded-[var(--radius)] px-3 py-2">
+          <p className="text-danger text-meta mb-1">Errore riportato dal build</p>
+          <pre className="text-danger overflow-auto font-mono text-xs break-words whitespace-pre-wrap">
+            {deployment.error_message}
+          </pre>
+        </div>
       )}
 
       {expanded && buildLog && (

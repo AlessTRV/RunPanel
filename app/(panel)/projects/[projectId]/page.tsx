@@ -2,14 +2,14 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { Button, Input, Label, TextField } from "@heroui/react";
+import { Input, Label, TextField } from "@heroui/react";
 import { Icon } from "@iconify/react";
 import { toast } from "sonner";
 import { useProjectStream } from "@/lib/hooks/useProjectStream";
 import { useResource } from "@/lib/hooks/useResource";
+import { usePollInterval } from "@/lib/hooks/usePollingInterval";
 import { useLineBuffer } from "@/lib/hooks/useLineBuffer";
-import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
-import { Panel } from "@/components/ui/Panel";
+import { FormDialog } from "@/components/ui/FormDialog";
 import { PageSkeleton } from "@/components/ui/Skeletons";
 import type { LogLine } from "@/components/ui/LogViewer";
 import { parseContractJson } from "@/lib/deploy-contract";
@@ -44,6 +44,7 @@ function toLine(text: string, stream: LogLine["stream"] = "stdout"): LogLine {
 }
 
 export default function ProjectDetailPage() {
+  const poll5000 = usePollInterval(5000);
   const params = useParams();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -65,9 +66,12 @@ export default function ProjectDetailPage() {
   const termLines = useLineBuffer<LogLine>(MAX_LOG_LINES);
   const [shellActive, setShellActive] = useState(false);
 
-  const [renameOpen, setRenameOpen] = useState(tabParam === "settings");
+  // Opened by the gear, and only by it. It used to default to open whenever the
+  // URL carried `?tab=settings`, from when this dialog WAS the settings screen —
+  // so arriving at the settings tab greeted you with a rename prompt over the
+  // form you came for.
+  const [renameOpen, setRenameOpen] = useState(false);
   const [renameValue, setRenameValue] = useState("");
-  const [confirmDeleteProject, setConfirmDeleteProject] = useState(false);
 
   const prevStatus = useRef<string | undefined>(undefined);
 
@@ -135,7 +139,7 @@ export default function ProjectDetailPage() {
   // mirroring fetched data into a useState is what turns one render into two.
   const { data: statusData } = useResource<{ process?: ProcessInfo | null }>(
     `/api/projects/${projectId}/status`,
-    { intervalMs: 5000 }
+    { intervalMs: poll5000 }
   );
   const processInfo = statusData?.process ?? null;
 
@@ -187,7 +191,7 @@ export default function ProjectDetailPage() {
       });
       const data = await res.json();
       if (!res.ok) {
-        toast.error(data.error ?? "Avvio fallito");
+        toast.error(data.error ?? "Avvio non riuscito");
         return;
       }
       toast.success(data.status === "queued" ? "Messo in coda dopo il deploy in corso" : "Deploy avviato");
@@ -195,7 +199,7 @@ export default function ProjectDetailPage() {
         setProject((p) => (p ? { ...p, status: "deploying" } : p));
       }
     } catch {
-      toast.error("Avvio fallito");
+      toast.error("Avvio non riuscito");
     } finally {
       setDeploying(false);
     }
@@ -315,84 +319,44 @@ export default function ProjectDetailPage() {
         <SettingsTab project={project} onProjectChange={setProject} />
       )}
 
-      {/* Rename + delete the project itself, as opposed to its app. */}
-      {renameOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div
-            className="bg-backdrop absolute inset-0"
-            onClick={() => setRenameOpen(false)}
-            aria-hidden
-          />
-          <Panel className="relative z-10 w-full max-w-md space-y-5">
-            <div className="flex items-center justify-between">
-              <h2 className="text-foreground text-base font-medium">Progetto</h2>
-              <button
-                onClick={() => setRenameOpen(false)}
-                className="text-muted hover:text-foreground"
-                aria-label="Chiudi"
-              >
-                <Icon icon="solar:close-circle-linear" width={20} />
-              </button>
-            </div>
+      {/*
+        Rename the project itself, as opposed to its app.
 
-            <TextField value={renameValue} onChange={setRenameValue}>
-              <Label>Nome</Label>
-              <Input />
-            </TextField>
-
-            <Button
-              variant="primary"
-              className="w-full"
-              onPress={async () => {
-                const res = await fetch(`/api/projects/${projectId}`, {
-                  method: "PATCH",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ name: renameValue.trim() }),
-                });
-                if (res.ok) {
-                  const updated = await res.json();
-                  setProject((p) => (p ? { ...p, name: updated.name } : p));
-                  toast.success("Progetto rinominato");
-                  setRenameOpen(false);
-                } else {
-                  toast.error("Rinomina fallita");
-                }
-              }}
-            >
-              Salva
-            </Button>
-
-            <div className="border-border border-t pt-4">
-              <p className="text-danger mb-1 text-sm font-medium">Zona pericolosa</p>
-              <p className="text-muted mb-3 text-xs">
-                Elimina il progetto, i suoi servizi, i volumi con i dati e le immagini costruite.
-              </p>
-              <Button variant="danger" className="w-full" onPress={() => setConfirmDeleteProject(true)}>
-                <Icon icon="solar:trash-bin-trash-linear" width={18} aria-hidden />
-                Elimina progetto e servizi
-              </Button>
-            </div>
-          </Panel>
-        </div>
-      )}
-
-      <ConfirmDialog
-        isOpen={confirmDeleteProject}
-        onOpenChange={setConfirmDeleteProject}
-        destructive
-        title="Eliminare il progetto?"
-        confirmLabel="Elimina definitivamente"
-        description="Verranno rimossi i processi, i container, le immagini e i volumi dei servizi collegati. I dati dei database non sono recuperabili."
-        onConfirm={async () => {
-          const res = await fetch(`/api/projects/${projectId}`, { method: "DELETE" });
+        This was a raw `fixed inset-0` div with a click-anywhere backdrop: no
+        `role="dialog"`, no `aria-modal`, no focus trap, no Escape — fifteen
+        lines above a `ConfirmDialog` used correctly. The delete button that
+        lived in its footer has moved to the page header, next to the rename
+        that opens this: an irreversible action does not belong behind a dialog
+        titled "Progetto", where it is found by someone looking to fix a typo.
+      */}
+      <FormDialog
+        isOpen={renameOpen}
+        onOpenChange={setRenameOpen}
+        title="Rinomina progetto"
+        submitLabel="Salva"
+        isSubmitDisabled={!renameValue.trim() || renameValue.trim() === project.name}
+        onSubmit={async () => {
+          const res = await fetch(`/api/projects/${projectId}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name: renameValue.trim() }),
+          });
           if (res.ok) {
-            toast.success("Progetto eliminato");
-            router.push("/home");
+            const updated = await res.json();
+            setProject((p) => (p ? { ...p, name: updated.name } : p));
+            toast.success("Progetto rinominato");
           } else {
-            toast.error("Eliminazione fallita");
+            const data = await res.json().catch(() => ({}));
+            toast.error(data.error ?? "Rinomina non riuscita");
           }
         }}
-      />
+      >
+        <TextField value={renameValue} onChange={setRenameValue} autoFocus>
+          <Label>Nome</Label>
+          <Input />
+        </TextField>
+      </FormDialog>
+
     </div>
   );
 }

@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState } from "react";
 import { Button, Spinner } from "@heroui/react";
 import { Icon } from "@iconify/react";
 import { toast } from "sonner";
+import { MSG } from "@/lib/copy";
+import { formatBytes } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 interface FileEntry {
@@ -48,7 +50,7 @@ export function FileManager({ projectId, runtimeType }: { projectId: string; run
         })
         .catch((err: unknown) => {
           if (err instanceof DOMException && err.name === "AbortError") return;
-          setDirError(err instanceof Error ? err.message : "Lettura fallita");
+          setDirError(err instanceof Error ? err.message : "Lettura non riuscita");
           setEntries([]);
           setLoadingDir(false);
         }),
@@ -101,10 +103,10 @@ export function FileManager({ projectId, runtimeType }: { projectId: string; run
         setOriginalContent(content);
       } else {
         const data = await res.json();
-        toast.error(data.error ?? "Salvataggio fallito");
+        toast.error(data.error ?? MSG.saveFailed);
       }
     } catch {
-      toast.error("Salvataggio fallito");
+      toast.error(MSG.saveFailed);
     } finally {
       setSaving(false);
     }
@@ -119,7 +121,7 @@ export function FileManager({ projectId, runtimeType }: { projectId: string; run
         <Icon icon="solar:folder-linear" className="text-muted" width={18} aria-hidden />
         <h2 className="text-foreground text-sm font-medium">File</h2>
         {runtimeType === "docker" && (
-          <span className="bg-default text-muted rounded-full px-2 py-0.5 text-[10px]">
+          <span className="bg-default text-muted rounded-full px-2 py-0.5 text-meta">
             container
           </span>
         )}
@@ -198,9 +200,7 @@ export function FileManager({ projectId, runtimeType }: { projectId: string; run
                   />
                   <span className="flex-1 truncate">{entry.name}</span>
                   {entry.type === "file" && entry.size > 0 && (
-                    <span className="text-muted shrink-0 text-[10px]">
-                      {entry.size > 1024 ? `${(entry.size / 1024).toFixed(0)}K` : `${entry.size}B`}
-                    </span>
+                    <span className="text-muted text-meta shrink-0">{formatBytes(entry.size)}</span>
                   )}
                 </button>
               );
@@ -214,7 +214,7 @@ export function FileManager({ projectId, runtimeType }: { projectId: string; run
               <div className="flex min-w-0 items-center gap-2">
                 <Icon icon="solar:document-linear" className="text-muted" width={14} aria-hidden />
                 <span className="text-muted truncate font-mono text-xs">{selectedFile}</span>
-                {dirty && <span className="text-warning text-[10px]">modificato</span>}
+                {dirty && <span className="text-warning text-meta">modificato</span>}
               </div>
               <div className="flex shrink-0 items-center gap-2">
                 <Button
