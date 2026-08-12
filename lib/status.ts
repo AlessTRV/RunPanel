@@ -40,7 +40,9 @@ const STATUS_META: Record<KnownStatus, StatusMeta> = {
   checking: { tone: "neutral", label: "Checking", active: true },
   error: { tone: "danger", label: "Error" },
   failed: { tone: "danger", label: "Failed" },
-  superseded: { tone: "neutral", label: "Completed" },
+  // Not a lifecycle token like `running` — this one is narration, and it was
+  // the only English word in a map whose other outcomes are already Italian.
+  superseded: { tone: "neutral", label: "Sostituito" },
   success: { tone: "success", label: "Riuscito" },
   // A backup where some targets failed still has value, so it is not an error —
   // but it must not read as a clean night either.
@@ -57,13 +59,6 @@ export function statusTone(status: string): StatusTone {
   return statusMeta(status).tone;
 }
 
-/** Tailwind classes per tone, so text, dots and chips stay in step. */
-export const TONE_TEXT: Record<StatusTone, string> = {
-  success: "text-success",
-  warning: "text-warning",
-  danger: "text-danger",
-  neutral: "text-muted",
-};
 
 export const TONE_DOT: Record<StatusTone, string> = {
   success: "bg-success",

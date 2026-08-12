@@ -35,29 +35,3 @@ export function isValidSlug(slug: string): boolean {
   return /^[a-z0-9][a-z0-9-]*$/.test(slug) && !slug.includes("..");
 }
 
-/**
- * Bytes as people read them. Binary units, because that is what `docker system
- * df` and every filesystem tool on the host report, and a panel that disagreed
- * with them by 7% would look wrong rather than precise.
- */
-export function formatBytes(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes < 0) return "—";
-  if (bytes < 1024) return `${bytes} B`;
-
-  const units = ["KB", "MB", "GB", "TB", "PB"];
-  let value = bytes / 1024;
-  let unit = 0;
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024;
-    unit++;
-  }
-  return `${value.toFixed(value >= 10 ? 0 : 1)} ${units[unit]}`;
-}
-
-export function parseGitHubUrl(url: string): { owner: string; repo: string } | null {
-  const match = url.match(
-    /(?:https?:\/\/)?(?:www\.)?github\.com\/([^/]+)\/([^/.]+)(?:\.git)?/
-  );
-  if (!match) return null;
-  return { owner: match[1], repo: match[2] };
-}
