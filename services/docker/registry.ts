@@ -2,7 +2,7 @@ import fs from "fs";
 import path from "path";
 import { z } from "zod";
 import { config } from "@/lib/config";
-import { decrypt, encrypt } from "@/lib/auth";
+import { decrypt, encrypt } from "@/lib/crypto";
 import { getSetting, setSetting } from "@/lib/settings";
 
 /**

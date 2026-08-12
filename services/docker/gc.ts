@@ -331,11 +331,6 @@ export function startGcScheduler(): void {
   globalRef.__runpanelGcTimer.unref?.();
 }
 
-export function stopGcScheduler(): void {
-  if (!globalRef.__runpanelGcTimer) return;
-  clearInterval(globalRef.__runpanelGcTimer);
-  globalRef.__runpanelGcTimer = undefined;
-}
 
 export interface DiskUsageEntry {
   type: string;

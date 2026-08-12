@@ -5,7 +5,7 @@ import fs from "fs";
 import path from "path";
 import { config } from "@/lib/config";
 import { getSetting } from "@/lib/settings";
-import { decrypt } from "@/lib/auth";
+import { decrypt } from "@/lib/crypto";
 
 const exec = promisify(execFile);
 

@@ -132,10 +132,6 @@ export async function enqueueDeploy(
   return { status: "started", deploymentId };
 }
 
-/** Whether a follow-up is waiting — surfaced in the UI as "another queued". */
-export function hasQueuedDeploy(projectId: string): boolean {
-  return pending.has(projectId);
-}
 
 /** Forget a project's queued run, e.g. when it is deleted mid-deploy. */
 export function clearQueuedDeploy(projectId: string): void {

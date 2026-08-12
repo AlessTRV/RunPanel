@@ -5,7 +5,6 @@ import {
   logPathFor,
   pruneLogDir,
   readLogFile,
-  removeLogFile,
 } from "./log-file";
 
 /**
@@ -48,13 +47,6 @@ export function readBuildLog(deploymentId: string, tailLines?: number): string {
   }
 }
 
-export function removeBuildLog(deploymentId: string): void {
-  try {
-    removeLogFile(buildLogPath(deploymentId));
-  } catch {
-    /* an unparseable id has no file to remove */
-  }
-}
 
 /** Drop logs for deployments that no longer exist. */
 export function pruneBuildLogs(keepDeploymentIds: Set<string>): number {

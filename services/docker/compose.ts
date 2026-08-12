@@ -186,14 +186,3 @@ export function composeFollow(ctx: ComposeContext, onLine: (line: string) => voi
   );
 }
 
-/** Compose projects RunPanel owns, for the garbage collector. */
-export async function listComposeProjects(): Promise<string[]> {
-  const result = await dockerTry(["compose", "ls", "--all", "--format", "json"], { timeout: 30_000 });
-  if (!result) return [];
-  try {
-    const parsed = JSON.parse(result.stdout) as { Name?: string }[];
-    return parsed.map((p) => p.Name ?? "").filter((n) => n.startsWith("runpanel-"));
-  } catch {
-    return [];
-  }
-}
