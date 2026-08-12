@@ -19,7 +19,7 @@ export async function GET(request: NextRequest, { params }: Params) {
     .executeTakeFirst();
 
   if (!deployment) {
-    return NextResponse.json({ error: "Deployment not found" }, { status: 404 });
+    return NextResponse.json({ error: "Deploy non trovato" }, { status: 404 });
   }
 
   // The log is read from disk rather than a column. `?tail=N` keeps a long

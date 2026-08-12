@@ -1,4 +1,4 @@
-import { client, createReporter, sleep, waitForDeploy } from "../harness.mjs";
+import { client, createReporter, sleep, waitForDeploy, SETUP_TOKEN } from "../harness.mjs";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -18,7 +18,7 @@ export async function run({ base, dataDir }) {
 
   await api.call("/api/auth/login", {
     method: "POST",
-    body: JSON.stringify({ setup: true, password: "realtime-pw" }),
+    body: JSON.stringify({ setup: true, setupToken: SETUP_TOKEN, password: "realtime-pw" }),
   });
 
   const created = await api.call("/api/projects", {

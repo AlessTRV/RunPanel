@@ -17,13 +17,43 @@ export type ProjectEvent =
   | { type: "deploy:status"; deploymentId: string; status: string; message?: string }
   | { type: "deploy:log"; deploymentId: string; line: string }
   | { type: "process:log"; line: string; stream: "stdout" | "stderr" }
+  /**
+   * A new run is about to start and its output begins from nothing — see
+   * `process-drivers/run-log.ts`. Emitted before the process is replaced, so a
+   * viewer clears the old run's lines instead of appending the new ones under
+   * them, which is what made a log look like it had never changed.
+   */
+  | { type: "process:reset" }
   | { type: "process:status"; status: string; running: boolean; pid?: number; uptime?: number }
   | { type: "terminal:output"; text: string }
   | { type: "terminal:closed"; code: number | null };
 
-type Listener = (event: ProjectEvent) => void;
+/**
+ * Everything a long operation that is not a project emits: a backup run, a
+ * restore, the boot reconciler.
+ *
+ * A separate channel rather than a synthetic project id. `projectEvents` is
+ * keyed by project because every one of its events belongs to one, and the
+ * three operations here routinely belong to none — a backup of the panel's own
+ * store, a policy that touches ten projects, a standalone service being
+ * restored. Forcing them through a `"__system"` key would make the key mean two
+ * things, which is how the four disagreeing status maps in `lib/status.ts` came
+ * about in the first place.
+ */
+export type OpsEvent =
+  | { type: "backup:log"; line: string }
+  | { type: "backup:status"; status: string; message?: string }
+  | { type: "backup:artifact"; label: string; status: string; bytes?: number; error?: string }
+  | { type: "restore:log"; line: string }
+  | { type: "restore:status"; status: string; message?: string }
+  | { type: "autostart:log"; line: string };
 
-class ProjectEventBus {
+/**
+ * One emitter, keyed by a channel string. Two instances rather than two classes:
+ * the wiring is identical and only the event union and the meaning of the key
+ * differ.
+ */
+class ChannelBus<TEvent> {
   private emitter = new EventEmitter();
 
   constructor() {
@@ -32,24 +62,32 @@ class ProjectEventBus {
     this.emitter.setMaxListeners(200);
   }
 
-  emit(projectId: string, event: ProjectEvent): void {
-    this.emitter.emit(projectId, event);
+  emit(channel: string, event: TEvent): void {
+    this.emitter.emit(channel, event);
   }
 
-  subscribe(projectId: string, listener: Listener): () => void {
-    this.emitter.on(projectId, listener);
+  subscribe(channel: string, listener: (event: TEvent) => void): () => void {
+    this.emitter.on(channel, listener);
     return () => {
-      this.emitter.off(projectId, listener);
+      this.emitter.off(channel, listener);
     };
   }
 
-  subscriberCount(projectId: string): number {
-    return this.emitter.listenerCount(projectId);
+  subscriberCount(channel: string): number {
+    return this.emitter.listenerCount(channel);
   }
 }
 
 // Held on globalThis so dev-mode module reloading does not orphan subscribers
 // on an emitter nobody publishes to any more.
-const globalRef = globalThis as typeof globalThis & { __runpanelEvents?: ProjectEventBus };
+const globalRef = globalThis as typeof globalThis & {
+  __runpanelEvents?: ChannelBus<ProjectEvent>;
+  __runpanelOpsEvents?: ChannelBus<OpsEvent>;
+};
 
-export const projectEvents = (globalRef.__runpanelEvents ??= new ProjectEventBus());
+export const projectEvents = (globalRef.__runpanelEvents ??= new ChannelBus<ProjectEvent>());
+
+/** Keyed by run id, or by `HOST_CHANNEL` for things that belong to the machine. */
+export const opsEvents = (globalRef.__runpanelOpsEvents ??= new ChannelBus<OpsEvent>());
+
+export const HOST_CHANNEL = "host";

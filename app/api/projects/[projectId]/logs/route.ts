@@ -23,7 +23,7 @@ export async function GET(request: NextRequest, { params }: Params) {
       .executeTakeFirst();
 
     if (!project) {
-      return NextResponse.json({ error: "Project not found" }, { status: 404 });
+      return NextResponse.json({ error: "Progetto non trovato" }, { status: 404 });
     }
 
     try {
