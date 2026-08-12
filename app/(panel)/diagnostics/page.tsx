@@ -9,6 +9,7 @@ import { Hint } from "@/components/ui/Hint";
 import { SkeletonBlock } from "@/components/ui/Skeletons";
 import { StatTile } from "@/components/ui/StatTile";
 import { useResource } from "@/lib/hooks/useResource";
+import { usePollInterval } from "@/lib/hooks/usePollingInterval";
 
 interface DiagnosticsData {
   checks: Check[];
@@ -17,8 +18,10 @@ interface DiagnosticsData {
 }
 
 export default function DiagnosticsPage() {
+  const poll30000 = usePollInterval(30_000);
+
   const { data, loading, refresh } = useResource<DiagnosticsData>("/api/diagnostics", {
-    intervalMs: 30_000,
+    intervalMs: poll30000,
   });
 
   if (loading && !data) {

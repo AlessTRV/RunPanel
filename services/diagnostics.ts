@@ -8,8 +8,9 @@ import { getDb } from "@/lib/db";
 import { getEnv } from "@/lib/env";
 import { getSetting } from "@/lib/settings";
 import { staleWhileRevalidate } from "@/lib/stale-cache";
-import { formatBytes } from "@/lib/utils";
+import { formatBytes } from "@/lib/format";
 import { dockerTry } from "./docker/cli";
+import { getShellPath, isWindows } from "./env-utils";
 import { autostartProbeCache } from "./autostart/probe";
 
 const exec = promisify(execFile);
@@ -36,9 +37,30 @@ export interface Check {
   href?: string;
 }
 
+/**
+ * Is this tool on the PATH, and which version?
+ *
+ * Goes through a shell on Windows, and that is not a preference. `pm2`,
+ * `npx` and most npm-installed tools are `.cmd` shims there, which `execFile`
+ * cannot launch — it looks for an executable image and gets ENOENT. So this
+ * page, whose entire job is to say what is missing from the host, reported PM2
+ * as absent on every Windows install, including ones where PM2 was installed
+ * and running projects. The panel's own PM2 driver never noticed because it
+ * shells out; only the thing telling the operator the truth did not.
+ *
+ * `windowsVerbatimArguments` for the reason documented in `run-command.ts`:
+ * Node's default quoting is for a C runtime, not for cmd.exe.
+ */
 async function binary(name: string, args: string[] = ["--version"]): Promise<string | null> {
+  const command = isWindows ? getShellPath() : name;
+  const argv = isWindows ? ["/c", name, ...args] : args;
+
   try {
-    const { stdout } = await exec(name, args, { timeout: 5_000, windowsHide: true });
+    const { stdout } = await exec(command, argv, {
+      timeout: 5_000,
+      windowsHide: true,
+      ...(isWindows ? { windowsVerbatimArguments: true } : {}),
+    });
     return stdout.toString().trim().split("\n")[0];
   } catch {
     return null;
