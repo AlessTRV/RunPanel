@@ -1,6 +1,6 @@
 import { getDb, nowIso } from "@/lib/db";
 import type { DeploymentsTable, ProjectsTable } from "@/lib/db/schema";
-import { decrypt } from "@/lib/auth";
+import { decrypt } from "@/lib/crypto";
 import { gitPull, gitClone, repoExists, getRepoPath, getLatestCommit } from "./git-manager";
 import { buildProject } from "./builder-registry";
 import { processManager } from "./process-manager";
@@ -17,7 +17,7 @@ import {
   stripPanelOnlyFields,
 } from "@/lib/deploy-contract";
 import { internalPort } from "./service-provisioner";
-import { buildConnectionString, connectionEnvKey } from "@/lib/service-env";
+import { buildConnectionString, resolveServiceEnv } from "@/lib/service-env";
 import { sweep } from "./docker/gc";
 import { BuildLogFile } from "./build-logs";
 import { projectEvents } from "./events";
@@ -267,7 +267,7 @@ async function runDeploy(
     // Auto-inject service connection URLs (DB, Redis, etc.)
     const linkedServices = await db
       .selectFrom("services")
-      .select(["name", "type", "port", "credentials", "container_name"])
+      .select(["name", "type", "port", "credentials", "container_name", "inject_env", "env_key"])
       .where("project_id", "=", project.id)
       .execute();
 
@@ -279,7 +279,10 @@ async function runDeploy(
     // port published on the host, exactly as for a native process.
     const onProjectNetwork = isDockerApp && contract.docker.network === "project";
 
-    for (const svc of linkedServices) {
+    // The rule itself lives in `lib/service-env.ts` as a pure function, so the
+    // whole on/off × key-already-defined matrix is testable without a daemon.
+    // Here we only supply what needs the database and the network topology.
+    const { applied, skipped, conflicts } = resolveServiceEnv(linkedServices, envVars, (svc) => {
       // Container name and container port travel together: inside the network
       // the published mapping does not exist, so a service published on 5433 is
       // still listening on 5432. Pairing the container name with the host port
@@ -291,21 +294,32 @@ async function runDeploy(
         creds = JSON.parse(decrypt(svc.credentials));
       } catch { /* credentials unreadable — fall back to an empty URL */ }
 
-      const envKey = connectionEnvKey(svc.type);
+      return buildConnectionString(svc.type, {
+        host,
+        port: svcPort,
+        user: creds.user,
+        password: creds.password,
+        database: creds.database,
+      });
+    });
 
-      // Don't overwrite if the user already set it
-      if (!envVars[envKey]) {
-        envVars[envKey] = buildConnectionString(svc.type, {
-          host,
-          port: svcPort,
-          user: creds.user,
-          password: creds.password,
-          database: creds.database,
-        });
-        appendLog(`Auto-linked ${svc.type} service "${svc.name}" → ${envKey} (${host}:${svcPort})`);
-      } else {
-        appendLog(`Service "${svc.name}" not linked: ${envKey} is set on the project.`);
-      }
+    for (const injection of applied) {
+      appendLog(
+        injection.replaced
+          ? `Servizio "${injection.service}" → ${injection.key}: sostituisce il valore definito sul progetto.`
+          : `Servizio "${injection.service}" → ${injection.key}`
+      );
+    }
+    for (const name of skipped) {
+      appendLog(`Servizio "${name}": iniezione disattivata, il progetto usa le proprie variabili.`);
+    }
+    for (const conflict of conflicts) {
+      // Reported rather than resolved by row order, which is how the second
+      // database of a pair used to disappear without anyone being told.
+      appendLog(
+        `ATTENZIONE: ${conflict.services.join(", ")} vogliono tutti ${conflict.key}. ` +
+          `Vale il primo (${conflict.services[0]}); cambia la variabile degli altri per usarli.`
+      );
     }
 
     // Fail fast on anything knowable before a build that may run for minutes.

@@ -79,7 +79,7 @@ export function DatabaseForm({ projectId }: { projectId?: string }) {
       });
       const data = await res.json();
       if (!res.ok) {
-        toast.error(data.error ?? "Creazione fallita");
+        toast.error(data.error ?? "Creazione non riuscita");
         return;
       }
       toast.success("Servizio creato");
@@ -87,7 +87,7 @@ export function DatabaseForm({ projectId }: { projectId?: string }) {
       // made — and the connection string is the reason someone created it.
       router.push(project ? `/projects/${project}` : `/services/${data.id}`);
     } catch {
-      toast.error("Creazione fallita");
+      toast.error("Creazione non riuscita");
     } finally {
       setSaving(false);
     }
@@ -101,9 +101,9 @@ export function DatabaseForm({ projectId }: { projectId?: string }) {
         <Hint tone="tip" icon="solar:link-circle-linear" title="Cosa succede dopo">
           Il container viene creato subito, con un volume dedicato per i dati. Dal deploy successivo
           il progetto riceve <Code>{envKey}</Code> già pronta — host, porta, utente e password
-          corretti per il runtime che stai usando. Non devi copiare niente a mano, e se un giorno
-          preferisci una connection string tua basta dichiarare <Code>{envKey}</Code> tra le
-          variabili del progetto: quella vince.
+          corretti per il runtime che stai usando. Non devi copiare niente a mano. Se un giorno
+          preferisci una connection string tua, spegni l&apos;iniezione dal collegamento e il progetto
+          torna a usare le sue variabili.
         </Hint>
       ) : (
         <Hint icon="solar:database-linear" title="Cosa succede dopo">

@@ -11,7 +11,13 @@ export async function POST(request: NextRequest, { params }: Params) {
   if (denied) return denied;
 
   const { serviceId } = await params;
-  const body = await request.json();
+  // A malformed body is a bad request, not a 500.
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Richiesta non valida" }, { status: 400 });
+  }
   const parsed = controlActionSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json({ error: "Azione non valida" }, { status: 400 });

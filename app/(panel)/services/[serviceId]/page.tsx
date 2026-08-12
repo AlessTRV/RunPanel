@@ -7,13 +7,17 @@ import { Button } from "@heroui/react";
 import { Icon } from "@iconify/react";
 import { toast } from "sonner";
 import { useResource } from "@/lib/hooks/useResource";
+import { usePollInterval } from "@/lib/hooks/usePollingInterval";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { PageSkeleton } from "@/components/ui/Skeletons";
 import { CopyField } from "@/components/ui/CopyField";
-import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { DangerZone } from "@/components/ui/DangerAction";
 import { Code, FieldHint, Hint } from "@/components/ui/Hint";
+import { Section } from "@/components/ui/Section";
+import { Segmented } from "@/components/ui/Segmented";
+import { InfoTip } from "@/components/ui/Tooltip";
 import { StatusBadge } from "@/components/StatusBadge";
 import { buildConnectionString, serviceLabel } from "@/lib/service-env";
 import { DatabasesPanel } from "./_components/DatabasesPanel";
@@ -54,18 +58,60 @@ interface Credentials {
   database?: string;
 }
 
+/**
+ * The same instance, from three places.
+ *
+ * These were four CopyFields stacked with a paragraph of explanation each, for
+ * one value. The difference between them is genuinely the thing people get
+ * wrong — a container name does not resolve outside the project network, and
+ * the published port is not the port inside — but presenting all of it at once
+ * meant reading four explanations to find out which single line was yours.
+ */
+type From = "network" | "container" | "host";
+
+const FROM_OPTIONS = [
+  { value: "network" as const, label: "Dall'app del progetto" },
+  { value: "container" as const, label: "Da un container" },
+  { value: "host" as const, label: "Da questa macchina" },
+];
+
+const FROM_NOTES: Record<From, (service: Service) => React.ReactNode> = {
+  network: (service) => (
+    <>
+      Host il nome del container, porta <Code>{String(service.internalPort)}</Code> — quella interna,
+      non quella pubblicata. È esattamente la riga che RunPanel inietta.
+    </>
+  ),
+  container: (service) => (
+    <>
+      <Code>host.docker.internal</Code> è un alias che RunPanel aggiunge a ogni container: il
+      traffico esce e rientra dalla porta pubblicata (<Code>{String(service.port)}</Code>). Funziona
+      senza reti condivise. Con <Code>network: host</Code> usa <Code>localhost</Code>.
+    </>
+  ),
+  host: () => (
+    <>
+      Per un processo nativo (PM2) e per i tuoi client: psql, TablePlus, uno script sul server. Da
+      fuori dalla macchina, per un database, la risposta giusta è quasi sempre un tunnel SSH.
+    </>
+  ),
+};
+
 export default function ServiceDetailPage() {
+  const poll5000 = usePollInterval(5000);
   const params = useParams();
   const router = useRouter();
   const serviceId = params.serviceId as string;
 
   const { data: service, loading, refresh } = useResource<Service>(
     `/api/services/${serviceId}`,
-    { intervalMs: 5000 }
+    { intervalMs: poll5000 }
   );
 
   const [creds, setCreds] = useState<Credentials | null>(null);
-  const [confirmDelete, setConfirmDelete] = useState(false);
+  // Null until chosen, so the sensible default can depend on data that has not
+  // loaded yet when the hook runs.
+  const [fromChoice, setFromChoice] = useState<From | null>(null);
   const [deleteData, setDeleteData] = useState(false);
 
   // The project the service belongs to, if any: without one nothing is injected
@@ -132,6 +178,7 @@ export default function ServiceDetailPage() {
 
   const running = service.status === "running";
   const label = serviceLabel(service.type);
+  const from: From = fromChoice ?? (service.project_id ? "network" : "container");
 
   // Three ways in, and which one is right depends on where the caller runs.
   // Shown together because the difference is exactly what people get wrong.
@@ -159,8 +206,7 @@ export default function ServiceDetailPage() {
     ...(creds ?? {}),
   });
 
-  /** What to paste into someone's environment, key included. */
-  const pasteLine = `${service.envKey}=${service.project_id ? networkUrl : gatewayUrl}`;
+  const url = from === "network" ? networkUrl : from === "container" ? gatewayUrl : hostUrl;
 
   return (
     <>
@@ -202,8 +248,8 @@ export default function ServiceDetailPage() {
             ) : (
               "il progetto"
             )}{" "}
-            riceve <Code>{service.envKey}</Code> con queste credenziali: non serve copiarla nelle
-            variabili. Se ne dichiari una con lo stesso nome, RunPanel lascia stare la tua.
+            riceve <Code>{service.envKey}</Code> con queste credenziali, se l&apos;iniezione è accesa: non
+            serve copiarla nelle variabili. L&apos;interruttore è nella scheda Variabili del progetto.
           </Hint>
         ) : (
           <Hint icon="solar:database-linear" title="Servizio autonomo">
@@ -216,66 +262,51 @@ export default function ServiceDetailPage() {
         <Panel className="space-y-4">
           <PanelHeader
             title="Come ci si collega"
-            description="La stessa istanza, indirizzi diversi a seconda di chi chiama"
+            description="Un solo indirizzo, visto da dove chiami"
+            actions={
+              <InfoTip title="Perché cambia">
+                È la stessa istanza: cambia solo la strada per arrivarci. Dentro la rete del
+                progetto si risolve per nome del container e la porta è quella interna; da
+                fuori si passa dalla porta pubblicata sull&apos;host.
+              </InfoTip>
+            }
           />
 
           {creds ? (
             <>
+              {/*
+                Four CopyFields with a paragraph each, for what is one value seen
+                from four places. The reader had to read all four to work out
+                which one was theirs; now they say where they are calling from
+                and get the answer.
+              */}
+              <Segmented
+                label="Da dove ti colleghi"
+                value={from}
+                onChange={setFromChoice}
+                options={FROM_OPTIONS.filter((o) => o.value !== "network" || Boolean(service.project_id))}
+              />
+
               <div>
-                <CopyField label="Riga pronta per le variabili" value={pasteLine} secret />
-                <FieldHint>
-                  Incollala così com&apos;è tra le variabili del progetto che deve usare questo
-                  servizio.
-                </FieldHint>
+                <CopyField label="Riga pronta per le variabili" value={`${service.envKey}=${url}`} secret />
+                <FieldHint>{FROM_NOTES[from](service)}</FieldHint>
               </div>
 
-              {service.project_id && (
-                <div>
-                  <CopyField label={`Da un container sulla rete ${service.networkName ?? "del progetto"}`} value={networkUrl} secret />
-                  <FieldHint>
-                    È quella che RunPanel inietta quando l&apos;app gira in un container sulla rete
-                    del progetto. L&apos;host è il nome del container e la porta è quella interna:{" "}
-                    <Code>{service.internalPort}</Code>, non quella pubblicata sull&apos;host.
-                  </FieldHint>
+              <Section title="Credenziali" summary="Utente, database, password e nome del container">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {creds.user && <CopyField label="Utente" value={creds.user} />}
+                  {creds.database && <CopyField label="Database" value={creds.database} />}
+                  {creds.password && <CopyField label="Password" value={creds.password} secret />}
+                  <CopyField label="Nome del container" value={service.containerName} />
                 </div>
-              )}
-
-              <div>
-                <CopyField label="Da un qualsiasi container su questa macchina" value={gatewayUrl} secret />
-                <FieldHint>
-                  <Code>host.docker.internal</Code> è un alias che RunPanel aggiunge a ogni
-                  container che avvia, e punta alla macchina host: il traffico esce dal container e
-                  rientra dalla porta pubblicata, quindi qui la porta è quella dell&apos;host (
-                  <Code>{service.port}</Code>). Funziona senza condividere nessuna rete — è la
-                  strada giusta quando il servizio non appartiene al progetto che lo chiama. Con{" "}
-                  <Code>network: host</Code> usa invece <Code>localhost</Code>.
-                </FieldHint>
-              </div>
-
-              <div>
-                <CopyField label="Dalla macchina host — client esterni, processi nativi" value={hostUrl} secret />
-                <FieldHint>
-                  Questa vale per un&apos;app avviata come processo nativo (PM2) e per i tuoi client:
-                  psql, TablePlus, uno script sul server. Da fuori dalla macchina la porta deve essere
-                  raggiungibile, e per un database esposto su internet la risposta giusta è quasi
-                  sempre un tunnel SSH.
-                </FieldHint>
-              </div>
-
-              <div className="border-border grid gap-3 border-t pt-4 sm:grid-cols-2">
-                {creds.user && <CopyField label="Utente" value={creds.user} />}
-                {creds.database && <CopyField label="Database" value={creds.database} />}
-                {creds.password && <CopyField label="Password" value={creds.password} secret />}
-                <CopyField label="Nome del container" value={service.containerName} />
-              </div>
-
-              {!service.project_id && (
-                <FieldHint>
-                  Il nome del container serve per <Code>docker exec</Code>: non è un host che un
-                  altro container può risolvere, perché senza progetto non c&apos;è una rete
-                  condivisa con nessuno.
-                </FieldHint>
-              )}
+                {!service.project_id && (
+                  <FieldHint>
+                    Il nome del container serve per <Code>docker exec</Code>: senza progetto non
+                    c&apos;è una rete condivisa, quindi non è un host che un altro container
+                    risolve.
+                  </FieldHint>
+                )}
+              </Section>
             </>
           ) : (
             <>
@@ -283,7 +314,7 @@ export default function ServiceDetailPage() {
                 <CopyField label="Nome del container" value={service.containerName} />
                 <CopyField
                   label="Porta"
-                  value={`${service.port} sull'host → ${service.internalPort} nel container`}
+                  value={`${service.port} sull'host, ${service.internalPort} nel container`}
                 />
               </div>
               <Button variant="secondary" onPress={revealCredentials}>
@@ -308,19 +339,36 @@ export default function ServiceDetailPage() {
           credentials={creds}
         />
 
-        <Panel className="space-y-3">
-          <PanelHeader title="Dati" description="Dove finisce quello che il servizio scrive" />
-          <p className="text-muted text-xs leading-relaxed">
-            I dati stanno in un volume Docker dedicato, con le etichette di proprietà di RunPanel —
-            fermare o ricreare il container non li tocca, e tutti i database di questo servizio ci
-            stanno dentro insieme. Vengono eliminati solo se lo chiedi esplicitamente eliminando il
-            servizio; se un volume resta indietro perché la riga è sparita, la pagina Storage lo
-            elenca tra le risorse orfane.
-          </p>
-        </Panel>
-
-        <Panel className="border-danger/30 space-y-3">
-          <PanelHeader title="Elimina il servizio" description="Il container viene rimosso subito" />
+        {/*
+          The "Dati" panel that used to sit above this is gone. Its one
+          operational fact — the data lives in a volume, and deleting it is
+          opt-in — is here instead, at the moment that fact decides something.
+          Read while scrolling past, it was trivia; read here, it is the choice.
+        */}
+        <DangerZone
+          title="Elimina il servizio"
+          description="Il container viene rimosso subito"
+          actionLabel="Elimina servizio"
+          confirm={{
+            title: `Eliminare "${service.name}"?`,
+            confirmLabel: "Elimina",
+            description: deleteData
+              ? "Il container e il volume con i dati vengono eliminati. I dati non sono recuperabili."
+              : "Il container viene eliminato. Il volume con i dati resta, e un servizio ricreato con lo stesso nome lo ritrova.",
+          }}
+          onConfirm={async () => {
+            const res = await fetch(
+              `/api/services/${serviceId}${deleteData ? "?deleteData=true" : ""}`,
+              { method: "DELETE" }
+            );
+            if (res.ok) {
+              toast.success("Servizio eliminato");
+              router.push("/services");
+            } else {
+              toast.error("Eliminazione non riuscita");
+            }
+          }}
+        >
           <label className="flex cursor-pointer items-start gap-2.5">
             <input
               type="checkbox"
@@ -330,43 +378,14 @@ export default function ServiceDetailPage() {
             />
             <span className="text-muted text-xs leading-relaxed">
               Elimina anche il volume con i dati.{" "}
-              <strong className="text-foreground">Non è recuperabile.</strong> Senza questa spunta il
-              volume resta: un servizio ricreato con lo stesso nome ritrova i dati di prima.
+              <strong className="text-foreground">Non è recuperabile.</strong> I dati di questo
+              servizio stanno in un volume Docker dedicato: senza la spunta resta lì, e un servizio
+              ricreato con lo stesso nome li ritrova.
             </span>
           </label>
-          <div>
-            <Button variant="danger" onPress={() => setConfirmDelete(true)}>
-              <Icon icon="solar:trash-bin-trash-linear" width={18} aria-hidden />
-              Elimina servizio
-            </Button>
-          </div>
-        </Panel>
+        </DangerZone>
       </div>
 
-      <ConfirmDialog
-        isOpen={confirmDelete}
-        onOpenChange={setConfirmDelete}
-        destructive
-        title={`Eliminare "${service.name}"?`}
-        confirmLabel="Elimina"
-        description={
-          deleteData
-            ? "Il container e il volume con i dati vengono eliminati. I dati non sono recuperabili."
-            : "Il container viene eliminato. Il volume con i dati resta e può essere riutilizzato da un servizio con lo stesso nome."
-        }
-        onConfirm={async () => {
-          const res = await fetch(
-            `/api/services/${serviceId}${deleteData ? "?deleteData=true" : ""}`,
-            { method: "DELETE" }
-          );
-          if (res.ok) {
-            toast.success("Servizio eliminato");
-            router.push("/services");
-          } else {
-            toast.error("Eliminazione fallita");
-          }
-        }}
-      />
     </>
   );
 }

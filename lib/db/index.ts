@@ -162,7 +162,7 @@ async function recoverFromCrash(db: Kysely<Database>): Promise<void> {
     .updateTable("deployments")
     .set({
       status: "failed",
-      error_message: "Server restarted during deploy",
+      error_message: "Il server è stato riavviato durante il deploy",
       finished_at: nowIso(),
     })
     .where("status", "in", ["pending", "building"])
@@ -181,7 +181,7 @@ async function recoverFromCrash(db: Kysely<Database>): Promise<void> {
     .updateTable("backup_runs")
     .set({
       status: "failed",
-      error_message: "Server restarted during backup",
+      error_message: "Il server è stato riavviato durante il backup",
       finished_at: nowIso(),
     })
     .where("status", "=", "running")
@@ -191,7 +191,7 @@ async function recoverFromCrash(db: Kysely<Database>): Promise<void> {
     .updateTable("restore_runs")
     .set({
       status: "failed",
-      error_message: "Server restarted during restore",
+      error_message: "Il server è stato riavviato durante il ripristino",
       finished_at: nowIso(),
     })
     .where("status", "=", "running")
@@ -243,11 +243,3 @@ export function getDb(): Promise<Kysely<Database>> {
   return globalRef.__runpanelDb;
 }
 
-/** Closes the pool/handle. Used by scripts; the server keeps the singleton. */
-export async function closeDb(): Promise<void> {
-  const pending = globalRef.__runpanelDb;
-  if (!pending) return;
-  globalRef.__runpanelDb = undefined;
-  const db = await pending;
-  await db.destroy();
-}

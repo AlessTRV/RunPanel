@@ -6,7 +6,9 @@ import { Button, Input } from "@heroui/react";
 import { Icon } from "@iconify/react";
 import { toast } from "sonner";
 import { useResource } from "@/lib/hooks/useResource";
+import { usePollInterval } from "@/lib/hooks/usePollingInterval";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { LinkButton } from "@/components/ui/LinkButton";
 import { Panel } from "@/components/ui/Panel";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Code, Hint } from "@/components/ui/Hint";
@@ -91,8 +93,9 @@ const ServiceRow = memo(function ServiceRow({
 });
 
 export default function ServicesPage() {
+  const poll5000 = usePollInterval(5000);
   const [search, setSearch] = useState("");
-  const { data, loading, refresh } = useResource<Service[]>("/api/services", { intervalMs: 5000 });
+  const { data, loading, refresh } = useResource<Service[]>("/api/services", { intervalMs: poll5000 });
 
   // Names only, and without polling: a service's project does not change while
   // the page is open, but "which project is this database attached to" is the
@@ -143,13 +146,10 @@ export default function ServicesPage() {
         title="Servizi"
         description="Database e cache provisionati da RunPanel"
         actions={
-          <Link
-            href="/services/new"
-            className="border-border bg-surface hover:bg-surface-hover text-foreground flex items-center gap-1.5 rounded-[var(--radius)] border px-3 py-1.5 text-sm transition-colors"
-          >
+          <LinkButton href="/services/new" variant="secondary">
             <Icon icon="solar:add-circle-linear" width={16} aria-hidden />
             Nuovo servizio
-          </Link>
+          </LinkButton>
         }
       />
 

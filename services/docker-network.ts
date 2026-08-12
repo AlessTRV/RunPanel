@@ -25,6 +25,22 @@ export async function connectToNetwork(containerName: string, projectSlug: strin
   });
 }
 
+/**
+ * The twin of `connectToNetwork`, for a service being detached from a project.
+ *
+ * `dockerTry` for the same reason: a stopped container, an already-removed
+ * network, or a service that was never attached are all normal states here, and
+ * none of them should fail the request that is trying to tidy up.
+ */
+export async function disconnectFromNetwork(
+  containerName: string,
+  projectSlug: string
+): Promise<void> {
+  await dockerTry(["network", "disconnect", networkName(projectSlug), containerName], {
+    timeout: 10_000,
+  });
+}
+
 export async function removeProjectNetwork(projectSlug: string): Promise<void> {
   await dockerTry(["network", "rm", networkName(projectSlug)], { timeout: 15_000 });
 }

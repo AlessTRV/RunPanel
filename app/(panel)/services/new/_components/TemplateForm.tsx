@@ -49,14 +49,14 @@ export function TemplateForm({
 
       if (!res.ok) {
         const data = await res.json();
-        toast.error(data.error ?? "Configurazione fallita");
+        toast.error(data.error ?? "Configurazione non riuscita");
         return;
       }
 
       toast.success(`${template.label} configurato`);
       router.push(`/projects/${projectId}`);
     } catch {
-      toast.error("Configurazione fallita");
+      toast.error("Configurazione non riuscita");
     } finally {
       setSaving(false);
     }

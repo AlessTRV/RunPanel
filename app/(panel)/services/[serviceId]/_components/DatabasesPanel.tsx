@@ -1,15 +1,17 @@
 "use client";
 
 import { useState } from "react";
-import { Button, Input, Label, TextField } from "@heroui/react";
+import { Button, Input, TextField } from "@heroui/react";
 import { Icon } from "@iconify/react";
 import { toast } from "sonner";
 import { useResource } from "@/lib/hooks/useResource";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { CopyField } from "@/components/ui/CopyField";
-import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { DeleteButton } from "@/components/ui/DangerAction";
 import { Code, FieldHint, Hint } from "@/components/ui/Hint";
+import { Field } from "@/components/ui/Field";
 import { buildConnectionString } from "@/lib/service-env";
+import { DATABASE_NAME_RULE } from "@/lib/validation";
 
 /**
  * The databases inside one service.
@@ -56,7 +58,6 @@ export function DatabasesPanel({
 
   const [name, setName] = useState("");
   const [creating, setCreating] = useState(false);
-  const [confirmDrop, setConfirmDrop] = useState<string | null>(null);
 
   if (type === "redis") {
     return (
@@ -76,12 +77,27 @@ export function DatabasesPanel({
 
   const databases = data?.databases ?? [];
 
+  async function dropDatabase(target: string) {
+    const res = await fetch(
+      `/api/services/${serviceId}/databases/${encodeURIComponent(target)}`,
+      { method: "DELETE" }
+    );
+    if (res.ok) {
+      toast.success(`Database "${target}" eliminato`);
+      refresh();
+    } else {
+      const body = await res.json().catch(() => ({}));
+      toast.error(body.error ?? "Eliminazione non riuscita");
+    }
+  }
+
+  // Shown under the field rather than thrown as a toast: the correction has to
+  // stay on screen while it is being made.
+  const nameError = name.trim() && !NAME_PATTERN.test(name.trim()) ? DATABASE_NAME_RULE : undefined;
+
   async function create() {
     const trimmed = name.trim();
-    if (!NAME_PATTERN.test(trimmed)) {
-      toast.error("Deve iniziare con una lettera minuscola; solo minuscole, numeri e underscore");
-      return;
-    }
+    if (!NAME_PATTERN.test(trimmed)) return;
 
     setCreating(true);
     try {
@@ -92,14 +108,14 @@ export function DatabasesPanel({
       });
       const body = await res.json();
       if (!res.ok) {
-        toast.error(body.error ?? "Creazione fallita");
+        toast.error(body.error ?? "Creazione non riuscita");
         return;
       }
       toast.success(`Database "${trimmed}" creato`);
       setName("");
       refresh();
     } catch {
-      toast.error("Creazione fallita");
+      toast.error("Creazione non riuscita");
     } finally {
       setCreating(false);
     }
@@ -137,31 +153,31 @@ export function DatabasesPanel({
                 >
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                     <span className="text-foreground font-mono text-sm">{database.name}</span>
-                    {database.primary && <span className="text-muted text-[11px]">principale</span>}
+                    {database.primary && <span className="text-muted text-meta">principale</span>}
                     {!database.managed && !database.primary && (
-                      <span className="text-muted text-[11px]">creato fuori dal pannello</span>
+                      <span className="text-muted text-meta">creato fuori dal pannello</span>
                     )}
                     {!database.present && (
-                      <span className="text-warning text-[11px]">non trovato nel motore</span>
+                      <span className="text-warning text-meta">non trovato nel motore</span>
                     )}
                     {!database.primary && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        isIconOnly
+                      <DeleteButton
                         className="ml-auto"
-                        aria-label={`Elimina ${database.name}`}
-                        onPress={() => setConfirmDrop(database.name)}
-                      >
-                        <Icon icon="solar:trash-bin-trash-linear" width={16} className="text-danger" />
-                      </Button>
+                        label={`Elimina il database ${database.name}`}
+                        confirm={{
+                          title: `Eliminare il database "${database.name}"?`,
+                          description:
+                            "Le tabelle e i dati che contiene vengono persi. Gli altri database del servizio restano.",
+                        }}
+                        onConfirm={() => dropDatabase(database.name)}
+                      />
                     )}
                   </div>
 
                   {url ? (
                     <CopyField value={`${envKey}=${url}`} secret />
                   ) : (
-                    <p className="text-muted text-[11px]">
+                    <p className="text-muted text-meta">
                       Mostra le connection string qui sopra per vedere la sua URL.
                     </p>
                   )}
@@ -178,18 +194,25 @@ export function DatabasesPanel({
           </Hint>
         )}
 
-        <div className="border-border flex flex-col gap-2 border-t pt-4 sm:flex-row sm:items-end">
+        <div className="border-border flex flex-col gap-2 border-t pt-4 sm:flex-row sm:items-start">
           <div className="flex-1">
-            <TextField value={name} onChange={setName}>
-              <Label className="text-xs">Nuovo database</Label>
-              <Input
-                placeholder="staging"
-                className="font-mono text-sm"
-                onKeyDown={(e) => e.key === "Enter" && create()}
-              />
-            </TextField>
+            <Field label="Nuovo database" error={nameError}>
+              <TextField value={name} onChange={setName} aria-label="Nuovo database">
+                <Input
+                  placeholder="staging"
+                  className="font-mono text-sm"
+                  onKeyDown={(e) => e.key === "Enter" && create()}
+                />
+              </TextField>
+            </Field>
           </div>
-          <Button variant="outline" isPending={creating} onPress={create}>
+          <Button
+            variant="outline"
+            className="sm:mt-6"
+            isPending={creating}
+            isDisabled={Boolean(nameError) || !name.trim()}
+            onPress={create}
+          >
             <Icon icon="solar:add-circle-linear" width={16} aria-hidden />
             Crea
           </Button>
@@ -209,29 +232,6 @@ export function DatabasesPanel({
         </FieldHint>
       </Panel>
 
-      <ConfirmDialog
-        isOpen={confirmDrop !== null}
-        onOpenChange={(open) => !open && setConfirmDrop(null)}
-        destructive
-        title={`Eliminare il database "${confirmDrop}"?`}
-        confirmLabel="Elimina"
-        description="Le tabelle e i dati che contiene vengono persi. Gli altri database del servizio restano."
-        onConfirm={async () => {
-          const target = confirmDrop;
-          if (!target) return;
-          const res = await fetch(
-            `/api/services/${serviceId}/databases/${encodeURIComponent(target)}`,
-            { method: "DELETE" }
-          );
-          if (res.ok) {
-            toast.success(`Database "${target}" eliminato`);
-            refresh();
-          } else {
-            const body = await res.json().catch(() => ({}));
-            toast.error(body.error ?? "Eliminazione fallita");
-          }
-        }}
-      />
     </>
   );
 }

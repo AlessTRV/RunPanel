@@ -84,7 +84,13 @@ export async function POST(request: NextRequest, { params }: Params) {
   if (denied) return denied;
 
   const { serviceId } = await params;
-  const body = await request.json();
+  // A malformed body is a bad request, not a 500.
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Richiesta non valida" }, { status: 400 });
+  }
   const parsed = createDatabaseSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json(
@@ -143,7 +149,7 @@ export async function POST(request: NextRequest, { params }: Params) {
     // failure mode this ordering exists to avoid.
     await admin.create(target, name);
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : "Creazione fallita";
+    const message = err instanceof Error ? err.message : "Creazione non riuscita";
     return NextResponse.json({ error: message }, { status: 500 });
   }
 

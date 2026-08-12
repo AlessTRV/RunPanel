@@ -76,7 +76,7 @@ export async function DELETE(_request: NextRequest, { params }: Params) {
     if (err instanceof DatabaseBusyError) {
       return NextResponse.json({ error: err.message }, { status: 409 });
     }
-    const message = err instanceof Error ? err.message : "Eliminazione fallita";
+    const message = err instanceof Error ? err.message : "Eliminazione non riuscita";
     return NextResponse.json({ error: message }, { status: 500 });
   }
 

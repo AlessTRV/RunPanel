@@ -120,6 +120,19 @@ export interface ServicesTable {
   /** JSON — holds the attached networks and template-specific fields */
   config: string;
   project_id: string | null;
+  /**
+   * 0 | 1 — whether this link contributes a connection URL to the project's
+   * environment. Explicit, because the previous rule was implicit: inject
+   * unless the project happened to define the same key with a truthy value,
+   * which no screen could show and no operator could switch off.
+   */
+  inject_env: number | null;
+  /**
+   * The variable this link provides. NULL means "derive it from the service
+   * type", which is right for the single-database project and wrong the moment
+   * there are two of the same type — they would both answer to `DATABASE_URL`.
+   */
+  env_key: string | null;
   /** 0 | 1 — see `ProjectsTable.autostart`; defaults to on for a database. */
   autostart: number | null;
   autostart_order: number | null;

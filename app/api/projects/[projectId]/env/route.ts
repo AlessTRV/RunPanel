@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth-guard";
 import { getDb, nowIso } from "@/lib/db";
-import { encrypt, decrypt } from "@/lib/auth";
+import { encrypt, decrypt } from "@/lib/crypto";
 import { generateId } from "@/lib/utils";
 import { envVarsSchema } from "@/lib/validation";
 
@@ -48,7 +48,13 @@ export async function PUT(request: NextRequest, { params }: Params) {
   if (denied) return denied;
 
   const { projectId } = await params;
-  const body = await request.json();
+  // A malformed body is a bad request, not a 500.
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Richiesta non valida" }, { status: 400 });
+  }
   const parsed = envVarsSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json(

@@ -10,14 +10,7 @@ export function nowIso(): string {
   return new Date().toISOString();
 }
 
-/** Booleans are stored as `0 | 1` integers so both dialects read back a number. */
-export function toDbBool(value: boolean): number {
-  return value ? 1 : 0;
-}
 
-export function fromDbBool(value: number | boolean | null | undefined): boolean {
-  return value === 1 || value === true;
-}
 
 /**
  * Kysely reports affected-row counts as `bigint`. Callers only ever want to know

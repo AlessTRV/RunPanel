@@ -1,17 +1,18 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
-import Link from "next/link";
 import { Button, Input, Label, TextField } from "@heroui/react";
 import { Icon } from "@iconify/react";
 import { toast } from "sonner";
+import { MSG } from "@/lib/copy";
 import { useResource } from "@/lib/hooks/useResource";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { SkeletonBlock } from "@/components/ui/Skeletons";
 import { Code, Hint } from "@/components/ui/Hint";
 import { BuildEnvHint, ManagedEnvHint, ServiceLinkHint } from "@/components/DeployHints";
-import { connectionEnvKey, serviceLabel } from "@/lib/service-env";
+import { InfoTip } from "@/components/ui/Tooltip";
+import { ServiceLink } from "@/components/ServiceLink";
 import type { EnvVar } from "./types";
 
 interface LinkedService {
@@ -21,6 +22,8 @@ interface LinkedService {
   status: string;
   port: number;
   project_id: string | null;
+  inject_env: number | null;
+  env_key: string | null;
 }
 
 /** Parse a .env file the same way a dotenv loader would, minus the exotica. */
@@ -71,7 +74,7 @@ export function EnvTab({
   // because this is where someone looks for DATABASE_URL, does not find it, and
   // pastes a connection string by hand — over the one RunPanel was about to
   // inject, which then silently wins forever.
-  const { data: servicesData } = useResource<LinkedService[]>("/api/services");
+  const { data: servicesData, refresh: refreshServices } = useResource<LinkedService[]>("/api/services");
   const linkedServices = useMemo(
     () => (Array.isArray(servicesData) ? servicesData : []).filter((s) => s.project_id === projectId),
     [servicesData, projectId]
@@ -95,10 +98,10 @@ export function EnvTab({
         toast.success(`${data.count ?? valid.length} variabili salvate`);
         onChange(valid);
       } else {
-        toast.error(data.error ?? "Salvataggio fallito");
+        toast.error(data.error ?? MSG.saveFailed);
       }
     } catch {
-      toast.error("Salvataggio fallito");
+      toast.error(MSG.saveFailed);
     } finally {
       setSaving(false);
     }
@@ -118,56 +121,27 @@ export function EnvTab({
         <Panel className="space-y-3">
           <PanelHeader
             title="Servizi collegati"
-            description="Le loro credenziali entrano nell'ambiente a ogni deploy, senza copiare niente"
+            description="Ognuno fornisce una variabile, se acceso"
+            actions={
+              <InfoTip title="Come viene scelto l'host">
+                Un&apos;app in container raggiunge il servizio per nome del container sulla rete del
+                progetto; un processo nativo lo raggiunge su <Code>localhost</Code> alla porta
+                pubblicata. RunPanel costruisce la URL di conseguenza.
+              </InfoTip>
+            }
           />
 
           <ul className="space-y-2">
-            {linkedServices.map((service) => {
-              const envKey = connectionEnvKey(service.type);
-              const overridden = vars.some((v) => v.key.trim() === envKey);
-
-              return (
-                <li key={service.id}>
-                  <Link
-                    href={`/services/${service.id}`}
-                    className="border-border bg-surface-secondary hover:border-separator flex flex-wrap items-center gap-x-3 gap-y-1 rounded-[var(--radius)] border px-3 py-2.5 transition-colors"
-                  >
-                    <Icon
-                      icon={service.type === "redis" ? "solar:bolt-linear" : "solar:database-linear"}
-                      width={16}
-                      className="text-muted shrink-0"
-                      aria-hidden
-                    />
-                    <span className="text-foreground text-sm">{service.name}</span>
-                    <span className="text-muted text-xs">{serviceLabel(service.type)}</span>
-                    <Icon
-                      icon="solar:arrow-right-linear"
-                      width={14}
-                      className="text-muted shrink-0"
-                      aria-hidden
-                    />
-                    <Code>{envKey}</Code>
-                    <span
-                      className={`ml-auto text-[11px] ${overridden ? "text-warning" : "text-muted"}`}
-                    >
-                      {overridden
-                        ? "sovrascritta: qui sotto c'è la tua"
-                        : service.status === "running"
-                          ? "iniettata al prossimo deploy"
-                          : "servizio fermo"}
-                    </span>
-                  </Link>
-                </li>
-              );
-            })}
+            {linkedServices.map((service) => (
+              <li key={service.id}>
+                <ServiceLink
+                  service={service}
+                  projectKeys={vars.map((v) => v.key)}
+                  onChanged={refreshServices}
+                />
+              </li>
+            ))}
           </ul>
-
-          <Hint>
-            L&apos;host lo sceglie RunPanel in base al runtime: un&apos;app in container raggiunge
-            il servizio per nome del container sulla rete del progetto, un processo nativo lo
-            raggiunge su <Code>localhost</Code> alla porta pubblicata. Se dichiari qui sotto una
-            variabile con lo stesso nome, RunPanel non tocca la tua.
-          </Hint>
         </Panel>
       ) : (
         <ServiceLinkHint projectId={projectId} />
@@ -206,7 +180,7 @@ export function EnvTab({
           <EmptyState
             icon="solar:key-linear"
             title="Nessuna variabile"
-            description="Le variabili sono cifrate a riposo e iniettate nel processo al deploy. Il modo più rapido per popolarle è importare il .env che usi in locale: le chiavi già presenti non vengono toccate."
+            description="Cifrate a riposo, iniettate al deploy. Il modo più rapido è importare il tuo .env."
           />
         </Panel>
       ) : (
@@ -248,7 +222,7 @@ export function EnvTab({
 
       {vars.length > 0 && (
         <div className="flex flex-wrap items-center justify-end gap-3">
-          <p className="text-muted mr-auto text-[11px]">
+          <p className="text-muted mr-auto text-meta">
             Salvare non riavvia niente: le variabili entrano in vigore al prossimo deploy. Quelle
             che il build compila nel bundle vanno salvate <em>prima</em> di lanciarlo.
           </p>

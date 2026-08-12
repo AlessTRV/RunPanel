@@ -1,5 +1,5 @@
 import { docker, dockerTry, lines } from "./docker/cli";
-import { decrypt } from "@/lib/auth";
+import { decrypt } from "@/lib/crypto";
 import type { ServicesTable } from "@/lib/db/schema";
 
 /**

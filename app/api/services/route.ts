@@ -3,7 +3,8 @@ import { requireAuth } from "@/lib/auth-guard";
 import { getDb, nowIso } from "@/lib/db";
 import { generateId } from "@/lib/utils";
 import { createServiceSchema } from "@/lib/validation";
-import { encrypt } from "@/lib/auth";
+import { encrypt } from "@/lib/crypto";
+import { connectionEnvKey, serviceEnvKey, suggestEnvKey } from "@/lib/service-env";
 import {
   generateCredentials,
   provisionService,
@@ -29,7 +30,13 @@ export async function POST(request: NextRequest) {
   const denied = await requireAuth();
   if (denied) return denied;
 
-  const body = await request.json();
+  // A malformed body is a bad request, not a 500.
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Richiesta non valida" }, { status: 400 });
+  }
   const parsed = createServiceSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json(
@@ -91,6 +98,26 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // Two links inside one project cannot both answer to the same variable. The
+  // second postgres used to be accepted and then quietly ignored at deploy
+  // time; now it is given a distinct name up front, and the response says so.
+  let envKey: string | null = null;
+  if (projectId) {
+    const siblings = await db
+      .selectFrom("services")
+      .select(["name", "type", "env_key", "inject_env"])
+      .where("project_id", "=", projectId)
+      .execute();
+
+    const taken = new Set(
+      siblings.filter((row) => row.inject_env === 1).map((row) => serviceEnvKey(row))
+    );
+    if (taken.has(connectionEnvKey(type))) {
+      const suggested = suggestEnvKey(name, type);
+      envKey = taken.has(suggested) ? `${suggested}_2` : suggested;
+    }
+  }
+
   const config = { name, type, version, port, credentials, projectSlug };
   let provisioned = false;
 
@@ -114,6 +141,13 @@ export async function POST(request: NextRequest) {
         container_name: containerName,
         config: JSON.stringify({}),
         project_id: projectId || null,
+        // Attaching a database to a project is the act of asking for its URL:
+        // a new link starts on. A standalone service has nowhere to inject.
+        inject_env: projectId ? 1 : 0,
+        // Null means "derive it from the type". Only a collision makes it worth
+        // naming, and there cannot be one on a service that was just created
+        // unless another link already claims the same key — checked below.
+        env_key: envKey,
         created_at: now,
         updated_at: now,
       })
