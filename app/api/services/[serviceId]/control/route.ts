@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth-guard";
 import { getDb, nowIso } from "@/lib/db";
 import { controlActionSchema } from "@/lib/validation";
-import { startService, stopService, restartService, serviceContainerName } from "@/services/service-provisioner";
+import { startService, stopService, restartService } from "@/services/service-provisioner";
 
 type Params = { params: Promise<{ serviceId: string }> };
 
@@ -14,7 +14,7 @@ export async function POST(request: NextRequest, { params }: Params) {
   const body = await request.json();
   const parsed = controlActionSchema.safeParse(body);
   if (!parsed.success) {
-    return NextResponse.json({ error: "Invalid action" }, { status: 400 });
+    return NextResponse.json({ error: "Azione non valida" }, { status: 400 });
   }
 
   const db = await getDb();
@@ -25,20 +25,11 @@ export async function POST(request: NextRequest, { params }: Params) {
     .executeTakeFirst();
 
   if (!service) {
-    return NextResponse.json({ error: "Service not found" }, { status: 404 });
+    return NextResponse.json({ error: "Servizio non trovato" }, { status: 404 });
   }
 
   const { action } = parsed.data;
-
-  // Resolve full container name: from config JSON (new services) or legacy unscoped pattern
-  let containerName = "";
-  try {
-    containerName = (JSON.parse(service.config || "{}") as { containerName?: string }).containerName ?? "";
-  } catch { /* fall through to the derived name */ }
-  if (!containerName) {
-    // Legacy services don't have containerName in config — use old unscoped pattern
-    containerName = serviceContainerName(service.name);
-  }
+  const containerName = service.container_name;
 
   const setStatus = (status: "running" | "stopped") =>
     db

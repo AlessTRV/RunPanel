@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import { buildConnectionString } from "@/lib/service-env";
 import { IServiceTemplate, ServiceConfig } from "./service-templates/types";
 import { postgresqlTemplate } from "./service-templates/postgresql";
 import { mysqlTemplate } from "./service-templates/mysql";
@@ -29,35 +30,6 @@ export function generateCredentials(type: string): { user: string; password: str
   return { user: "runpanel", password, database: "runpanel_db" };
 }
 
-/**
- * Build the connection URL for a service.
- *
- * `host` is the caller's decision, and it matters: an app running in a
- * container reaches the service by container name over the shared project
- * network, while a native process reaches it on localhost. There used to be two
- * separate implementations of this — one in the templates that always said
- * "localhost", and one in the deploy pipeline that was container-aware — which
- * meant the credentials shown in the UI could disagree with what was actually
- * injected into the app.
- */
-export function buildConnectionString(
-  type: string,
-  opts: { host: string; port: number; user?: string; password?: string; database?: string }
-): string {
-  const { host, port, user = "", password = "", database = "" } = opts;
-
-  switch (type) {
-    case "redis":
-      return `redis://${password ? `:${password}@` : ""}${host}:${port}/0`;
-    case "mongodb":
-      return `mongodb://${user}:${password}@${host}:${port}/${database}`;
-    case "mysql":
-      return `mysql://${user}:${password}@${host}:${port}/${database}`;
-    default:
-      return `postgresql://${user}:${password}@${host}:${port}/${database}`;
-  }
-}
-
 export function getConnectionString(config: ServiceConfig, host = "localhost"): string {
   return buildConnectionString(config.type, {
     host,
@@ -68,11 +40,28 @@ export function getConnectionString(config: ServiceConfig, host = "localhost"): 
   });
 }
 
-/** Which env var name an app expects for a given service type. */
-export function connectionEnvKey(type: string): string {
-  if (type === "redis") return "REDIS_URL";
-  if (type === "mongodb") return "MONGODB_URL";
-  return "DATABASE_URL";
+/**
+ * The port the service listens on INSIDE its container.
+ *
+ * Not the same number as the one stored on the service, which is where it is
+ * published on the host. A container on the project network talks to the
+ * service by container name, and the published mapping plays no part there — so
+ * a Postgres published on 5433 because 5432 was taken is still reached on 5432.
+ *
+ * Read from the template rather than restated, so it cannot disagree with the
+ * port the container actually exposes.
+ */
+export function internalPort(type: string, fallback: number): number {
+  const template = getTemplate(type);
+  if (!template) return fallback;
+
+  return template.getDockerConfig({
+    name: "probe",
+    type: type as ServiceConfig["type"],
+    version: template.defaultVersion,
+    port: fallback,
+    credentials: { user: "", password: "", database: "" },
+  }).port;
 }
 
 export async function provisionService(config: ServiceConfig, projectSlug?: string): Promise<string> {
@@ -153,29 +142,65 @@ export async function restartService(containerName: string): Promise<void> {
   await docker(["restart", containerName], { timeout: 60_000 });
 }
 
+/** Enough of a service to name its container and its volumes. */
+export interface ServiceIdentity {
+  type: string;
+  name: string;
+  projectSlug?: string | null;
+}
+
+/**
+ * The volumes belonging to one service, named by the same code that created
+ * them so the two cannot drift.
+ *
+ * The previous answer to this question was `name.endsWith("-" + serviceName)`
+ * over every volume RunPanel owns on the host. For a service scoped to a
+ * project that was merely sloppy — it also matched a sibling service called
+ * `main-db`. For a service with no project it listed the whole host unscoped,
+ * so deleting a service called `db` would have taken `runpanel-pg-anyproject-db`
+ * with it: every project's database, gone, from one confirmation dialog.
+ */
+export function serviceVolumeNames(service: ServiceIdentity): string[] {
+  const template = getTemplate(service.type);
+  if (!template) return [];
+
+  const dockerConfig = template.getDockerConfig({
+    name: service.name,
+    type: service.type as ServiceConfig["type"],
+    version: template.defaultVersion,
+    port: 0,
+    credentials: { user: "", password: "", database: "" },
+    projectSlug: service.projectSlug ?? undefined,
+  });
+
+  return dockerConfig.volumes
+    .map((mapping) => mapping.split(":")[0])
+    .filter((name) => Boolean(name) && !name.startsWith("/") && !name.includes("\\"));
+}
+
 /**
  * Remove a service container, and optionally the volume holding its data.
  *
  * `removeData` defaults to false: dropping a database's storage is not
  * something to do as a side effect. Callers that mean it — deleting the service
  * from the UI — pass true after confirming.
+ *
+ * Without `service` there is no way to know which volumes are this one's, so
+ * nothing is removed. Guessing is what the old implementation did.
  */
 export async function removeService(
   containerName: string,
-  opts: { removeData?: boolean; projectSlug?: string; serviceName?: string } = {}
+  opts: { removeData?: boolean; service?: ServiceIdentity } = {}
 ): Promise<{ volumesRemoved: string[] }> {
   await dockerTry(["rm", "-f", containerName], { timeout: 30_000 });
 
-  if (!opts.removeData) return { volumesRemoved: [] };
+  if (!opts.removeData || !opts.service) return { volumesRemoved: [] };
 
-  const owned = await listOwnedVolumes(
-    opts.projectSlug ? { project: opts.projectSlug } : {}
-  );
-
-  // Match the volumes this service created, not everything the project owns.
-  const mine = owned
-    .map((v) => v.name)
-    .filter((name) => (opts.serviceName ? name.endsWith(`-${opts.serviceName}`) : false));
+  // Intersected with what RunPanel actually owns: the names above are derived
+  // from a user-supplied service name, and `docker volume rm` on a name this
+  // panel never created is not ours to run.
+  const owned = new Set((await listOwnedVolumes()).map((v) => v.name));
+  const mine = serviceVolumeNames(opts.service).filter((name) => owned.has(name));
 
   return { volumesRemoved: await removeVolumes(mine) };
 }

@@ -9,6 +9,7 @@ import { useResource } from "@/lib/hooks/useResource";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Panel } from "@/components/ui/Panel";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { Code, Hint } from "@/components/ui/Hint";
 import { PageSkeleton } from "@/components/ui/Skeletons";
 import { StatusBadge } from "@/components/StatusBadge";
 
@@ -19,6 +20,7 @@ interface Service {
   version: string;
   status: string;
   port: number;
+  project_id: string | null;
 }
 
 const TYPE_ICONS: Record<string, string> = {
@@ -30,9 +32,12 @@ const TYPE_ICONS: Record<string, string> = {
 
 const ServiceRow = memo(function ServiceRow({
   service,
+  projectName,
   onControl,
 }: {
   service: Service;
+  /** Undefined when the service belongs to no project — which is worth showing. */
+  projectName?: string;
   onControl: (id: string, action: "start" | "stop" | "restart") => void;
 }) {
   const running = service.status === "running";
@@ -51,8 +56,17 @@ const ServiceRow = memo(function ServiceRow({
           <span className="text-foreground truncate text-sm font-medium">{service.name}</span>
           <StatusBadge status={service.status} />
         </div>
-        <p className="text-muted mt-0.5 truncate font-mono text-xs">
-          {service.type} {service.version} · :{service.port}
+        <p className="text-muted mt-0.5 flex flex-wrap items-center gap-x-2 truncate text-xs">
+          <span className="font-mono">
+            {service.type} {service.version} · :{service.port}
+          </span>
+          {projectName ? (
+            <span className="text-muted">
+              → <span className="text-foreground">{projectName}</span>
+            </span>
+          ) : (
+            <span className="text-warning">nessun progetto collegato</span>
+          )}
         </p>
       </Link>
 
@@ -79,6 +93,18 @@ const ServiceRow = memo(function ServiceRow({
 export default function ServicesPage() {
   const [search, setSearch] = useState("");
   const { data, loading, refresh } = useResource<Service[]>("/api/services", { intervalMs: 5000 });
+
+  // Names only, and without polling: a service's project does not change while
+  // the page is open, but "which project is this database attached to" is the
+  // one thing this list was not answering.
+  const { data: projectsData } = useResource<{ id: string; name: string }[]>("/api/projects");
+  const projectNames = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const project of Array.isArray(projectsData) ? projectsData : []) {
+      map.set(project.id, project.name);
+    }
+    return map;
+  }, [projectsData]);
 
   const services = useMemo(() => (Array.isArray(data) ? data : []), [data]);
 
@@ -127,6 +153,14 @@ export default function ServicesPage() {
         }
       />
 
+      <Hint tone="tip" icon="solar:link-circle-linear" className="mb-4">
+        Un servizio creato dentro un progetto gli si collega da solo: al deploy l&apos;app riceve{" "}
+        <Code>DATABASE_URL</Code> (o <Code>REDIS_URL</Code>, <Code>MONGODB_URL</Code>) con host,
+        porta e password già giusti. Uno senza progetto resta autonomo e lo usa chiunque: apri la
+        sua pagina e copia la riga pronta — da un container si raggiunge su{" "}
+        <Code>host.docker.internal</Code>, dalla macchina su <Code>localhost</Code>.
+      </Hint>
+
       {services.length > 3 && (
         <div className="mb-4 max-w-sm">
           <Input
@@ -145,7 +179,7 @@ export default function ServicesPage() {
             title={services.length === 0 ? "Nessun servizio" : "Nessun risultato"}
             description={
               services.length === 0
-                ? "Provisiona PostgreSQL, MySQL, Redis o MongoDB e collegalo a un progetto."
+                ? "PostgreSQL, MySQL, Redis o MongoDB, provisionati come container con volume dedicato. Aprine uno dal progetto che lo userà e il collegamento è già fatto."
                 : "Nessun servizio corrisponde alla ricerca."
             }
           />
@@ -153,7 +187,12 @@ export default function ServicesPage() {
       ) : (
         <div className="space-y-2">
           {filtered.map((service) => (
-            <ServiceRow key={service.id} service={service} onControl={handleControl} />
+            <ServiceRow
+              key={service.id}
+              service={service}
+              projectName={service.project_id ? projectNames.get(service.project_id) : undefined}
+              onControl={handleControl}
+            />
           ))}
         </div>
       )}

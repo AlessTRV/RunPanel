@@ -5,11 +5,17 @@ import { useRouter } from "next/navigation";
 import { Button, Input, Label, TextField } from "@heroui/react";
 import { Icon } from "@iconify/react";
 import { toast } from "sonner";
+import { useResource } from "@/lib/hooks/useResource";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
+import { Code, FieldHint, Hint } from "@/components/ui/Hint";
+import { connectionEnvKey } from "@/lib/service-env";
 import { cn } from "@/lib/utils";
 import { DATABASE_OPTIONS, databaseOption, type ServiceType } from "../_data/catalog";
 
-export function DatabaseForm({ projectId }: { projectId: string }) {
+/** Mirrors `serviceNameSchema`: a bad name should not need a round trip. */
+const NAME_PATTERN = /^[a-z0-9][a-z0-9_-]*$/;
+
+export function DatabaseForm({ projectId }: { projectId?: string }) {
   const router = useRouter();
   const [saving, setSaving] = useState(false);
 
@@ -20,6 +26,15 @@ export function DatabaseForm({ projectId }: { projectId: string }) {
   const [user, setUser] = useState("runpanel");
   const [password, setPassword] = useState("");
   const [database, setDatabase] = useState("runpanel_db");
+  // Seeded from the entry point, then editable: arriving from a project
+  // pre-selects it, arriving from Servizi starts on "nessuno".
+  const [project, setProject] = useState(projectId ?? "");
+
+  const { data: projectsData } = useResource<{ id: string; name: string; slug: string }[]>(
+    "/api/projects"
+  );
+  const projects = Array.isArray(projectsData) ? projectsData : [];
+  const projectSlug = projects.find((p) => p.id === project)?.slug;
 
   const option = databaseOption(type);
 
@@ -34,21 +49,27 @@ export function DatabaseForm({ projectId }: { projectId: string }) {
   }
 
   async function create() {
-    if (!name.trim()) {
+    const trimmed = name.trim();
+    if (!trimmed) {
       toast.error("Serve un nome per il servizio");
       return;
     }
+    if (!NAME_PATTERN.test(trimmed)) {
+      toast.error("Il nome può contenere solo minuscole, numeri, trattini e underscore");
+      return;
+    }
+
     setSaving(true);
     try {
       const res = await fetch("/api/services", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          name: name.trim(),
+          name: trimmed,
           type,
           version,
           port: Number.parseInt(port, 10),
-          projectId: projectId || undefined,
+          projectId: project || undefined,
           credentials: {
             user: user.trim() || undefined,
             password: password || undefined,
@@ -62,7 +83,9 @@ export function DatabaseForm({ projectId }: { projectId: string }) {
         return;
       }
       toast.success("Servizio creato");
-      router.push(projectId ? `/projects/${projectId}` : "/services");
+      // Without a project there is nowhere else to go that shows what was just
+      // made — and the connection string is the reason someone created it.
+      router.push(project ? `/projects/${project}` : `/services/${data.id}`);
     } catch {
       toast.error("Creazione fallita");
     } finally {
@@ -70,8 +93,56 @@ export function DatabaseForm({ projectId }: { projectId: string }) {
     }
   }
 
+  const envKey = connectionEnvKey(type);
+
   return (
     <div className="max-w-2xl space-y-4">
+      {project ? (
+        <Hint tone="tip" icon="solar:link-circle-linear" title="Cosa succede dopo">
+          Il container viene creato subito, con un volume dedicato per i dati. Dal deploy successivo
+          il progetto riceve <Code>{envKey}</Code> già pronta — host, porta, utente e password
+          corretti per il runtime che stai usando. Non devi copiare niente a mano, e se un giorno
+          preferisci una connection string tua basta dichiarare <Code>{envKey}</Code> tra le
+          variabili del progetto: quella vince.
+        </Hint>
+      ) : (
+        <Hint icon="solar:database-linear" title="Cosa succede dopo">
+          Il container viene creato subito, con un volume dedicato per i dati. Senza progetto
+          nessuna variabile viene iniettata da nessuna parte: la pagina del servizio ti dà la
+          connection string pronta, e la incolli come <Code>{envKey}</Code> tra le variabili di chi
+          lo deve usare — quanti progetti vuoi.
+        </Hint>
+      )}
+
+      <Panel className="space-y-4">
+        <PanelHeader title="Progetto" description="Facoltativo: decide solo chi lo riceve in automatico" />
+
+        {/* A native select, like the branch picker in AppForm: the list is plain
+            data, and this is keyboard- and screen-reader-correct for free. */}
+        <div>
+          <label htmlFor="service-project" className="text-muted mb-1 block text-sm font-medium">
+            Progetto
+          </label>
+          <select
+            id="service-project"
+            value={project}
+            onChange={(e) => setProject(e.target.value)}
+            className="border-border bg-background text-foreground focus:border-accent/60 w-full rounded-[var(--radius)] border px-3 py-2 text-sm outline-none"
+          >
+            <option value="">Nessuno — servizio autonomo</option>
+            {projects.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+          <FieldHint>
+            Con un progetto: stessa rete Docker e <Code>{envKey}</Code> iniettata a ogni deploy.
+            Senza: il servizio resta a sé e lo colleghi copiando la sua URL dove serve.
+          </FieldHint>
+        </div>
+      </Panel>
+
       <Panel className="space-y-4">
         <PanelHeader title="Tipo" description="Il container viene provisionato con un volume dedicato" />
 
@@ -94,10 +165,21 @@ export function DatabaseForm({ projectId }: { projectId: string }) {
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2">
-          <TextField value={name} onChange={setName}>
-            <Label>Nome del servizio</Label>
-            <Input placeholder="db" />
-          </TextField>
+          <div>
+            <TextField value={name} onChange={setName}>
+              <Label>Nome del servizio</Label>
+              <Input placeholder="db" />
+            </TextField>
+            <FieldHint>
+              Diventa il nome del container:{" "}
+              <Code>
+                runpanel-svc-{projectSlug ? `${projectSlug}-` : ""}
+                {name.trim() || "nome"}
+              </Code>
+              . Solo minuscole, numeri, trattini e underscore.
+              {!project && " Senza progetto il nome deve essere unico tra i servizi autonomi."}
+            </FieldHint>
+          </div>
 
           <div>
             <span className="text-muted mb-2 block text-sm font-medium">Versione</span>
@@ -108,13 +190,25 @@ export function DatabaseForm({ projectId }: { projectId: string }) {
                 </Button>
               ))}
             </div>
+            <FieldHint>
+              Il tag dell&apos;immagine ufficiale. Sceglila uguale a quella che usi in sviluppo: un
+              dump ripristinato su una major diversa è il modo classico per perdere un pomeriggio.
+            </FieldHint>
           </div>
         </div>
 
-        <TextField value={port} onChange={setPort}>
-          <Label>Porta sull&apos;host</Label>
-          <Input type="number" />
-        </TextField>
+        <div>
+          <TextField value={port} onChange={setPort}>
+            <Label>Porta sull&apos;host</Label>
+            <Input type="number" />
+          </TextField>
+          <FieldHint>
+            Serve a te, per collegarti dalla macchina con un client esterno. Se{" "}
+            <Code>{option.defaultPort}</Code> è già occupata — un altro {option.label} installato,
+            o un altro servizio qui dentro — cambiala pure: dentro la rete del progetto l&apos;app
+            continua a usare la porta standard del container, quindi per lei non cambia nulla.
+          </FieldHint>
+        </div>
       </Panel>
 
       <Panel className="space-y-4">
@@ -136,10 +230,18 @@ export function DatabaseForm({ projectId }: { projectId: string }) {
           </div>
         )}
 
-        <TextField value={password} onChange={setPassword}>
-          <Label>Password</Label>
-          <Input type="password" placeholder="generata automaticamente" className="font-mono text-sm" />
-        </TextField>
+        <div>
+          <TextField value={password} onChange={setPassword}>
+            <Label>Password</Label>
+            <Input type="password" placeholder="generata automaticamente" className="font-mono text-sm" />
+          </TextField>
+          <FieldHint>
+            Lasciala vuota: viene generata casuale e non devi ricordartela, perché nell&apos;app
+            arriva da sola. Resta cifrata a riposo e la puoi rileggere quando vuoi dalla pagina del
+            servizio. Vale la pena metterla a mano solo se stai ricreando un servizio che deve
+            ritrovare un volume con dati già inizializzati da quelle credenziali.
+          </FieldHint>
+        </div>
       </Panel>
 
       <div className="flex justify-end">
