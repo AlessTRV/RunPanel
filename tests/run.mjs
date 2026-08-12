@@ -27,8 +27,21 @@ const REPO_ROOT = resolve(HERE, "..");
 
 const args = process.argv.slice(2);
 const flags = new Set(args.filter((a) => a.startsWith("--")));
-const requested = args.filter((a) => !a.startsWith("--"));
-const driverFilter = args.includes("--driver") ? args[args.indexOf("--driver") + 1] : null;
+
+// `--driver postgres` takes a value, and that value is not a suite name. It was
+// being collected into `requested` all the same, which filters suites by name —
+// so the documented invocation matched nothing and ran zero tests while
+// reporting success. Any option that takes a value has to be dropped here
+// together with it.
+const driverIndex = args.indexOf("--driver");
+const driverFilter = driverIndex >= 0 ? (args[driverIndex + 1] ?? null) : null;
+// `driverIndex + 1` is only a value position when the flag is actually present:
+// with no `--driver`, indexOf returns -1 and that expression is 0, which would
+// silently swallow the first suite name instead.
+const driverValueIndex = driverIndex >= 0 ? driverIndex + 1 : -1;
+const requested = args.filter(
+  (a, index) => !a.startsWith("--") && index !== driverValueIndex
+);
 
 const pgUrl = process.env.RUNPANEL_TEST_PG_URL ?? null;
 const hasDocker = !flags.has("--no-docker") && dockerAvailable();
