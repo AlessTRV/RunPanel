@@ -1,13 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import {
-  getSession,
-  getAdminPasswordHash,
-  verifyPassword,
-  setAdminPassword,
-  createSession,
-  destroyAllSessions,
-  encrypt,
-} from "@/lib/auth";
+import { getSession, getAdminPasswordHash, verifyPassword, setAdminPassword, createSession, destroyAllSessions } from "@/lib/auth";
+import { encrypt } from "@/lib/crypto";
 import { z } from "zod";
 import { getAllSettings, setSetting } from "@/lib/settings";
 import { ACCENT_PRESETS, ACCENT_SETTING_KEY } from "@/lib/themes";
@@ -45,7 +38,7 @@ const READABLE_SETTINGS: readonly string[] = [
 // GET: Read settings
 export async function GET() {
   const session = await getSession();
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!session) return NextResponse.json({ error: "Non autorizzato" }, { status: 401 });
 
   const all = await getAllSettings();
   const settings: Record<string, string> = {};
@@ -69,12 +62,28 @@ export async function GET() {
 // PUT: Update settings (password, preferences, or GitHub token)
 export async function PUT(request: NextRequest) {
   const session = await getSession();
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!session) return NextResponse.json({ error: "Non autorizzato" }, { status: 401 });
 
-  const body = await request.json();
+  // A malformed body is a bad request, not a 500.
+  // This handler reads a handful of optional fields by hand rather than through
+  // one schema, because it serves three unrelated operations on one endpoint.
+  // Each field is checked below; what matters here is that a body which is not
+  // JSON at all becomes a 400 rather than an unhandled rejection.
+  let raw: unknown;
+  try {
+    raw = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Richiesta non valida" }, { status: 400 });
+  }
+  const body = (raw ?? {}) as {
+    currentPassword?: unknown;
+    newPassword?: unknown;
+    preferences?: unknown;
+    github_token?: unknown;
+  };
 
   // Password change
-  if (body.currentPassword && body.newPassword) {
+  if (typeof body.currentPassword === "string" && body.newPassword !== undefined) {
     if (typeof body.newPassword !== "string" || body.newPassword.length < 8) {
       return NextResponse.json(
         { error: "New password must be at least 8 characters" },
@@ -106,7 +115,7 @@ export async function PUT(request: NextRequest) {
     const parsed = preferencesSchema.safeParse(body.preferences);
     if (!parsed.success) {
       return NextResponse.json(
-        { error: "Invalid preferences", details: parsed.error.issues },
+        { error: "Preferenze non valide", details: parsed.error.issues },
         { status: 400 }
       );
     }
@@ -121,7 +130,8 @@ export async function PUT(request: NextRequest) {
 
   // GitHub token
   if (body.github_token !== undefined) {
-    await setSetting("github_token", body.github_token ? encrypt(body.github_token) : "");
+    const token = typeof body.github_token === "string" ? body.github_token.trim() : "";
+    await setSetting("github_token", token ? encrypt(token) : "");
     return NextResponse.json({ success: true });
   }
 

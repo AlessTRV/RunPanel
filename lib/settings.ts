@@ -17,19 +17,6 @@ export async function getSetting(key: string): Promise<string | null> {
   return row?.value ?? null;
 }
 
-export async function getSettings(keys: string[]): Promise<Record<string, string>> {
-  if (keys.length === 0) return {};
-  const db = await getDb();
-  const rows = await db
-    .selectFrom("settings")
-    .select(["key", "value"])
-    .where("key", "in", keys)
-    .execute();
-
-  const out: Record<string, string> = {};
-  for (const row of rows) out[row.key] = row.value;
-  return out;
-}
 
 export async function getAllSettings(): Promise<Record<string, string>> {
   const db = await getDb();
@@ -67,8 +54,3 @@ export async function setSettingIfAbsent(key: string, value: string): Promise<bo
   return row !== undefined;
 }
 
-export async function deleteSettings(keys: string[]): Promise<void> {
-  if (keys.length === 0) return;
-  const db = await getDb();
-  await db.deleteFrom("settings").where("key", "in", keys).execute();
-}
