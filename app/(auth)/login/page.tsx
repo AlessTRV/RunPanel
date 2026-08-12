@@ -22,6 +22,7 @@ export default function LoginPage() {
   const [isFirstRun, setIsFirstRun] = useState<boolean | null>(null);
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [setupToken, setSetupToken] = useState("");
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -59,6 +60,10 @@ export default function LoginPage() {
   }
 
   async function handleSetup() {
+    if (!setupToken.trim()) {
+      toast.error("Enter the setup token from the panel's startup log");
+      return;
+    }
     if (password.length < 8) {
       toast.error("Password must be at least 8 characters");
       return;
@@ -72,7 +77,7 @@ export default function LoginPage() {
       const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ password, setup: true }),
+        body: JSON.stringify({ password, setup: true, setupToken: setupToken.trim() }),
       });
       if (res.ok) {
         router.push("/home");
@@ -108,11 +113,20 @@ export default function LoginPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4 px-5 sm:px-8 pb-6 sm:pb-8 pt-4 sm:pt-6">
+          {/* Proves the person claiming this panel is the one who can read its
+              log, rather than whoever reached it first. */}
+          {isFirstRun && (
+            <TextField value={setupToken} onChange={setSetupToken} autoFocus>
+              <Label>Setup token</Label>
+              <Input placeholder="Printed in the panel's startup log" />
+            </TextField>
+          )}
+
           <TextField
             type="password"
             value={password}
             onChange={setPassword}
-            autoFocus
+            autoFocus={!isFirstRun}
           >
             <Label>Password</Label>
             <Input

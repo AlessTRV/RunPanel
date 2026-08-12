@@ -12,8 +12,13 @@ import { z } from "zod";
 import { getAllSettings, setSetting } from "@/lib/settings";
 import { ACCENT_PRESETS, ACCENT_SETTING_KEY } from "@/lib/themes";
 
-/** Settings that must never be echoed back to the client in cleartext. */
-const SECRET_SETTINGS = new Set(["github_token", "session_token", "admin_password_hash"]);
+/**
+ * Settings reported only as present or absent, never by value.
+ *
+ * Separate from the allowlist below because the client genuinely needs to know
+ * whether a GitHub token is configured — it just must not learn what it is.
+ */
+const PRESENCE_ONLY_SETTINGS = new Set(["github_token"]);
 
 /** Every preference a client is allowed to write, and what counts as valid. */
 const preferencesSchema = z
@@ -26,6 +31,17 @@ const preferencesSchema = z
   })
   .strict();
 
+/**
+ * Everything `GET /api/settings` will hand back. The preferences a client
+ * writes, plus the one key it needs to know the presence of.
+ */
+const READABLE_SETTINGS: readonly string[] = [
+  "polling_interval",
+  "timezone",
+  ACCENT_SETTING_KEY,
+  "github_token",
+];
+
 // GET: Read settings
 export async function GET() {
   const session = await getSession();
@@ -34,12 +50,20 @@ export async function GET() {
   const all = await getAllSettings();
   const settings: Record<string, string> = {};
 
-  for (const [key, value] of Object.entries(all)) {
-    // Report presence, never the value itself.
-    settings[key] = SECRET_SETTINGS.has(key) ? (value ? "configured" : "") : value;
+  // An allowlist, not a list of things to hide.
+  //
+  // This used to return every row in the `settings` table and mask three known
+  // names. That table is also where the autostart host config, the scheduler's
+  // bookkeeping and the encrypted registry credentials live, and any secret
+  // added to it later would have been published by default — the failure mode
+  // of a denylist is silence.
+  for (const key of READABLE_SETTINGS) {
+    const value = all[key];
+    if (value === undefined) continue;
+    settings[key] = PRESENCE_ONLY_SETTINGS.has(key) ? (value ? "configured" : "") : value;
   }
 
-  return NextResponse.json(settings);
+  return NextResponse.json(settings, { headers: { "Cache-Control": "no-store" } });
 }
 
 // PUT: Update settings (password, preferences, or GitHub token)
@@ -101,5 +125,5 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ success: true });
   }
 
-  return NextResponse.json({ error: "Invalid request" }, { status: 400 });
+  return NextResponse.json({ error: "Richiesta non valida" }, { status: 400 });
 }

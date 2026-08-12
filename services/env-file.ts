@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { config } from "@/lib/config";
+import { resolveInside } from "@/lib/fs-safe";
 
 /**
  * Writes a project's environment out as a real `.env` file.
@@ -76,10 +77,11 @@ export function removeEnvFile(slug: string): void {
  * own working directory, so put one there.
  */
 export function writeEnvFileInto(repoDir: string, relativePath: string, envVars: Record<string, string>): string {
-  const target = path.resolve(repoDir, relativePath.replace(/^\/+/, ""));
-
-  // Never let a configured path escape the project directory.
-  if (!target.startsWith(path.resolve(repoDir))) {
+  // Never let a configured path escape the project directory. This wrote every
+  // one of the project's decrypted variables, and the check used to be a bare
+  // `startsWith`, which accepts `../app-x/.env` next to a project called `app`.
+  const target = resolveInside(repoDir, relativePath);
+  if (!target) {
     throw new Error(`envFile.path esce dalla directory del progetto: ${relativePath}`);
   }
 

@@ -4,6 +4,7 @@ import { decrypt } from "@/lib/auth";
 import { gitPull, gitClone, repoExists, getRepoPath, getLatestCommit } from "./git-manager";
 import { buildProject } from "./builder-registry";
 import { processManager } from "./process-manager";
+import { isWindows } from "./env-utils";
 import { runReleaseCommand, waitForHealthy } from "./deploy-steps";
 import { writeEnvFile, writeEnvFileInto } from "./env-file";
 import { detectPreset, readRepoContract, RUNPANEL_CONFIG_FILE } from "./deploy-presets";
@@ -13,12 +14,10 @@ import {
   resolveContract,
   resolveContractJson,
   selectBuildEnv,
+  stripPanelOnlyFields,
 } from "@/lib/deploy-contract";
-import {
-  buildConnectionString,
-  connectionEnvKey,
-  serviceContainerName,
-} from "./service-provisioner";
+import { internalPort } from "./service-provisioner";
+import { buildConnectionString, connectionEnvKey } from "@/lib/service-env";
 import { sweep } from "./docker/gc";
 import { BuildLogFile } from "./build-logs";
 import { projectEvents } from "./events";
@@ -40,6 +39,14 @@ const REBUILD_CLEAN_DIRS: Record<string, string[]> = {
   docker: [],
   compose: [],
 };
+
+/**
+ * Runtimes whose build writes into the same directory the app runs from.
+ *
+ * Docker and Compose build an image instead, so a running container holds
+ * nothing on the host and the old instance can stay up through the build.
+ */
+const IN_PLACE_BUILD_RUNTIMES = new Set(["node", "static", "custom"]);
 
 /**
  * Deploys are started with `void executeDeploy(...)` — nothing awaits them, so
@@ -68,8 +75,30 @@ async function runDeploy(
   const db = await getDb();
   const externalLog = opts.onLog;
   const mode = opts.mode ?? "deploy";
-  const wasRunning = project.status === "running";
   const logFile = new BuildLogFile(deploymentId);
+
+  // The row is a record of intent, and it drifts from reality: a deploy that
+  // starts the app and then fails its health check records "error"/"stopped"
+  // while the process it started is still online. Only the driver knows what is
+  // running — but asking costs a pm2 spawn, so it is asked only where believing
+  // the row actually breaks something.
+  //
+  // That is Windows. There, a rebuild that skips its stop then walks into
+  // `rm -rf node_modules` and cannot remove a directory holding a mapped native
+  // addon:
+  //
+  //   EPERM, Permission denied: …\data\repos\spanel\node_modules
+  //
+  // Elsewhere an open file is no obstacle to unlinking it, so a stale row costs
+  // at most a stop that no-ops — not worth a spawn on every deploy.
+  let wasRunning = project.status === "running";
+  if (isWindows) {
+    try {
+      wasRunning = (await processManager.status(project.slug, project.runtime_type)).running;
+    } catch {
+      /* a driver that cannot answer leaves the row's opinion standing */
+    }
+  }
 
   // Resolved once the source is on disk, so an in-repo `runpanel.json` can take
   // part. Until then, the panel's settings alone.
@@ -121,7 +150,24 @@ async function runDeploy(
       for (const dir of REBUILD_CLEAN_DIRS[project.runtime_type] ?? []) {
         const fullPath = path.join(cleanDir, dir);
         if (fs.existsSync(fullPath)) {
-          fs.rmSync(fullPath, { recursive: true, force: true });
+          try {
+            fs.rmSync(fullPath, { recursive: true, force: true });
+          } catch (err: unknown) {
+            // Windows only: there EPERM/EBUSY on a directory means something
+            // has it open, and `force: true` does not help — raw, the error
+            // reads as a permissions problem and sends you to check ACLs. On
+            // POSIX the same codes really are about permissions, so rewriting
+            // the message there would only mislead.
+            const code = (err as NodeJS.ErrnoException).code;
+            if (isWindows && (code === "EPERM" || code === "EBUSY" || code === "EACCES")) {
+              throw new Error(
+                `Cannot remove ${dir}/: a process still has it open. ` +
+                  `On Windows a running app locks its native modules, so stop anything ` +
+                  `using ${cleanDir} — including editors and terminals — and retry.`
+              );
+            }
+            throw err;
+          }
           appendLog(`Removed ${dir}/`);
         }
       }
@@ -164,7 +210,12 @@ async function runDeploy(
     // then the repository's own runpanel.json, then whatever the operator set.
     // The detected preset is what lets a project with no configuration at all
     // deploy anyway.
-    const repoContract = readRepoContract(projectDir);
+    // The repository's contract is untrusted input: it arrives with whatever
+    // was pushed. Strip the fields that would let it reach outside its own
+    // container before it takes part in the merge at all.
+    const rawRepoContract = readRepoContract(projectDir);
+    const stripped = rawRepoContract === null ? null : stripPanelOnlyFields(rawRepoContract);
+    const repoContract = stripped?.contract ?? null;
     const preset = detectPreset(projectDir);
 
     if (preset) {
@@ -179,6 +230,12 @@ async function runDeploy(
 
       if (repoContract) {
         appendLog(`Found ${RUNPANEL_CONFIG_FILE} in the repository — merged under the panel settings.`);
+      }
+      if (stripped && stripped.rejected.length > 0) {
+        appendLog(
+          `Ignored ${stripped.rejected.join(", ")} from ${RUNPANEL_CONFIG_FILE}: ` +
+            `these grant access to the host and can only be set from the panel.`
+        );
       }
     }
 
@@ -210,22 +267,25 @@ async function runDeploy(
     // Auto-inject service connection URLs (DB, Redis, etc.)
     const linkedServices = await db
       .selectFrom("services")
-      .select(["name", "type", "port", "credentials", "config"])
+      .select(["name", "type", "port", "credentials", "container_name"])
       .where("project_id", "=", project.id)
       .execute();
 
     const isDockerApp = project.runtime_type === "docker";
-    for (const svc of linkedServices) {
-      let containerName = "";
-      try {
-        containerName =
-          (JSON.parse(svc.config || "{}") as { containerName?: string }).containerName ?? "";
-      } catch { /* fall through to the derived name */ }
-      if (!containerName) containerName = serviceContainerName(svc.name);
 
-      // A containerised app reaches the service by container name over the
-      // shared project network; a native process reaches it on localhost.
-      const host = isDockerApp ? containerName : "localhost";
+    // Only an app on the project network resolves the service by container
+    // name. On `host` the container shares the host's stack, and on `bridge` it
+    // never joins the project network at all — in both cases the way in is the
+    // port published on the host, exactly as for a native process.
+    const onProjectNetwork = isDockerApp && contract.docker.network === "project";
+
+    for (const svc of linkedServices) {
+      // Container name and container port travel together: inside the network
+      // the published mapping does not exist, so a service published on 5433 is
+      // still listening on 5432. Pairing the container name with the host port
+      // is what made a database on a non-default port unreachable.
+      const host = onProjectNetwork ? svc.container_name : "localhost";
+      const svcPort = onProjectNetwork ? internalPort(svc.type, svc.port) : svc.port;
       let creds: { user?: string; password?: string; database?: string } = {};
       try {
         creds = JSON.parse(decrypt(svc.credentials));
@@ -237,12 +297,14 @@ async function runDeploy(
       if (!envVars[envKey]) {
         envVars[envKey] = buildConnectionString(svc.type, {
           host,
-          port: svc.port,
+          port: svcPort,
           user: creds.user,
           password: creds.password,
           database: creds.database,
         });
-        appendLog(`Auto-linked ${svc.type} service "${svc.name}" → ${envKey}`);
+        appendLog(`Auto-linked ${svc.type} service "${svc.name}" → ${envKey} (${host}:${svcPort})`);
+      } else {
+        appendLog(`Service "${svc.name}" not linked: ${envKey} is set on the project.`);
       }
     }
 
@@ -276,7 +338,39 @@ async function runDeploy(
       }
     }
 
-    // Build (install + compile) — the old process stays up during this phase
+    // Windows cannot replace a file that a running process has mapped, and a
+    // native addon is always mapped — Prisma's query engine, better-sqlite3,
+    // sharp. Since an in-place build writes into the very node_modules the old
+    // instance is executing from, leaving it up does not buy zero downtime, it
+    // costs the whole deploy: `prisma generate` dies with
+    //
+    //   EPERM: operation not permitted, rename
+    //   '…/.prisma/client/query_engine-windows.dll.node.tmp3776' -> '….node'
+    //
+    // and every subsequent deploy of a Prisma project fails the same way, for
+    // as long as the app is up. Real zero-downtime here needs a separate build
+    // directory, not a later stop. Placed after preflight so a deploy that was
+    // never going to run does not take the app down on its way out.
+    let stoppedForBuild = false;
+    if (
+      isWindows &&
+      wasRunning &&
+      mode === "deploy" &&
+      IN_PLACE_BUILD_RUNTIMES.has(project.runtime_type)
+    ) {
+      appendLog("\n--- Stopping previous instance ---");
+      appendLog("Windows: the build writes into the directory it runs from.");
+      try {
+        await processManager.stop(project.slug, project.runtime_type);
+        appendLog("Previous instance stopped.");
+      } catch {
+        appendLog("No previous instance to stop.");
+      }
+      stoppedForBuild = true;
+    }
+
+    // Build (install + compile). Everywhere else the old process stays up for
+    // this phase; see above for why Windows cannot.
     appendLog("\n--- Building ---");
 
     const buildResult = await buildProject(projectDir, project.runtime_type, {
@@ -326,8 +420,9 @@ async function runDeploy(
       artifact_dir: buildResult.artifactDir,
     });
 
-    // Stop the old process only after the build succeeded
-    if (wasRunning && mode === "deploy") {
+    // Stop the old process only after the build succeeded — unless the build
+    // itself already required it down.
+    if (wasRunning && mode === "deploy" && !stoppedForBuild) {
       appendLog("\n--- Stopping previous instance ---");
       try {
         await processManager.stop(project.slug, project.runtime_type);
@@ -339,6 +434,10 @@ async function runDeploy(
 
     // Start new process
     appendLog("\n--- Starting application ---");
+    // Announced before the start, not after: the driver empties the output as
+    // its first act, and a viewer told afterwards would clear the lines the new
+    // run has already printed.
+    projectEvents.emit(project.id, { type: "process:reset" });
     await processManager.start(project.slug, buildResult.startCmd, project.runtime_type, {
       cwd: buildResult.artifactDir,
       env: envVars,
@@ -431,11 +530,25 @@ async function runDeploy(
       finished_at: nowIso(),
     });
 
-    // If it had been running and we took it down, that is an error state.
-    // If it was already stopped, leave it stopped.
+    // Record what is actually up, not what was up when the deploy began: a
+    // health check failure arrives with the new process already started, so the
+    // opening snapshot is what let the row say "stopped" about a live app.
+    // Windows only, for the same reason as above — it is the platform where the
+    // next rebuild is then unable to clean the directory that app is holding.
+    let stillRunning = wasRunning;
+    if (isWindows) {
+      try {
+        stillRunning = (await processManager.status(project.slug, project.runtime_type)).running;
+      } catch {
+        /* a driver that cannot answer leaves the opening snapshot standing */
+      }
+    }
+
+    // Running after a failed deploy is an error state — it is serving, but not
+    // what this deploy intended. Not running is simply stopped.
     await db
       .updateTable("projects")
-      .set({ status: wasRunning ? "error" : "stopped", updated_at: nowIso() })
+      .set({ status: stillRunning ? "error" : "stopped", updated_at: nowIso() })
       .where("id", "=", project.id)
       .execute();
   } finally {

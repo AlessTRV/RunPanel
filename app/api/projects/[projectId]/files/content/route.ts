@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth-guard";
 import { getDb } from "@/lib/db";
+import { isPathShapeSafe, resolveInside } from "@/lib/fs-safe";
 import { getRepoPath } from "@/services/git-manager";
 import { execFile } from "child_process";
 import { promisify } from "util";
@@ -22,12 +23,17 @@ const BINARY_EXTENSIONS = new Set([
   ".pdf", ".doc", ".xls",
 ]);
 
-function isPathSafe(relPath: string): boolean {
-  if (relPath === "/" || relPath === "") return true;
-  const cleaned = relPath.replace(/^\//, "");
-  const normalized = path.normalize(cleaned);
-  return !normalized.startsWith("..") && !path.isAbsolute(normalized) && !normalized.includes("..");
-}
+/**
+ * Note on the two runtimes below.
+ *
+ * For a Docker project this file manager browses the CONTAINER from `/` — the
+ * listing endpoint runs `ls -la /` and the terminal tab opens a shell in the
+ * same place. An absolute path there is the feature, not an escape, so the
+ * Docker branch is left alone deliberately.
+ *
+ * The local branch is different: it is scoped to one project's checkout, and
+ * that scope is what `resolveInside` enforces.
+ */
 
 function isBinary(filePath: string): boolean {
   return BINARY_EXTENSIONS.has(path.extname(filePath).toLowerCase());
@@ -41,12 +47,12 @@ export async function GET(request: NextRequest, { params }: Params) {
   const { projectId } = await params;
   const filePath = request.nextUrl.searchParams.get("path");
 
-  if (!filePath || !isPathSafe(filePath)) {
-    return NextResponse.json({ error: "Invalid path" }, { status: 400 });
+  if (!filePath || !isPathShapeSafe(filePath)) {
+    return NextResponse.json({ error: "Percorso non valido" }, { status: 400 });
   }
 
   if (isBinary(filePath)) {
-    return NextResponse.json({ error: "Binary files cannot be edited" }, { status: 400 });
+    return NextResponse.json({ error: "I file binari non si possono modificare dal pannello" }, { status: 400 });
   }
 
   const db = await getDb();
@@ -57,7 +63,7 @@ export async function GET(request: NextRequest, { params }: Params) {
     .executeTakeFirst();
 
   if (!project) {
-    return NextResponse.json({ error: "Project not found" }, { status: 404 });
+    return NextResponse.json({ error: "Progetto non trovato" }, { status: 404 });
   }
 
   try {
@@ -72,7 +78,7 @@ export async function GET(request: NextRequest, { params }: Params) {
       const stat = fs.statSync(tmpFile);
       if (stat.size > MAX_FILE_SIZE) {
         fs.rmSync(tmpFile);
-        return NextResponse.json({ error: "File too large to edit (max 1MB)" }, { status: 400 });
+        return NextResponse.json({ error: "File troppo grande per l'editor (massimo 1 MB)" }, { status: 400 });
       }
 
       const content = fs.readFileSync(tmpFile, "utf-8");
@@ -82,11 +88,9 @@ export async function GET(request: NextRequest, { params }: Params) {
 
     // Local
     const repoDir = getRepoPath(project.slug);
-    const safeFilePath = filePath.replace(/^\//, "");
-    const fullPath = path.join(repoDir, safeFilePath);
-    const resolved = path.resolve(fullPath);
-    if (!resolved.startsWith(path.resolve(repoDir))) {
-      return NextResponse.json({ error: "Invalid path" }, { status: 400 });
+    const fullPath = resolveInside(repoDir, filePath);
+    if (!fullPath) {
+      return NextResponse.json({ error: "Percorso non valido" }, { status: 400 });
     }
 
     if (!fs.existsSync(fullPath)) {
@@ -95,7 +99,7 @@ export async function GET(request: NextRequest, { params }: Params) {
 
     const stat = fs.statSync(fullPath);
     if (stat.size > MAX_FILE_SIZE) {
-      return NextResponse.json({ error: "File too large to edit (max 1MB)" }, { status: 400 });
+      return NextResponse.json({ error: "File troppo grande per l'editor (massimo 1 MB)" }, { status: 400 });
     }
 
     const content = fs.readFileSync(fullPath, "utf-8");
@@ -115,12 +119,12 @@ export async function PUT(request: NextRequest, { params }: Params) {
   const body = await request.json();
   const { path: filePath, content } = body as { path?: string; content?: string };
 
-  if (!filePath || !isPathSafe(filePath) || typeof content !== "string") {
+  if (!filePath || !isPathShapeSafe(filePath) || typeof content !== "string") {
     return NextResponse.json({ error: "Invalid path or content" }, { status: 400 });
   }
 
   if (isBinary(filePath)) {
-    return NextResponse.json({ error: "Binary files cannot be edited" }, { status: 400 });
+    return NextResponse.json({ error: "I file binari non si possono modificare dal pannello" }, { status: 400 });
   }
 
   if (content.length > MAX_FILE_SIZE) {
@@ -135,7 +139,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
     .executeTakeFirst();
 
   if (!project) {
-    return NextResponse.json({ error: "Project not found" }, { status: 404 });
+    return NextResponse.json({ error: "Progetto non trovato" }, { status: 404 });
   }
 
   try {
@@ -154,11 +158,9 @@ export async function PUT(request: NextRequest, { params }: Params) {
 
     // Local
     const repoDir = getRepoPath(project.slug);
-    const safeFilePath = filePath.replace(/^\//, "");
-    const fullPath = path.join(repoDir, safeFilePath);
-    const resolved = path.resolve(fullPath);
-    if (!resolved.startsWith(path.resolve(repoDir))) {
-      return NextResponse.json({ error: "Invalid path" }, { status: 400 });
+    const fullPath = resolveInside(repoDir, filePath);
+    if (!fullPath) {
+      return NextResponse.json({ error: "Percorso non valido" }, { status: 400 });
     }
 
     fs.writeFileSync(fullPath, content, "utf-8");

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth-guard";
 import { getDb } from "@/lib/db";
+import { isPathShapeSafe, resolveInside } from "@/lib/fs-safe";
 import { getRepoPath } from "@/services/git-manager";
 import { execFile } from "child_process";
 import { promisify } from "util";
@@ -11,13 +12,6 @@ const exec = promisify(execFile);
 
 type Params = { params: Promise<{ projectId: string }> };
 
-function isPathSafe(relPath: string): boolean {
-  if (relPath === "/" || relPath === "") return true; // root is always safe
-  const cleaned = relPath.replace(/^\//, ""); // strip leading slash
-  const normalized = path.normalize(cleaned);
-  return !normalized.startsWith("..") && !path.isAbsolute(normalized) && !normalized.includes("..");
-}
-
 export async function GET(request: NextRequest, { params }: Params) {
   const denied = await requireAuth();
   if (denied) return denied;
@@ -25,8 +19,8 @@ export async function GET(request: NextRequest, { params }: Params) {
   const { projectId } = await params;
   const dirPath = request.nextUrl.searchParams.get("path") || "/";
 
-  if (!isPathSafe(dirPath)) {
-    return NextResponse.json({ error: "Invalid path" }, { status: 400 });
+  if (!isPathShapeSafe(dirPath)) {
+    return NextResponse.json({ error: "Percorso non valido" }, { status: 400 });
   }
 
   const db = await getDb();
@@ -37,7 +31,7 @@ export async function GET(request: NextRequest, { params }: Params) {
     .executeTakeFirst();
 
   if (!project) {
-    return NextResponse.json({ error: "Project not found" }, { status: 404 });
+    return NextResponse.json({ error: "Progetto non trovato" }, { status: 404 });
   }
 
   try {
@@ -64,18 +58,30 @@ export async function GET(request: NextRequest, { params }: Params) {
 
     // Local: read from repos directory
     const repoDir = getRepoPath(project.slug);
-    // Normalize: "/" means root of repo, map to "."
-    const safeDirPath = dirPath === "/" ? "." : dirPath.replace(/^\//, "");
-    const fullPath = path.join(repoDir, safeDirPath);
 
-    // Safety: ensure resolved path is inside repo
-    const resolved = path.resolve(fullPath);
-    if (!resolved.startsWith(path.resolve(repoDir))) {
-      return NextResponse.json({ error: "Invalid path" }, { status: 400 });
+    // A project whose source was never checked out has no repo directory at
+    // all. Reporting that as "Path not found" sends you looking for a missing
+    // folder inside a project that has no code in the first place — the same
+    // confusion the deploy pipeline already words properly.
+    if (!fs.existsSync(repoDir)) {
+      return NextResponse.json(
+        {
+          error:
+            "The project has no source yet — configure a GitHub repository or upload a ZIP, then deploy.",
+        },
+        { status: 404 }
+      );
+    }
+
+    // Resolved through any symlinks, so a link in the repository cannot be used
+    // to list a directory outside it.
+    const fullPath = resolveInside(repoDir, dirPath === "/" ? "." : dirPath);
+    if (!fullPath) {
+      return NextResponse.json({ error: "Percorso non valido" }, { status: 400 });
     }
 
     if (!fs.existsSync(fullPath)) {
-      return NextResponse.json({ error: "Path not found" }, { status: 404 });
+      return NextResponse.json({ error: "Percorso inesistente" }, { status: 404 });
     }
 
     const items = fs.readdirSync(fullPath, { withFileTypes: true });

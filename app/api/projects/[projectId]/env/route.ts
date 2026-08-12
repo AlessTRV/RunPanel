@@ -22,7 +22,7 @@ export async function GET(request: NextRequest, { params }: Params) {
     .executeTakeFirst();
 
   if (!project) {
-    return NextResponse.json({ error: "Project not found" }, { status: 404 });
+    return NextResponse.json({ error: "Progetto non trovato" }, { status: 404 });
   }
 
   const rows = await db
@@ -38,7 +38,9 @@ export async function GET(request: NextRequest, { params }: Params) {
     value: reveal ? decrypt(row.value) : "••••••••",
   }));
 
-  return NextResponse.json(vars);
+  // `?reveal=true` puts decrypted values in this body. Nothing between here and
+  // the browser — a proxy, a service worker, the disk cache — should keep a copy.
+  return NextResponse.json(vars, { headers: { "Cache-Control": "no-store" } });
 }
 
 export async function PUT(request: NextRequest, { params }: Params) {
@@ -50,7 +52,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
   const parsed = envVarsSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json(
-      { error: "Validation failed", details: parsed.error.issues },
+      { error: "Dati non validi", details: parsed.error.issues },
       { status: 400 }
     );
   }
@@ -63,7 +65,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
     .executeTakeFirst();
 
   if (!project) {
-    return NextResponse.json({ error: "Project not found" }, { status: 404 });
+    return NextResponse.json({ error: "Progetto non trovato" }, { status: 404 });
   }
 
   const now = nowIso();

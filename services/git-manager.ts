@@ -19,9 +19,27 @@ function cleanRepoUrl(repoUrl: string): string {
   return repoUrl.replace(/https:\/\/[^@]+@/, "https://");
 }
 
-/** Build git -c args to pass GitHub token via Authorization header (avoids URL-embedded creds rejected by newer git/curl) */
-function authArgs(token: string | null): string[] {
+/**
+ * Build git -c args to pass the GitHub token via an Authorization header
+ * (avoids URL-embedded creds, which newer git/curl reject).
+ *
+ * Gated on the destination, and that is the whole point: `http.extraheader`
+ * applies to the command, not to a host. Git sends it to whatever it connects
+ * to, so calling this for a URL on someone else's server posts the panel's
+ * GitHub token to that server's access log.
+ */
+function authArgs(token: string | null, remoteUrl: string): string[] {
   if (!token) return [];
+
+  let host: string;
+  try {
+    host = new URL(remoteUrl).hostname.toLowerCase();
+  } catch {
+    return [];
+  }
+
+  if (host !== "github.com" && !host.endsWith(".github.com")) return [];
+
   const encoded = Buffer.from(`x-access-token:${token}`).toString("base64");
   return ["-c", `http.extraheader=Authorization: basic ${encoded}`];
 }
@@ -49,7 +67,7 @@ export async function gitClone(
   const token = await getGitHubToken();
   const url = cleanRepoUrl(repoUrl);
 
-  await exec("git", [...authArgs(token), "clone", "--depth", "1", "--branch", branch, url, destDir], {
+  await exec("git", [...authArgs(token, url), "clone", "--depth", "1", "--branch", branch, url, destDir], {
     timeout: 120_000,
     env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
   });
@@ -62,10 +80,14 @@ export async function gitPull(
   const repoDir = path.join(config.reposDir, projectSlug);
   const token = await getGitHubToken();
 
+  // Kept so the fetch below can decide whether the token may go along.
+  let originUrl = "";
+
   // Clean any old embedded-token URL from the remote (legacy repos)
   try {
     const { stdout: remoteUrl } = await exec("git", ["remote", "get-url", "origin"], { cwd: repoDir });
     const cleaned = cleanRepoUrl(remoteUrl.trim());
+    originUrl = cleaned;
     if (cleaned !== remoteUrl.trim()) {
       await exec("git", ["remote", "set-url", "origin", cleaned], { cwd: repoDir });
     }
@@ -82,7 +104,7 @@ export async function gitPull(
     await exec(
       "git",
       [
-        ...authArgs(token),
+        ...authArgs(token, originUrl),
         "fetch",
         "--depth", "1",
         "origin",

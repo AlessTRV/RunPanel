@@ -20,8 +20,10 @@ export async function POST(request: NextRequest, { params }: Params) {
     .where("id", "=", projectId)
     .executeTakeFirst();
 
+  // Answered the same way as a bad signature, deliberately. Distinguishing the
+  // two told an unauthenticated caller which project ids exist.
   if (!project) {
-    return NextResponse.json({ error: "Project not found" }, { status: 404 });
+    return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
   }
 
   async function recordDelivery(
@@ -46,15 +48,19 @@ export async function POST(request: NextRequest, { params }: Params) {
   const signature = request.headers.get("x-hub-signature-256") || "";
   const contentLength = Number.parseInt(request.headers.get("content-length") || "0", 10);
   if (contentLength > MAX_PAYLOAD_BYTES) {
-    return NextResponse.json({ error: "Payload too large" }, { status: 413 });
+    return NextResponse.json({ error: "File troppo grande" }, { status: 413 });
   }
   const body = await request.text();
   if (Buffer.byteLength(body) > MAX_PAYLOAD_BYTES) {
-    return NextResponse.json({ error: "Payload too large" }, { status: 413 });
+    return NextResponse.json({ error: "File troppo grande" }, { status: 413 });
   }
 
   if (!verifyWebhookSignature(Buffer.from(body), signature, project.webhook_secret)) {
-    await recordDelivery("rejected", { reason: "invalid signature" });
+    // Not recorded. This endpoint has to stay public, so a row written before
+    // the signature was checked was an unauthenticated INSERT that anyone
+    // holding a project id could repeat until the disk filled. The log line
+    // keeps the signal without the storage.
+    console.warn(`[webhook] Rejected delivery for project ${projectId}: invalid signature`);
     return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
   }
 
@@ -102,7 +108,7 @@ export async function POST(request: NextRequest, { params }: Params) {
   };
 
   if (result.status === "not-found") {
-    return NextResponse.json({ error: "Project not found" }, { status: 404 });
+    return NextResponse.json({ error: "Progetto non trovato" }, { status: 404 });
   }
 
   if (result.status === "queued") {

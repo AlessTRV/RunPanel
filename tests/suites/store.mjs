@@ -1,4 +1,4 @@
-import { client, createReporter } from "../harness.mjs";
+import { client, createReporter, SETUP_TOKEN } from "../harness.mjs";
 
 /**
  * The store contract: auth, projects, env vars, cascade deletes.
@@ -22,7 +22,7 @@ export async function run({ base }) {
 
   res = await api.call("/api/auth/login", {
     method: "POST",
-    body: JSON.stringify({ setup: true, password: "store-suite-pw" }),
+    body: JSON.stringify({ setup: true, setupToken: SETUP_TOKEN, password: "store-suite-pw" }),
   });
   r.check("first-run setup succeeds", res.body.success === true, JSON.stringify(res.body));
 
@@ -34,12 +34,12 @@ export async function run({ base }) {
   res = await api.call("/api/settings");
   r.check(
     "settings never returns the password hash",
-    res.body.admin_password_hash === "configured",
+    !("admin_password_hash" in res.body),
     JSON.stringify(res.body).slice(0, 160)
   );
   r.check(
     "settings never returns a session token",
-    !("session_token" in res.body) || res.body.session_token === "configured",
+    !("session_token" in res.body),
     JSON.stringify(res.body).slice(0, 160)
   );
 

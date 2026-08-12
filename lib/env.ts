@@ -33,6 +33,31 @@ const envSchema = z
       .optional(),
     PORT: z.coerce.number().int().min(1).max(65535).default(3000),
 
+    /**
+     * Silences the background timers — housekeeping, backups, the boot
+     * reconciler. The test runner starts one server per suite on one machine,
+     * and without this every one of them would begin dumping databases.
+     *
+     * Spelled out rather than coerced: `z.coerce.boolean()` reads "0" as true,
+     * which is precisely the value someone types to turn a flag off.
+     */
+    RUNPANEL_DISABLE_SCHEDULERS: z.enum(["1", "0", "true", "false", "yes", "no"]).optional(),
+
+    /**
+     * How many reverse proxies sit in front of the panel.
+     *
+     * `X-Forwarded-For` is a list that each hop APPENDS to, so the leftmost
+     * entry is the one the client sent — the value an attacker picks, not the
+     * address they connected from. Reading it defeated the login rate limit
+     * entirely: a different value per request meant a different counter per
+     * request. The trustworthy entry is the nth from the RIGHT, where n is the
+     * number of proxies you actually run.
+     *
+     * 0 (the default) ignores the header and uses the socket address, which is
+     * correct for a panel reached directly.
+     */
+    RUNPANEL_TRUSTED_PROXY_HOPS: z.coerce.number().int().min(0).max(10).default(0),
+
     RUNPANEL_DB_DRIVER: z.enum(["sqlite", "postgres"]).default("sqlite"),
 
     // sqlite
@@ -87,6 +112,10 @@ export interface RunPanelEnv {
   /** Explicit secret from the environment. When absent, a file-backed one is generated. */
   secret?: string;
   port: number;
+  /** When true, nothing schedules itself at boot. */
+  disableSchedulers: boolean;
+  /** Reverse proxies in front of the panel. 0 means trust no `X-Forwarded-For`. */
+  trustedProxyHops: number;
   db: DbConfig;
 }
 
@@ -135,7 +164,18 @@ export function getEnv(): RunPanelEnv {
             : path.join(dataDir, "runpanel.db"),
         };
 
-  cached = { dataDir, secret: v.RUNPANEL_SECRET, port: v.PORT, db };
+  const disableSchedulers = ["1", "true", "yes"].includes(
+    v.RUNPANEL_DISABLE_SCHEDULERS ?? ""
+  );
+
+  cached = {
+    dataDir,
+    secret: v.RUNPANEL_SECRET,
+    port: v.PORT,
+    disableSchedulers,
+    trustedProxyHops: v.RUNPANEL_TRUSTED_PROXY_HOPS,
+    db,
+  };
   return cached;
 }
 
@@ -152,6 +192,7 @@ export function getEnv(): RunPanelEnv {
 export const PRIVATE_ENV_KEYS: readonly string[] = [
   "RUNPANEL_SECRET",
   "RUNPANEL_DATA_DIR",
+  "RUNPANEL_DISABLE_SCHEDULERS",
   "RUNPANEL_DB_DRIVER",
   "RUNPANEL_DB_FILE",
   "RUNPANEL_DATABASE_URL",

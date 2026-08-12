@@ -48,6 +48,25 @@ export async function setSetting(key: string, value: string): Promise<void> {
     .execute();
 }
 
+/**
+ * Write a key only if nobody has written it yet. Returns whether this call was
+ * the one that did.
+ *
+ * The claim and the check are one statement so two callers racing for the same
+ * key cannot both win — `setSetting` would let the second one overwrite the
+ * first. First-run setup depends on that: the admin password is claimed once.
+ */
+export async function setSettingIfAbsent(key: string, value: string): Promise<boolean> {
+  const db = await getDb();
+  const row = await db
+    .insertInto("settings")
+    .values({ key, value })
+    .onConflict((oc) => oc.column("key").doNothing())
+    .returning("key")
+    .executeTakeFirst();
+  return row !== undefined;
+}
+
 export async function deleteSettings(keys: string[]): Promise<void> {
   if (keys.length === 0) return;
   const db = await getDb();

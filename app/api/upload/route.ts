@@ -1,17 +1,25 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth-guard";
 import { config } from "@/lib/config";
+import { getDb } from "@/lib/db";
 import { isValidSlug } from "@/lib/utils";
+import { extractProjectArchive } from "@/services/project-archive";
 import fs from "fs";
 import path from "path";
-import { execFile } from "child_process";
-import { promisify } from "util";
 
-const exec = promisify(execFile);
+const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
 
 export async function POST(request: NextRequest) {
   const denied = await requireAuth();
   if (denied) return denied;
+
+  // Checked before `formData()`, which reads the whole body into memory. A
+  // declared length is not proof, but it turns the obvious case into a cheap
+  // refusal instead of a 2 GB allocation.
+  const declaredLength = Number.parseInt(request.headers.get("content-length") ?? "0", 10);
+  if (declaredLength > MAX_UPLOAD_BYTES * 1.1) {
+    return NextResponse.json({ error: "File too large (max 100MB)" }, { status: 413 });
+  }
 
   const formData = await request.formData();
   const file = formData.get("file") as File | null;
@@ -32,6 +40,20 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // A well-formed slug that belongs to no project is still a directory under
+  // `repos/`, and the extraction below starts by deleting it. Without this, a
+  // typo — or a guess — wiped another project's checkout.
+  const db = await getDb();
+  const project = await db
+    .selectFrom("projects")
+    .select("id")
+    .where("slug", "=", projectSlug)
+    .executeTakeFirst();
+
+  if (!project) {
+    return NextResponse.json({ error: "Progetto non trovato" }, { status: 404 });
+  }
+
   if (!file.name.endsWith(".zip")) {
     return NextResponse.json(
       { error: "Only ZIP files are supported" },
@@ -39,72 +61,61 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Validate ZIP magic bytes (PK\x03\x04)
-  const header = Buffer.from(await file.slice(0, 4).arrayBuffer());
-  if (header[0] !== 0x50 || header[1] !== 0x4B || header[2] !== 0x03 || header[3] !== 0x04) {
-    return NextResponse.json(
-      { error: "File is not a valid ZIP archive" },
-      { status: 400 }
-    );
-  }
-
-  // Max 100MB
-  if (file.size > 100 * 1024 * 1024) {
+  if (file.size > MAX_UPLOAD_BYTES) {
     return NextResponse.json(
       { error: "File too large (max 100MB)" },
       { status: 400 }
     );
   }
 
-  const uploadDir = config.uploadsDir;
-  const zipPath = path.join(uploadDir, `${projectSlug}.zip`);
+  // Validate ZIP magic bytes (PK\x03\x04)
+  const header = Buffer.from(await file.slice(0, 4).arrayBuffer());
+  if (header[0] !== 0x50 || header[1] !== 0x4b || header[2] !== 0x03 || header[3] !== 0x04) {
+    return NextResponse.json(
+      { error: "File is not a valid ZIP archive" },
+      { status: 400 }
+    );
+  }
+
+  const zipPath = path.join(config.uploadsDir, `${projectSlug}.zip`);
   const destDir = path.join(config.reposDir, projectSlug);
 
-  // Save zip
-  const bytes = await file.arrayBuffer();
-  fs.writeFileSync(zipPath, Buffer.from(bytes));
-
-  // Extract
-  if (fs.existsSync(destDir)) {
-    fs.rmSync(destDir, { recursive: true, force: true });
-  }
-  fs.mkdirSync(destDir, { recursive: true });
+  await fs.promises.mkdir(config.uploadsDir, { recursive: true });
+  await fs.promises.writeFile(zipPath, Buffer.from(await file.arrayBuffer()));
 
   try {
-    // Try using tar (available on modern Windows and Linux)
-    await exec("tar", ["-xf", zipPath, "-C", destDir], { timeout: 60_000 });
-  } catch {
-    // Fallback: try powershell on Windows
-    try {
-      await exec("powershell", [
-        "-NoProfile", "-Command",
-        `Expand-Archive -Path '${zipPath}' -DestinationPath '${destDir}' -Force`
-      ], { timeout: 60_000 });
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "Extraction failed";
-      return NextResponse.json(
-        { error: `Failed to extract ZIP: ${message}` },
-        { status: 500 }
-      );
-    }
+    await fs.promises.rm(destDir, { recursive: true, force: true });
+    await fs.promises.mkdir(destDir, { recursive: true });
+
+    // Entry names, symlinks and the decompressed total are all checked here
+    // rather than left to whichever extractor happened to be on the host.
+    await extractProjectArchive(zipPath, destDir);
+    await flattenSingleRoot(destDir);
+
+    return NextResponse.json({ success: true, path: destDir });
+  } catch (err: unknown) {
+    // A rejected archive leaves a half-written tree behind, and the next deploy
+    // would build it.
+    await fs.promises.rm(destDir, { recursive: true, force: true }).catch(() => {});
+    const message = err instanceof Error ? err.message : "Extraction failed";
+    return NextResponse.json({ error: `Failed to extract ZIP: ${message}` }, { status: 400 });
+  } finally {
+    await fs.promises.rm(zipPath, { force: true }).catch(() => {});
   }
+}
 
-  // Check if zip extracted into a single subfolder
-  const entries = fs.readdirSync(destDir);
-  if (entries.length === 1) {
-    const singleDir = path.join(destDir, entries[0]);
-    if (fs.statSync(singleDir).isDirectory()) {
-      // Move contents up one level
-      const subEntries = fs.readdirSync(singleDir);
-      for (const entry of subEntries) {
-        fs.renameSync(path.join(singleDir, entry), path.join(destDir, entry));
-      }
-      fs.rmdirSync(singleDir);
-    }
+/**
+ * A zip made from a folder unpacks as `project-main/…`. Lift that one level so
+ * the repo root is where every builder expects it.
+ */
+async function flattenSingleRoot(destDir: string): Promise<void> {
+  const entries = await fs.promises.readdir(destDir, { withFileTypes: true });
+  const only = entries.length === 1 ? entries[0] : null;
+  if (!only?.isDirectory()) return;
+
+  const nested = path.join(destDir, only.name);
+  for (const entry of await fs.promises.readdir(nested)) {
+    await fs.promises.rename(path.join(nested, entry), path.join(destDir, entry));
   }
-
-  // Clean up zip
-  fs.unlinkSync(zipPath);
-
-  return NextResponse.json({ success: true, path: destDir });
+  await fs.promises.rmdir(nested);
 }

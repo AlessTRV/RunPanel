@@ -223,6 +223,63 @@ export function parseContractJson(json: string | null | undefined): DeployContra
 }
 
 /**
+ * Fields a repository is never allowed to set for itself.
+ *
+ * Most of the contract says how to build and run the app, which is the
+ * repository's own business — deploying it already means running its code.
+ * These say what the app may reach *outside* its container, which is the
+ * operator's: a bind mount of `/` or of the Docker socket, an added capability,
+ * or `network: host` hands over the whole machine, and `envFile.path` decides
+ * where the project's decrypted secrets get written. Choosing a Docker runtime
+ * is a choice for isolation, and the repository must not be able to revoke it.
+ *
+ * A project starts life with `builder_config` of `"{}"`, so without this every
+ * one of these fields would come from the repository until an operator happened
+ * to set it by hand.
+ */
+const PANEL_ONLY_FIELDS: readonly (readonly [string, string])[] = [
+  ["docker", "mounts"],
+  ["docker", "capAdd"],
+  ["docker", "network"],
+  ["docker", "extraHosts"],
+  ["envFile", "path"],
+];
+
+export interface StrippedContract {
+  /** The contract with every panel-only field removed. */
+  contract: RawObject;
+  /** Dotted names of the fields that were present and dropped, for the log. */
+  rejected: string[];
+}
+
+/**
+ * Drop the fields a repository may not set, before its contract is merged.
+ *
+ * Done here rather than after the merge because once the layers are combined
+ * there is nothing left to say which side a value came from. Returns copies:
+ * `normalizeRaw` hands back the caller's own object when it is already in the
+ * current shape, so mutating in place would edit the parsed `runpanel.json`.
+ */
+export function stripPanelOnlyFields(repoRaw: unknown): StrippedContract {
+  if (!isPlainObject(repoRaw)) return { contract: {}, rejected: [] };
+
+  const contract: RawObject = { ...repoRaw };
+  const rejected: string[] = [];
+
+  for (const [parent, child] of PANEL_ONLY_FIELDS) {
+    const branch = contract[parent];
+    if (!isPlainObject(branch) || !(child in branch)) continue;
+
+    const remaining = { ...branch };
+    delete remaining[child];
+    contract[parent] = remaining;
+    rejected.push(`${parent}.${child}`);
+  }
+
+  return { contract, rejected };
+}
+
+/**
  * Combine a repository's own `runpanel.json` with the panel's settings.
  *
  * Both sides are merged RAW, before defaults are filled in. That distinction is
@@ -232,7 +289,10 @@ export function parseContractJson(json: string | null | undefined): DeployContra
  * nearly all of them.
  *
  * Where both sides set the same field the panel wins: the operator can see the
- * target machine, the repository cannot.
+ * target machine, the repository cannot. For the fields in `PANEL_ONLY_FIELDS`
+ * that is not enough, because the panel usually sets nothing at all — the
+ * repository side must be stripped with `stripPanelOnlyFields` before it gets
+ * here.
  */
 export function resolveContract(panelRaw: unknown, repoRaw: unknown): DeployContract {
   const panel = normalizeRaw(panelRaw);

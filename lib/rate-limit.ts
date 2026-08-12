@@ -1,3 +1,4 @@
+import { sql } from "kysely";
 import { getDb, nowIso } from "./db";
 
 /**
@@ -24,29 +25,43 @@ export async function consumeRateLimit(
 ): Promise<RateLimitResult> {
   const db = await getDb();
   const now = Date.now();
+  const nowStamp = new Date(now).toISOString();
+  const freshReset = new Date(now + windowMs).toISOString();
 
-  const existing = await db
-    .selectFrom("rate_limits")
-    .selectAll()
-    .where("key", "=", key)
+  /**
+   * One statement, deliberately.
+   *
+   * This was a SELECT followed by an UPDATE that wrote `existing.count + 1` as
+   * an absolute value. Concurrent attempts all read the same count and all
+   * wrote the same number back, so twenty parallel requests advanced the
+   * counter by one and the limit only ever applied to attempts made one after
+   * another. The increment has to happen inside the database.
+   *
+   * The CASE arms roll the window over in place: an expired row starts again at
+   * 1 with a fresh deadline, a live one counts up and keeps its own. Both
+   * dialects read `rate_limits.<col>` in a DO UPDATE as the row already there.
+   */
+  const row = await db
+    .insertInto("rate_limits")
+    .values({ key, count: 1, reset_at: freshReset })
+    .onConflict((oc) =>
+      oc.column("key").doUpdateSet({
+        count: sql<number>`case when rate_limits.reset_at <= ${nowStamp} then 1 else rate_limits.count + 1 end`,
+        reset_at: sql<string>`case when rate_limits.reset_at <= ${nowStamp} then ${freshReset} else rate_limits.reset_at end`,
+      })
+    )
+    .returning(["count", "reset_at"])
     .executeTakeFirst();
 
-  const expired = !existing || new Date(existing.reset_at).getTime() <= now;
-
-  if (expired) {
-    const resetAt = new Date(now + windowMs).toISOString();
-    await db
-      .insertInto("rate_limits")
-      .values({ key, count: 1, reset_at: resetAt })
-      .onConflict((oc) => oc.column("key").doUpdateSet({ count: 1, reset_at: resetAt }))
-      .execute();
-    return { allowed: true, remaining: limit - 1, retryAfter: 0 };
+  // The upsert always returns a row. If that ever stops being true, refuse
+  // rather than hand out an unlimited allowance.
+  if (!row) {
+    return { allowed: false, remaining: 0, retryAfter: Math.ceil(windowMs / 1000) };
   }
 
-  const count = existing.count + 1;
-  await db.updateTable("rate_limits").set({ count }).where("key", "=", key).execute();
+  const count = Number(row.count);
+  const retryAfter = Math.max(0, Math.ceil((new Date(row.reset_at).getTime() - now) / 1000));
 
-  const retryAfter = Math.max(0, Math.ceil((new Date(existing.reset_at).getTime() - now) / 1000));
   return { allowed: count <= limit, remaining: Math.max(0, limit - count), retryAfter };
 }
 
@@ -56,8 +71,15 @@ export async function clearRateLimit(key: string): Promise<void> {
   await db.deleteFrom("rate_limits").where("key", "=", key).execute();
 }
 
-/** Drop windows that have already elapsed. */
-export async function pruneRateLimits(): Promise<void> {
+/**
+ * Drop windows that have already elapsed.
+ *
+ * Not housekeeping for its own sake: the key of the login limiter contains a
+ * client address, so every distinct one leaves a row behind. Without this the
+ * table is an unauthenticated write that nothing ever collects.
+ */
+export async function pruneRateLimits(): Promise<number> {
   const db = await getDb();
-  await db.deleteFrom("rate_limits").where("reset_at", "<", nowIso()).execute();
+  const result = await db.deleteFrom("rate_limits").where("reset_at", "<", nowIso()).executeTakeFirst();
+  return Number(result?.numDeletedRows ?? 0);
 }

@@ -2,11 +2,11 @@ import crypto from "crypto";
 import bcrypt from "bcryptjs";
 import { cookies } from "next/headers";
 import { getSecret } from "./config";
-import { getSetting, setSetting } from "./settings";
+import { getSetting, setSetting, setSettingIfAbsent } from "./settings";
 import { getDb, rowCount } from "./db";
 import { generateId } from "./utils";
 
-const SESSION_COOKIE = "runpanel_session";
+export const SESSION_COOKIE = "runpanel_session";
 const SESSION_MAX_AGE = 60 * 60 * 24 * 7; // 7 days
 
 /** Only the hash is stored, so a database copy cannot be replayed as a cookie. */
@@ -69,6 +69,35 @@ export async function createSession(meta: { userAgent?: string; ip?: string } = 
   });
 
   return token;
+}
+
+/**
+ * Whether a cookie value names a live session, without recording a visit.
+ *
+ * Split out for `proxy.ts`, which runs before the route handlers and has a
+ * `NextRequest` rather than the `cookies()` store. Leaving `last_seen_at` alone
+ * keeps the write on the request path it was already on, instead of doubling it.
+ */
+export async function isSessionTokenValid(token: string | undefined | null): Promise<boolean> {
+  if (!token) return false;
+
+  try {
+    const db = await getDb();
+    const session = await db
+      .selectFrom("sessions")
+      .select(["id", "expires_at"])
+      .where("token_hash", "=", hashToken(token))
+      .executeTakeFirst();
+
+    if (!session) return false;
+    if (new Date(session.expires_at) < new Date()) {
+      await db.deleteFrom("sessions").where("id", "=", session.id).execute();
+      return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export async function getSession(): Promise<boolean> {
@@ -145,6 +174,19 @@ export async function getAdminPasswordHash(): Promise<string | null> {
 export async function setAdminPassword(password: string): Promise<void> {
   const hash = await hashPassword(password);
   await setSetting("admin_password_hash", hash);
+}
+
+/**
+ * Set the admin password only if there is not one already.
+ *
+ * First-run setup used to read `isFirstRun()` and then write, which two
+ * concurrent requests could both pass. Returns false when someone else got
+ * there first, so the caller can refuse instead of silently overwriting the
+ * password the real operator just chose.
+ */
+export async function claimAdminPassword(password: string): Promise<boolean> {
+  const hash = await hashPassword(password);
+  return setSettingIfAbsent("admin_password_hash", hash);
 }
 
 export async function isFirstRun(): Promise<boolean> {

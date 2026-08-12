@@ -26,9 +26,40 @@ const devOrigins = (process.env.RUNPANEL_DEV_ORIGINS ?? "")
   .map((host) => host.trim())
   .filter(Boolean);
 
+/**
+ * Sent on every response.
+ *
+ * The panel had none of these. The one that matters most is the framing pair:
+ * this UI has a "Delete project" button and a terminal, and without them any
+ * page on the internet could load it in an invisible iframe and collect clicks
+ * from an operator who is already signed in.
+ *
+ * `frame-ancestors` is the only CSP directive set here on purpose. It governs
+ * who may embed the page and nothing else, so it cannot break HeroUI or the
+ * bundled icons — unlike `script-src`, which wants a report-only period first.
+ *
+ * HSTS is inert over plain HTTP, so it costs nothing on a LAN install and is
+ * already in place the day the panel is put behind TLS.
+ */
+const securityHeaders = [
+  { key: "X-Frame-Options", value: "DENY" },
+  { key: "Content-Security-Policy", value: "frame-ancestors 'none'" },
+  { key: "X-Content-Type-Options", value: "nosniff" },
+  { key: "Referrer-Policy", value: "no-referrer" },
+  { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains" },
+];
+
 const nextConfig: NextConfig = {
   // Native / driver packages that must stay outside the bundle.
   serverExternalPackages: ["better-sqlite3", "pg"],
+
+  // The version is not a secret worth keeping, but it is a free hint for
+  // anyone scanning for a Next release with a known advisory.
+  poweredByHeader: false,
+
+  async headers() {
+    return [{ source: "/:path*", headers: securityHeaders }];
+  },
 
   // The usual private ranges, so "open the panel from my phone" works without
   // anyone having to configure anything.
