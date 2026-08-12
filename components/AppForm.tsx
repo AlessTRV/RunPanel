@@ -8,6 +8,8 @@ import { Icon } from "@iconify/react";
 import { toast } from "sonner";
 import { useResource } from "@/lib/hooks/useResource";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
+import { Code, FieldHint, Hint } from "@/components/ui/Hint";
+import { PortHint, ServiceLinkHint } from "@/components/DeployHints";
 import { cn } from "@/lib/utils";
 
 type SourceType = "github" | "upload";
@@ -41,6 +43,41 @@ const RUNTIMES: { id: RuntimeType; label: string; hint: string; icon: string }[]
   { id: "compose", label: "Compose", hint: "Avvia lo stack descritto dal compose file", icon: "solar:layers-linear" },
   { id: "custom", label: "Custom", hint: "Comandi espliciti, qualsiasi linguaggio", icon: "solar:command-linear" },
 ];
+
+/**
+ * What each runtime expects to find in the checkout. Said here rather than
+ * discovered ten minutes later, at the bottom of a failed build log.
+ */
+const RUNTIME_REQUIREMENTS: Record<RuntimeType, React.ReactNode> = {
+  node: (
+    <>
+      Serve un <Code>package.json</Code> nella root. Il lockfile decide il package manager
+      (<Code>bun.lock</Code>, <Code>pnpm-lock.yaml</Code>, <Code>yarn.lock</Code>, altrimenti npm) e
+      lo script <Code>build</Code> viene eseguito se esiste.
+    </>
+  ),
+  docker: (
+    <>
+      Serve un <Code>Dockerfile</Code> nella root del repository: viene costruito con il contesto
+      sulla root. Le variabili di build arrivano come <Code>--build-arg</Code>, quindi vanno
+      dichiarate anche con <Code>ARG</Code> nel Dockerfile per essere visibili.
+    </>
+  ),
+  compose: (
+    <>
+      Serve un <Code>compose.yaml</Code>, <Code>compose.yml</Code>,{" "}
+      <Code>docker-compose.yaml</Code> o <Code>docker-compose.yml</Code> nella root. Lo stack viene
+      avviato con un nome di progetto derivato dallo slug, così i container restano riconoscibili.
+    </>
+  ),
+  custom: (
+    <>
+      Nessun rilevamento: quello che scrivi qui sotto è tutto quello che viene eseguito. Il comando
+      di avvio è obbligatorio e deve restare in primo piano — un comando che va in background
+      sembra un&apos;app morta un secondo dopo il deploy.
+    </>
+  ),
+};
 
 export function AppForm({
   projectId,
@@ -308,6 +345,11 @@ export function AppForm({
                 />
               </TextField>
             )}
+
+            <FieldHint>
+              È il branch che viene clonato a ogni deploy. Con l&apos;auto-deploy attivo, un push su
+              un altro branch viene ricevuto e ignorato: solo questo fa partire un deploy.
+            </FieldHint>
           </>
         ) : (
           <div>
@@ -323,6 +365,13 @@ export function AppForm({
               <Icon icon="solar:upload-linear" width={16} aria-hidden />
               {zipFile ? zipFile.name : "Scegli un file"}
             </Button>
+            <FieldHint>
+              Massimo 100 MB. Se l&apos;archivio contiene una sola cartella al primo livello viene
+              aperta da sola, quindi <Code>progetto.zip → progetto/package.json</Code> va bene
+              quanto averlo in cima. Ogni upload sostituisce i file precedenti del progetto, e
+              senza repository collegato non c&apos;è auto-deploy: ricarichi lo ZIP a ogni
+              modifica.
+            </FieldHint>
           </div>
         )}
       </Panel>
@@ -351,15 +400,21 @@ export function AppForm({
           ))}
         </div>
 
-        <TextField value={port} onChange={setPort}>
-          <Label>Porta</Label>
-          <Input type="number" placeholder="3000" />
-        </TextField>
+        <Hint>{RUNTIME_REQUIREMENTS[runtime]}</Hint>
+
+        <div>
+          <TextField value={port} onChange={setPort}>
+            <Label>Porta</Label>
+            <Input type="number" placeholder="3000" />
+          </TextField>
+          <PortHint runtimeType={runtime} />
+        </div>
 
         {runtime !== "docker" && runtime !== "compose" && (
           <div className="border-border space-y-3 border-t pt-4">
             <p className="text-muted text-xs">
-              Un comando per riga. Lasciando vuoto, RunPanel prova a dedurli dal repository.
+              Un comando per riga, eseguiti in ordine nella stessa shell. Lasciando vuoto, RunPanel
+              prova a dedurli dal repository — per un progetto Node.js quasi sempre ci riesce.
             </p>
             {[
               { label: "Install", value: installCmd, set: setInstallCmd, ph: "npm ci" },
@@ -380,6 +435,8 @@ export function AppForm({
           </div>
         )}
       </Panel>
+
+      <ServiceLinkHint projectId={projectId} />
 
       <div className="flex items-center justify-end gap-3">
         {secondaryAction}

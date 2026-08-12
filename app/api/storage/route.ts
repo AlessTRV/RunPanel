@@ -87,7 +87,7 @@ export async function POST(request: NextRequest) {
   const parsed = sweepSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json(
-      { error: "Invalid request", details: parsed.error.issues },
+      { error: "Richiesta non valida", details: parsed.error.issues },
       { status: 400 }
     );
   }

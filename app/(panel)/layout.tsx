@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth";
 import { AppSidebar } from "@/components/AppSidebar";
+import { CommandPalette } from "@/components/CommandPalette";
 import { TopBar } from "@/components/TopBar";
 
 export default async function PanelLayout({
@@ -24,6 +25,9 @@ export default async function PanelLayout({
           {children}
         </main>
       </div>
+      {/* Mounted once for the whole panel: it listens for Ctrl/Cmd+K and
+          renders nothing until it is asked for. */}
+      <CommandPalette />
     </div>
   );
 }

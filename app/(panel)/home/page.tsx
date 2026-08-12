@@ -10,6 +10,7 @@ import { StatTile } from "@/components/ui/StatTile";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { PageSkeleton } from "@/components/ui/Skeletons";
 import { StatusBadge } from "@/components/StatusBadge";
+import { HealthBanner } from "@/components/HealthBanner";
 import { statusMeta, TONE_DOT } from "@/lib/status";
 import { cn } from "@/lib/utils";
 
@@ -136,6 +137,10 @@ export default function HomePage() {
           </Link>
         }
       />
+
+      {/* Above the metrics on purpose: a number that is merely interesting
+          should never sit above a problem that needs doing. */}
+      <HealthBanner />
 
       <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatTile

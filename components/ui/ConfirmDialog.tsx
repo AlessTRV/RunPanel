@@ -45,8 +45,14 @@ export function ConfirmDialog({
     }
   }
 
+  // No AlertDialog.Root: that is react-aria's DialogTrigger, which wraps its
+  // children in a PressResponder to turn the first one into the trigger. This
+  // dialog has no trigger element — it is opened from state — so nothing ever
+  // registered as pressable and every mount logged "A PressResponder was
+  // rendered without a pressable child". The backdrop is a ModalOverlay, which
+  // takes isOpen/onOpenChange directly when it is not inside a trigger.
   return (
-    <AlertDialog.Root
+    <AlertDialog.Backdrop
       isOpen={isOpen}
       onOpenChange={(open) => {
         // Never let a backdrop click cancel work that is already running.
@@ -54,33 +60,31 @@ export function ConfirmDialog({
         onOpenChange(open);
       }}
     >
-      <AlertDialog.Backdrop>
-        <AlertDialog.Container>
-          <AlertDialog.Dialog>
-            <AlertDialog.Header>
-              <AlertDialog.Heading>{title}</AlertDialog.Heading>
-            </AlertDialog.Header>
-            {description && (
-              <AlertDialog.Body>
-                <p className="text-muted text-sm">{description}</p>
-              </AlertDialog.Body>
-            )}
-            <AlertDialog.Footer className="justify-end gap-2">
-              <Button variant="ghost" isDisabled={pending} onPress={() => onOpenChange(false)}>
-                {cancelLabel}
-              </Button>
-              <Button
-                variant={destructive ? "danger" : "primary"}
-                isPending={pending}
-                onPress={handleConfirm}
-              >
-                {confirmLabel}
-              </Button>
-            </AlertDialog.Footer>
-          </AlertDialog.Dialog>
-        </AlertDialog.Container>
-      </AlertDialog.Backdrop>
-    </AlertDialog.Root>
+      <AlertDialog.Container>
+        <AlertDialog.Dialog>
+          <AlertDialog.Header>
+            <AlertDialog.Heading>{title}</AlertDialog.Heading>
+          </AlertDialog.Header>
+          {description && (
+            <AlertDialog.Body>
+              <p className="text-muted text-sm">{description}</p>
+            </AlertDialog.Body>
+          )}
+          <AlertDialog.Footer className="justify-end gap-2">
+            <Button variant="ghost" isDisabled={pending} onPress={() => onOpenChange(false)}>
+              {cancelLabel}
+            </Button>
+            <Button
+              variant={destructive ? "danger" : "primary"}
+              isPending={pending}
+              onPress={handleConfirm}
+            >
+              {confirmLabel}
+            </Button>
+          </AlertDialog.Footer>
+        </AlertDialog.Dialog>
+      </AlertDialog.Container>
+    </AlertDialog.Backdrop>
   );
 }
 

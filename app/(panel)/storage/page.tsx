@@ -213,7 +213,7 @@ export default function StoragePage() {
         <Panel>
           <PanelHeader
             title="Risorse orfane"
-            description="Possedute da RunPanel ma senza un progetto corrispondente nel database"
+            description="Possedute da RunPanel ma senza un progetto o un servizio corrispondente nel database"
             actions={
               orphanCount > 0 ? (
                 <Button
@@ -330,8 +330,8 @@ export default function StoragePage() {
         description={
           <>
             Verranno eliminati {orphanCount} elementi. Tra questi ci sono{" "}
-            <strong>{data.orphans.volumes.length} volumi</strong>: contengono i dati dei database
-            di progetti già cancellati e non sono recuperabili.
+            <strong>{data.orphans.volumes.length} volumi</strong>: contengono i dati di database
+            il cui progetto o servizio non esiste più, e non sono recuperabili.
           </>
         }
         onConfirm={() => runSweep(true)}

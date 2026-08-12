@@ -20,6 +20,9 @@ const NAV_ITEMS: NavItem[] = [
   { label: "Servizi", href: "/services", icon: "solar:database-linear" },
   { label: "Monitor", href: "/monitor", icon: "solar:chart-2-linear" },
   { label: "Storage", href: "/storage", icon: "solar:ssd-square-linear" },
+  { label: "Backup", href: "/backups", icon: "solar:archive-linear" },
+  { label: "Avvio", href: "/autostart", icon: "solar:power-linear" },
+  { label: "Diagnostica", href: "/diagnostics", icon: "solar:health-linear" },
   { label: "GitHub", href: "/github", icon: "solar:code-linear" },
   { label: "Impostazioni", href: "/account", icon: "solar:settings-linear", owns: ["/settings"] },
 ];

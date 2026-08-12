@@ -8,6 +8,13 @@ import { toast } from "sonner";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { CopyField } from "@/components/ui/CopyField";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { Code, FieldHint, Hint } from "@/components/ui/Hint";
+import {
+  BuildEnvHint,
+  EnvFilePathHint,
+  HealthcheckHint,
+  PortHint,
+} from "@/components/DeployHints";
 import { parseContractJson, type DeployContract } from "@/lib/deploy-contract";
 import type { Project } from "./types";
 
@@ -21,7 +28,7 @@ function CommandField({
   onChange,
 }: {
   label: string;
-  hint?: string;
+  hint?: React.ReactNode;
   value: string;
   placeholder?: string;
   rows?: number;
@@ -146,20 +153,36 @@ export function SettingsTab({
       <Panel className="space-y-4">
         <PanelHeader title="Applicazione" description="Sorgente, porta e comandi" />
 
-        <TextField value={appName} onChange={setAppName}>
-          <Label>Nome app</Label>
-          <Input placeholder={project.slug} />
-        </TextField>
+        <div>
+          <TextField value={appName} onChange={setAppName}>
+            <Label>Nome app</Label>
+            <Input placeholder={project.slug} />
+          </TextField>
+          <FieldHint>
+            Solo un&apos;etichetta per il pannello. Container, processo, volumi e cartelle
+            continuano a usare lo slug <Code>{project.slug}</Code>, che non cambia più: rinominare
+            qui non rompe niente proprio perché non tocca nulla di tutto questo.
+          </FieldHint>
+        </div>
 
         <div className="grid gap-4 sm:grid-cols-2">
-          <TextField value={branch} onChange={setBranch}>
-            <Label>Branch</Label>
-            <Input />
-          </TextField>
-          <TextField value={port} onChange={setPort}>
-            <Label>Porta</Label>
-            <Input type="number" placeholder="3000" />
-          </TextField>
+          <div>
+            <TextField value={branch} onChange={setBranch}>
+              <Label>Branch</Label>
+              <Input />
+            </TextField>
+            <FieldHint>
+              Cambiarlo ha effetto dal prossimo deploy, non subito: il checkout attuale resta
+              quello che è finché non ridistribuisci.
+            </FieldHint>
+          </div>
+          <div>
+            <TextField value={port} onChange={setPort}>
+              <Label>Porta</Label>
+              <Input type="number" placeholder="3000" />
+            </TextField>
+            <PortHint runtimeType={project.runtime_type} />
+          </div>
         </div>
 
         {project.runtime_type === "node" && (
@@ -212,7 +235,15 @@ export function SettingsTab({
             rows={2}
             value={contract.commands.release ?? ""}
             placeholder="npx prisma migrate deploy"
-            hint="Eseguito una volta dopo il build e prima dell'avvio. Se fallisce, il deploy fallisce."
+            hint={
+              <>
+                Eseguito una volta dopo il build e prima dell&apos;avvio. Se fallisce, fallisce il
+                deploy e la nuova versione non parte: è il posto giusto per le migrazioni.{" "}
+                {isDocker
+                  ? "Gira in un container usa-e-getta creato dall'immagine appena costruita, sulla stessa rete e con lo stesso ambiente dell'app — quindi vede il database del progetto."
+                  : "Gira nella cartella del repository con lo stesso ambiente dell'app."}
+              </>
+            }
             onChange={(v) => patchContract({ commands: { ...contract.commands, release: v } })}
           />
         </div>
@@ -234,37 +265,40 @@ export function SettingsTab({
         </div>
 
         {contract.healthcheck.enabled && (
-          <div className="grid gap-4 sm:grid-cols-3">
-            <TextField
-              value={contract.healthcheck.path}
-              onChange={(v) => patchContract({ healthcheck: { ...contract.healthcheck, path: v } })}
-            >
-              <Label>Path</Label>
-              <Input placeholder="/" className="font-mono text-sm" />
-            </TextField>
-            <TextField
-              value={String(contract.healthcheck.startPeriodSec)}
-              onChange={(v) =>
-                patchContract({
-                  healthcheck: { ...contract.healthcheck, startPeriodSec: Number.parseInt(v, 10) || 0 },
-                })
-              }
-            >
-              <Label>Attesa iniziale (s)</Label>
-              <Input type="number" />
-            </TextField>
-            <TextField
-              value={String(contract.healthcheck.timeoutSec)}
-              onChange={(v) =>
-                patchContract({
-                  healthcheck: { ...contract.healthcheck, timeoutSec: Number.parseInt(v, 10) || 30 },
-                })
-              }
-            >
-              <Label>Timeout (s)</Label>
-              <Input type="number" />
-            </TextField>
-          </div>
+          <>
+            <HealthcheckHint />
+            <div className="grid gap-4 sm:grid-cols-3">
+              <TextField
+                value={contract.healthcheck.path}
+                onChange={(v) => patchContract({ healthcheck: { ...contract.healthcheck, path: v } })}
+              >
+                <Label>Path</Label>
+                <Input placeholder="/" className="font-mono text-sm" />
+              </TextField>
+              <TextField
+                value={String(contract.healthcheck.startPeriodSec)}
+                onChange={(v) =>
+                  patchContract({
+                    healthcheck: { ...contract.healthcheck, startPeriodSec: Number.parseInt(v, 10) || 0 },
+                  })
+                }
+              >
+                <Label>Attesa iniziale (s)</Label>
+                <Input type="number" />
+              </TextField>
+              <TextField
+                value={String(contract.healthcheck.timeoutSec)}
+                onChange={(v) =>
+                  patchContract({
+                    healthcheck: { ...contract.healthcheck, timeoutSec: Number.parseInt(v, 10) || 30 },
+                  })
+                }
+              >
+                <Label>Timeout (s)</Label>
+                <Input type="number" />
+              </TextField>
+            </div>
+          </>
         )}
       </Panel>
 
@@ -274,14 +308,7 @@ export function SettingsTab({
           description="Come le variabili raggiungono build e runtime"
         />
 
-        <p className="text-muted text-xs">
-          Le variabili con prefisso{" "}
-          <code className="bg-surface-secondary rounded px-1 py-0.5 font-mono">
-            {contract.buildEnvPrefixes.join(", ")}
-          </code>{" "}
-          vengono passate anche al <strong>build</strong>: molti framework le compilano dentro il
-          bundle, quindi fornirle solo a runtime spedisce il valore sbagliato.
-        </p>
+        <BuildEnvHint prefixes={contract.buildEnvPrefixes} />
 
         <div className="flex items-center justify-between gap-4">
           <div>
@@ -298,13 +325,21 @@ export function SettingsTab({
         </div>
 
         {contract.envFile.enabled && (
-          <TextField
-            value={contract.envFile.path}
-            onChange={(v) => patchContract({ envFile: { ...contract.envFile, path: v } })}
-          >
-            <Label>Percorso del file</Label>
-            <Input placeholder="/app/.env" className="font-mono text-sm" />
-          </TextField>
+          <div>
+            <TextField
+              value={contract.envFile.path}
+              onChange={(v) => patchContract({ envFile: { ...contract.envFile, path: v } })}
+            >
+              <Label>Percorso del file</Label>
+              <Input placeholder="/app/.env" className="font-mono text-sm" />
+            </TextField>
+            <EnvFilePathHint runtimeType={project.runtime_type} />
+            <FieldHint>
+              Il file viene riscritto a ogni deploy con tutte le variabili del progetto: quello che
+              modifichi a mano lì dentro sparisce. Il posto giusto per cambiarle è la scheda
+              Variabili.
+            </FieldHint>
+          </div>
         )}
       </Panel>
 
@@ -326,10 +361,13 @@ export function SettingsTab({
                 </Button>
               ))}
             </div>
-            <p className="text-muted mt-1 text-[11px]">
-              <span className="font-mono">project</span> isola il progetto con i suoi servizi;{" "}
-              <span className="font-mono">host</span> condivide lo stack di rete della macchina.
-            </p>
+            <FieldHint>
+              <Code>project</Code> mette app e servizi del progetto sulla stessa rete, dove si
+              raggiungono per nome del container: è quello che rende automatico il collegamento del
+              database. <Code>bridge</Code> lascia l&apos;app sulla rete di default, isolata dai
+              servizi. <Code>host</Code> condivide lo stack di rete della macchina: niente porte
+              pubblicate, <Code>localhost</Code> dentro il container è già quello dell&apos;host.
+            </FieldHint>
           </div>
 
           <div>
@@ -346,39 +384,60 @@ export function SettingsTab({
                 </Button>
               ))}
             </div>
+            <FieldHint>
+              <Code>unless-stopped</Code> è il default e nella maggior parte dei casi è quello
+              giusto: riparte al riavvio della macchina, ma se sei tu a fermarlo resta fermo. Con{" "}
+              <Code>always</Code> un riavvio di Docker lo rimette su anche se l&apos;avevi fermato a
+              mano. <Code>no</Code> lo lascia giù dopo ogni crash.
+            </FieldHint>
           </div>
 
-          <div className="grid gap-4 sm:grid-cols-3">
-            <TextField
-              value={contract.runtime.memory ?? ""}
-              onChange={(v) => patchContract({ runtime: { ...contract.runtime, memory: v || undefined } })}
-            >
-              <Label>Memoria</Label>
-              <Input placeholder="2g" className="font-mono text-sm" />
-            </TextField>
-            <TextField
-              value={contract.runtime.cpus ?? ""}
-              onChange={(v) => patchContract({ runtime: { ...contract.runtime, cpus: v || undefined } })}
-            >
-              <Label>CPU</Label>
-              <Input placeholder="1.5" className="font-mono text-sm" />
-            </TextField>
-            <TextField
-              value={contract.runtime.shmSize ?? ""}
-              onChange={(v) => patchContract({ runtime: { ...contract.runtime, shmSize: v || undefined } })}
-            >
-              <Label>shm-size</Label>
-              <Input placeholder="2g" className="font-mono text-sm" />
-            </TextField>
+          <div>
+            <div className="grid gap-4 sm:grid-cols-3">
+              <TextField
+                value={contract.runtime.memory ?? ""}
+                onChange={(v) => patchContract({ runtime: { ...contract.runtime, memory: v || undefined } })}
+              >
+                <Label>Memoria</Label>
+                <Input placeholder="2g" className="font-mono text-sm" />
+              </TextField>
+              <TextField
+                value={contract.runtime.cpus ?? ""}
+                onChange={(v) => patchContract({ runtime: { ...contract.runtime, cpus: v || undefined } })}
+              >
+                <Label>CPU</Label>
+                <Input placeholder="1.5" className="font-mono text-sm" />
+              </TextField>
+              <TextField
+                value={contract.runtime.shmSize ?? ""}
+                onChange={(v) => patchContract({ runtime: { ...contract.runtime, shmSize: v || undefined } })}
+              >
+                <Label>shm-size</Label>
+                <Input placeholder="2g" className="font-mono text-sm" />
+              </TextField>
+            </div>
+            <FieldHint>
+              Formato Docker: <Code>512m</Code>, <Code>2g</Code> per la memoria, un numero anche
+              decimale per le CPU (<Code>1.5</Code> = una CPU e mezza). Vuoti significano nessun
+              limite. <Code>shm-size</Code> serve solo se dentro gira un browser headless o
+              Postgres: il default di 64 MB li fa crashare senza spiegazioni.
+            </FieldHint>
           </div>
 
-          <TextField
-            value={contract.docker.hostname ?? ""}
-            onChange={(v) => patchContract({ docker: { ...contract.docker, hostname: v || undefined } })}
-          >
-            <Label>Hostname</Label>
-            <Input placeholder="127.0.0.1" className="font-mono text-sm" />
-          </TextField>
+          <div>
+            <TextField
+              value={contract.docker.hostname ?? ""}
+              onChange={(v) => patchContract({ docker: { ...contract.docker, hostname: v || undefined } })}
+            >
+              <Label>Hostname</Label>
+              <Input placeholder="app" className="font-mono text-sm" />
+            </TextField>
+            <FieldHint>
+              Il nome che il container dà a se stesso (<Code>--hostname</Code>). Serve alle app che
+              si annunciano agli altri con il proprio hostname; per raggiungere questo container
+              dagli altri basta il nome del container, che non cambia.
+            </FieldHint>
+          </div>
         </Panel>
       )}
 
@@ -407,6 +466,15 @@ export function SettingsTab({
 
         <CopyField label="URL" value={webhookUrl} />
         <CopyField label="Secret" value={project.webhook_secret} secret />
+
+        <Hint tone="tip" title="Come si collega su GitHub">
+          Repository → Settings → Webhooks → Add webhook. Incolla URL e Secret qui sopra, metti
+          Content type su <Code>application/json</Code> e lascia selezionato il solo evento{" "}
+          <Code>push</Code>. La firma viene verificata a ogni chiamata, quindi un Secret sbagliato
+          non fa danni: la consegna viene rifiutata e la vedi rossa in &quot;Recent Deliveries&quot;
+          su GitHub. Se il pannello non è raggiungibile da internet GitHub non può chiamarlo, e
+          resta il pulsante Deploy.
+        </Hint>
       </Panel>
 
       <Panel className="border-danger/30 space-y-3">
