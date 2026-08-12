@@ -1,17 +1,7 @@
 import { z } from "zod";
 import { isValidTimeZone, parseCron } from "./cron";
 
-export const loginSchema = z.object({
-  password: z.string().min(1, "Password is required").max(128, "Password too long"),
-});
 
-export const setupSchema = z.object({
-  password: z.string().min(8, "Password must be at least 8 characters").max(128, "Password too long"),
-  confirmPassword: z.string().max(128),
-}).refine((data) => data.password === data.confirmPassword, {
-  message: "Passwords do not match",
-  path: ["confirmPassword"],
-});
 
 export const runtimeTypes = ["node", "docker", "compose", "custom"] as const;
 export type RuntimeType = (typeof runtimeTypes)[number];
@@ -88,6 +78,13 @@ export const updateProjectSchema = z.object({
   port: z.number().int().min(1).max(65535).optional().nullable(),
   autoDeploy: z.boolean().optional(),
   /**
+   * A deploy preset chosen by hand, applied UNDER whatever the caller also
+   * sends. Detection still runs at deploy time; this is the answer for a
+   * repository whose shape cannot be seen from outside — or that has not been
+   * cloned yet, which is every project at the moment it is configured.
+   */
+  presetId: z.string().min(1).max(64).optional().nullable(),
+  /**
    * The deploy contract, in either the current shape or the older four-field
    * one. It is accepted loosely here and normalised in the route: a strict
    * schema would silently DROP the legacy keys — Zod strips what it does not
@@ -114,23 +111,36 @@ export const controlActionSchema = z.object({
  * a slash passed every check here and died as a 500 carrying a raw Docker
  * error. Docker's own rule is `[a-zA-Z0-9][a-zA-Z0-9_.-]*`; lowercase-only
  * keeps the names predictable on case-insensitive hosts.
+ *
+ * The message is exported so the form can render the sentence the server would.
+ *
+ * The two name rules here look alike enough to be mistaken for one rule stated
+ * inconsistently. They are not: a service name becomes a Docker container name,
+ * where hyphens are legal; a database name becomes an SQL identifier, where
+ * they are not. Keeping each message next to its own regex is what stops them
+ * being "reconciled" into a single wrong one.
  */
+export const SERVICE_NAME_RULE = "Solo minuscole, numeri, trattini e underscore";
+
 export const serviceNameSchema = z
   .string()
   .min(1)
   .max(38)
-  .regex(/^[a-z0-9][a-z0-9_-]*$/, "Solo minuscole, numeri, trattini e underscore");
+  .regex(/^[a-z0-9][a-z0-9_-]*$/, SERVICE_NAME_RULE);
 
 /**
  * A database name goes into `CREATE DATABASE "<name>"`, and an SQL identifier
  * cannot be parameterised — this regex is the whole defence against injection
  * there, not a convenience.
  */
+export const DATABASE_NAME_RULE =
+  "Deve iniziare con una lettera minuscola; poi solo minuscole, numeri e underscore";
+
 export const databaseNameSchema = z
   .string()
   .min(1)
   .max(63)
-  .regex(/^[a-z][a-z0-9_]*$/, "Deve iniziare con una lettera minuscola; solo minuscole, numeri e underscore");
+  .regex(/^[a-z][a-z0-9_]*$/, DATABASE_NAME_RULE);
 
 export const createDatabaseSchema = z.object({
   name: databaseNameSchema,
@@ -147,6 +157,34 @@ export const createServiceSchema = z.object({
     password: z.string().optional(),
     database: z.string().optional(),
   }).optional(),
+});
+
+/**
+ * An environment variable name, as a shell and a Dockerfile will accept it.
+ *
+ * Uppercase because every convention around connection strings is, and because
+ * a lowercase twin of an existing key is the kind of difference nobody sees in
+ * a list. Rejecting the leading digit is not style: `2_URL` is not a legal
+ * identifier for `export`.
+ */
+export const envKeySchema = z
+  .string()
+  .min(1)
+  .max(64)
+  .regex(/^[A-Z][A-Z0-9_]*$/, "Solo maiuscole, numeri e underscore, e deve iniziare con una lettera");
+
+/**
+ * What can be changed about a service after it exists.
+ *
+ * There was no PATCH at all, so `project_id` was fixed at creation: detaching a
+ * database from a project meant deleting the service, and deleting a service
+ * offers to delete its data. Every field here is optional and absent means
+ * unchanged — `projectId: null` is the explicit detach.
+ */
+export const updateServiceSchema = z.object({
+  projectId: z.string().min(1).max(32).nullable().optional(),
+  injectEnv: z.boolean().optional(),
+  envKey: envKeySchema.nullable().optional(),
 });
 
 // --- Backups ---
@@ -229,14 +267,70 @@ export const cronPreviewSchema = z.object({
 });
 
 /** Only `local` is implemented; adding a transport means adding it here too. */
-export const destinationTypes = ["local"] as const;
+export const destinationTypes = ["local", "s3"] as const;
 
-export const destinationSchema = z.object({
-  name: z.string().min(1).max(60),
-  type: z.enum(destinationTypes),
-  config: z.record(z.string(), z.unknown()).optional(),
-  isDefault: z.boolean().optional(),
+/**
+ * An S3-compatible destination's configuration.
+ *
+ * Validated here rather than trusted from the form, because it is stored
+ * encrypted and read back at 03:00 by a scheduler nobody is watching: a typo in
+ * the endpoint has to be a 400 now, not a failed backup six hours from now.
+ */
+export const s3ConfigSchema = z.object({
+  /**
+   * HTTPS towards the internet; plain HTTP allowed only towards a private
+   * address.
+   *
+   * "Always https" was the first rule here and it was wrong in the most common
+   * self-hosted case: a MinIO on the LAN, or on the same host, reached over
+   * http. SigV4 never puts the secret key on the wire — but with
+   * UNSIGNED-PAYLOAD it is TLS that protects the archive itself, and an archive
+   * carries every environment variable the panel holds. Over the internet that
+   * is not negotiable; inside a private network it is the operator's own wire.
+   *
+   * `isBlockedRepoHost` is reused deliberately, for the opposite purpose: the
+   * set of hosts a clone must never reach is exactly the set where http is
+   * acceptable here, and having one definition of "private" is what stops the
+   * two drifting apart.
+   */
+  endpoint: z
+    .string()
+    .url()
+    .refine(
+      (raw) => {
+        let url: URL;
+        try {
+          url = new URL(raw);
+        } catch {
+          return false;
+        }
+        if (url.protocol === "https:") return true;
+        return url.protocol === "http:" && isBlockedRepoHost(url.hostname);
+      },
+      { message: "Serve https://, oppure http:// verso un indirizzo privato" }
+    ),
+  region: z.string().min(1).max(64),
+  bucket: z.string().min(1).max(255),
+  accessKeyId: z.string().min(1).max(255),
+  secretAccessKey: z.string().min(1).max(255),
+  prefix: z.string().max(255).optional(),
+  forcePathStyle: z.boolean().optional(),
 });
+
+export const destinationSchema = z
+  .object({
+    name: z.string().min(1).max(60),
+    type: z.enum(destinationTypes),
+    config: z.record(z.string(), z.unknown()).optional(),
+    isDefault: z.boolean().optional(),
+  })
+  // `local` needs no configuration; `s3` needs all of it, and half a
+  // configuration is worse than none — it would be accepted, encrypted, and
+  // then fail on first use.
+  .refine((value) => value.type !== "s3" || s3ConfigSchema.safeParse(value.config ?? {}).success, {
+    message: "Configurazione S3 incompleta o non valida",
+    path: ["config"],
+  });
 
 /**
  * A restore request.

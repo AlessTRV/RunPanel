@@ -1,5 +1,5 @@
 import { getSetting } from "@/lib/settings";
-import { decrypt } from "@/lib/auth";
+import { decrypt } from "@/lib/crypto";
 
 const API = "https://api.github.com";
 

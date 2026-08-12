@@ -2,21 +2,22 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import {
-  Card,
-  CardHeader,
-  CardTitle,
-  CardDescription,
-  CardContent,
-  TextField,
-  Label,
-  Input,
-  Button,
-  Spinner,
-} from "@heroui/react";
+import { TextField, Label, Input, Button, Spinner } from "@heroui/react";
 import { Icon } from "@iconify/react";
 import { toast } from "sonner";
+import { Panel } from "@/components/ui/Panel";
+import { Code, FieldHint } from "@/components/ui/Hint";
 
+/**
+ * The first screen the operator ever sees, and the one that was entirely in
+ * English in an otherwise Italian panel.
+ *
+ * It also carried the only `shadow-2xl` in the app, against a token layer whose
+ * own comment says depth comes from the surface steps and the border — "flat by
+ * default" being most of the difference between minimal and dated. A login card
+ * is exactly where that temptation shows up, and exactly where it looks least
+ * like the rest of the product.
+ */
 export default function LoginPage() {
   const router = useRouter();
   const [isFirstRun, setIsFirstRun] = useState<boolean | null>(null);
@@ -50,10 +51,10 @@ export default function LoginPage() {
         router.push("/home");
       } else {
         const data = await res.json();
-        toast.error(data.error || "Invalid password");
+        toast.error(data.error || "Password errata");
       }
     } catch {
-      toast.error("Connection error");
+      toast.error("Impossibile raggiungere il pannello");
     } finally {
       setLoading(false);
     }
@@ -61,15 +62,15 @@ export default function LoginPage() {
 
   async function handleSetup() {
     if (!setupToken.trim()) {
-      toast.error("Enter the setup token from the panel's startup log");
+      toast.error("Serve il token che il pannello ha stampato nel suo log di avvio");
       return;
     }
     if (password.length < 8) {
-      toast.error("Password must be at least 8 characters");
+      toast.error("La password deve avere almeno 8 caratteri");
       return;
     }
     if (password !== confirmPassword) {
-      toast.error("Passwords do not match");
+      toast.error("Le due password non coincidono");
       return;
     }
     setLoading(true);
@@ -83,10 +84,10 @@ export default function LoginPage() {
         router.push("/home");
       } else {
         const data = await res.json();
-        toast.error(data.error || "Setup failed");
+        toast.error(data.error || "Configurazione non riuscita");
       }
     } catch {
-      toast.error("Connection error");
+      toast.error("Impossibile raggiungere il pannello");
     } finally {
       setLoading(false);
     }
@@ -102,32 +103,34 @@ export default function LoginPage() {
 
   return (
     <div className="flex min-h-screen items-center justify-center p-4">
-      <Card className="w-full max-w-md border border-border shadow-2xl ">
-        <CardHeader className="flex flex-col items-center gap-2 pb-0 pt-8">
-          <Icon icon="solar:server-bold-duotone" className="text-accent" width={48} />
-          <CardTitle className="text-2xl">RunPanel</CardTitle>
-          <CardDescription>
-            {isFirstRun
-              ? "Set up your admin password to get started"
-              : "Enter your password to continue"}
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-4 px-5 sm:px-8 pb-6 sm:pb-8 pt-4 sm:pt-6">
-          {/* Proves the person claiming this panel is the one who can read its
-              log, rather than whoever reached it first. */}
+      <Panel className="w-full max-w-md space-y-5 p-6 sm:p-8">
+        <div className="flex flex-col items-center gap-2 text-center">
+          <Icon icon="solar:server-bold-duotone" className="text-accent" width={44} aria-hidden />
+          <h1 className="text-foreground text-xl font-semibold tracking-tight">RunPanel</h1>
+          <p className="text-muted text-sm">
+            {isFirstRun ? "Scegli la password di amministratore" : "Accedi per continuare"}
+          </p>
+        </div>
+
+        <div className="space-y-4">
+          {/*
+            Proves the person claiming this panel is the one who can read its
+            log, rather than whoever reached the port first.
+          */}
           {isFirstRun && (
-            <TextField value={setupToken} onChange={setSetupToken} autoFocus>
-              <Label>Setup token</Label>
-              <Input placeholder="Printed in the panel's startup log" />
-            </TextField>
+            <div>
+              <TextField value={setupToken} onChange={setSetupToken} autoFocus>
+                <Label>Token di setup</Label>
+                <Input placeholder="3f9c1a…" className="font-mono text-sm" />
+              </TextField>
+              <FieldHint>
+                Il pannello lo stampa nel proprio log all&apos;avvio, dopo{" "}
+                <Code>Not set up yet</Code>. Ne genera uno nuovo a ogni riavvio.
+              </FieldHint>
+            </div>
           )}
 
-          <TextField
-            type="password"
-            value={password}
-            onChange={setPassword}
-            autoFocus={!isFirstRun}
-          >
+          <TextField type="password" value={password} onChange={setPassword} autoFocus={!isFirstRun}>
             <Label>Password</Label>
             <Input
               onKeyDown={(e) => {
@@ -137,12 +140,8 @@ export default function LoginPage() {
           </TextField>
 
           {isFirstRun && (
-            <TextField
-              type="password"
-              value={confirmPassword}
-              onChange={setConfirmPassword}
-            >
-              <Label>Confirm Password</Label>
+            <TextField type="password" value={confirmPassword} onChange={setConfirmPassword}>
+              <Label>Conferma password</Label>
               <Input
                 onKeyDown={(e) => {
                   if (e.key === "Enter") handleSetup();
@@ -150,18 +149,17 @@ export default function LoginPage() {
               />
             </TextField>
           )}
+        </div>
 
-          <Button
-            variant="primary"
-            size="lg"
-            className="mt-2 w-full"
-            isDisabled={loading}
-            onPress={isFirstRun ? handleSetup : handleLogin}
-          >
-            {loading ? <Spinner /> : isFirstRun ? "Create Account" : "Sign In"}
-          </Button>
-        </CardContent>
-      </Card>
+        <Button
+          variant="primary"
+          className="w-full"
+          isPending={loading}
+          onPress={isFirstRun ? handleSetup : handleLogin}
+        >
+          {isFirstRun ? "Configura il pannello" : "Accedi"}
+        </Button>
+      </Panel>
     </div>
   );
 }

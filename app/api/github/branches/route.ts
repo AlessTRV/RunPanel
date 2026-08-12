@@ -17,7 +17,7 @@ export async function GET(request: NextRequest) {
   // Validated rather than interpolated: this value reaches a URL path, and a
   // caller-supplied `../` would otherwise walk to a different API endpoint.
   if (!REPO_PATTERN.test(repo)) {
-    return NextResponse.json({ error: "Expected repo=owner/name", branches: [] }, { status: 400 });
+    return NextResponse.json({ error: "Serve il parametro repo nella forma owner/nome", branches: [] }, { status: 400 });
   }
 
   const token = await githubToken();

@@ -108,7 +108,7 @@ export async function POST(request: NextRequest) {
   const hash = await getAdminPasswordHash();
   if (!hash) {
     return NextResponse.json(
-      { error: "Panel not set up. Please refresh the page." },
+      { error: "Il pannello non è ancora configurato. Ricarica la pagina." },
       { status: 400 }
     );
   }

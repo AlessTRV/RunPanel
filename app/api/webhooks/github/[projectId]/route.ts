@@ -1,3 +1,11 @@
+/**
+ * The one route whose error strings stay in English.
+ *
+ * Everything else the panel says is Italian, because an operator reads it.
+ * These are read by GitHub — they land in the repository's "Recent Deliveries"
+ * list, next to GitHub's own English UI, and whoever debugs a rejected webhook
+ * is reading them there rather than here.
+ */
 import { NextRequest, NextResponse } from "next/server";
 import { getDb, nowIso } from "@/lib/db";
 import type { WebhookStatus } from "@/lib/db/schema";
