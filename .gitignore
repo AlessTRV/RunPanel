@@ -45,8 +45,3 @@ next-env.d.ts
 # IDE
 .idea/
 .vscode/
-
-# Claude Code
-.claude/settings.local.json
-/.claude/skills/api-route-hardener/SKILL.md
-/.claude/
