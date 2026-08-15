@@ -19,6 +19,16 @@ export interface UnitInput {
   dataDir: string;
   /** `.env` beside the working directory; a missing one must not fail the boot. */
   envFile: string;
+  /**
+   * PATH for the service, already assembled by the caller.
+   *
+   * systemd hands a unit PID 1's PATH and nothing else, and on a normal host
+   * that PATH has no `~/.bun/bin` and no nvm directory in it. The panel boots
+   * regardless — its own node path is absolute right there in `ExecStart` — and
+   * then every build it runs dies with `command not found`. Written into the
+   * unit because a unit inherits nothing from the shell that installed it.
+   */
+  pathEnv?: string;
 }
 
 export const UNIT_NAME = "runpanel.service";
@@ -61,6 +71,9 @@ export function renderUnit(input: UnitInput): string {
     "Environment=NODE_ENV=production",
     `Environment=PORT=${input.port}`,
     `Environment=RUNPANEL_DATA_DIR=${input.dataDir}`,
+    // Quoted form: systemd splits an unquoted assignment on whitespace, and a
+    // bin directory with a space in it would silently truncate the PATH.
+    ...(input.pathEnv ? [`Environment="PATH=${input.pathEnv}"`] : []),
     `ExecStart=${input.nodePath} ${input.nextBin} start -p ${input.port}`,
     "Restart=always",
     "RestartSec=5",
@@ -99,6 +112,9 @@ export function renderStartScript(input: UnitInput, logFile: string): string {
     "export NODE_ENV=production",
     `export PORT=${input.port}`,
     `export RUNPANEL_DATA_DIR=${shellQuote(input.dataDir)}`,
+    // cron's PATH is narrower still than systemd's — /usr/bin:/bin — so this is
+    // not optional here either. See `pathEnv` in UnitInput.
+    ...(input.pathEnv ? [`export PATH=${shellQuote(input.pathEnv)}`] : []),
     "",
     "# cron has no Restart=, so supervise the process here instead.",
     "while true; do",

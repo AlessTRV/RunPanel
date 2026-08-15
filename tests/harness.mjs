@@ -11,6 +11,9 @@ import { spawn, execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+// The panel's own tool resolution, imported rather than reimplemented so the
+// harness cannot drift from what the driver actually does.
+import { whichSync } from "../services/toolchain.ts";
 
 const REPO_ROOT = new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
 
@@ -154,18 +157,23 @@ export function dockerAvailable() {
  * Is PM2 reachable the way the driver reaches it?
  *
  * Deliberately mirrors `resolvePm2Command()` in `pm2-driver.ts`: a vendored
- * binary first, otherwise `npx --no-install`, which is what finds a global
- * install — the arrangement the README tells operators to use. Probing with
- * anything else would answer a different question from the one the panel asks.
+ * binary first, then one resolved off the repaired PATH, and `npx --no-install`
+ * only as a last resort. Probing with anything else would answer a different
+ * question from the one the panel asks — and `npx` alone answers it wrongly,
+ * since `npm exec` never searches PATH, so a `bun add -g pm2` in `~/.bun/bin`
+ * reads as "pm2 not installed" on a host where it is running projects.
  *
- * `shell` on Windows because the resolved binary is `npx.cmd`, which
+ * `shell` on Windows because the resolved binary may be `npx.cmd`, which
  * `execFileSync` cannot launch directly.
  */
 export function pm2Available() {
   const vendored = join(REPO_ROOT, "node_modules", ".bin", process.platform === "win32" ? "pm2.cmd" : "pm2");
+  const onPath = whichSync("pm2");
   const [command, args] = existsSync(vendored)
     ? [vendored, ["-v"]]
-    : ["npx", ["--no-install", "pm2", "-v"]];
+    : onPath
+      ? [onPath, ["-v"]]
+      : ["npx", ["--no-install", "pm2", "-v"]];
 
   try {
     execFileSync(command, args, {

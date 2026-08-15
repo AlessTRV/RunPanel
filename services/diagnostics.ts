@@ -10,7 +10,7 @@ import { getSetting } from "@/lib/settings";
 import { staleWhileRevalidate } from "@/lib/stale-cache";
 import { formatBytes } from "@/lib/format";
 import { dockerTry } from "./docker/cli";
-import { getShellPath, isWindows } from "./env-utils";
+import { getShellPath, isWindows, toolchainPath } from "./env-utils";
 import { autostartProbeCache } from "./autostart/probe";
 
 const exec = promisify(execFile);
@@ -59,6 +59,11 @@ async function binary(name: string, args: string[] = ["--version"]): Promise<str
     const { stdout } = await exec(command, argv, {
       timeout: 5_000,
       windowsHide: true,
+      // The same PATH the panel gives every child process. Without it this page
+      // resolves against systemd's PATH while builds resolve against the
+      // repaired one, and it reports pm2 and bun as missing on a host where
+      // both are installed and working.
+      env: { ...process.env, PATH: toolchainPath(), Path: toolchainPath() },
       ...(isWindows ? { windowsVerbatimArguments: true } : {}),
     });
     return stdout.toString().trim().split("\n")[0];

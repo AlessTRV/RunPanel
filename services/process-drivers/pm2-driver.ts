@@ -1,7 +1,7 @@
 import { IProcessDriver, ProcessInfo, StartOpts, OutputCallback } from "./types";
 import { execFile } from "child_process";
 import { promisify } from "util";
-import { buildEnv, getShellPath, isWindows } from "../env-utils";
+import { buildEnv, getShellPath, isWindows, toolchainPath, whichSync } from "../env-utils";
 import fs from "fs";
 import path from "path";
 import { config } from "@/lib/config";
@@ -72,6 +72,15 @@ function shellExec(command: string, options: Record<string, unknown> = {}) {
  * `npx pm2 …` re-resolves the package on each invocation, which costs hundreds
  * of milliseconds — and `status()` was calling it on every status poll of every
  * project. Resolved lazily and cached for the process lifetime.
+ *
+ * Order matters. A vendored pm2 wins, then one found on the repaired PATH — see
+ * `toolchainPath()` — and only then `npx`. The npx fallback is genuinely last
+ * because it is the one that cannot work when it is needed most: `npm exec`
+ * searches the project's `node_modules/.bin` and its own cache, not PATH, so a
+ * pm2 installed with `bun add -g` (which lands in `~/.bun/bin`, not npm's
+ * global prefix) is invisible to it. Under systemd that produced
+ * `npx: command not found` at every project start, with pm2 sitting installed
+ * and working two directories away.
  */
 let pm2Command: string | null = null;
 
@@ -87,7 +96,8 @@ function resolvePm2Command(): string {
 
   // A local install is both faster and more predictable than whatever `npx`
   // decides to fetch; fall back to it only if pm2 is not vendored.
-  pm2Command = fs.existsSync(local) ? `"${local}"` : "npx --no-install pm2";
+  const resolved = fs.existsSync(local) ? local : whichSync("pm2");
+  pm2Command = resolved ? `"${resolved}"` : "npx --no-install pm2";
   return pm2Command;
 }
 
@@ -263,8 +273,11 @@ export const pm2Driver: IProcessDriver = {
       NODE_ENV: opts.env.NODE_ENV || "production",
     };
 
-    // Capture the FULL system PATH now (while we still have it)
-    const systemPath = process.env.Path || process.env.PATH || "";
+    // Capture the FULL system PATH now (while we still have it), repaired the
+    // same way every other child process gets it — the panel's own PATH is
+    // PID 1's when systemd started it, and the wrapper would otherwise hand a
+    // project a PATH with neither bun nor node on it.
+    const systemPath = toolchainPath();
 
     // Split command into binary and args: "bun next start -p 3002" → ["bun", "next", "start", "-p", "3002"]
     const cmdParts = portAwareCmd.split(/\s+/);

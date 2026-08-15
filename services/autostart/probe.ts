@@ -8,6 +8,7 @@ import { config } from "@/lib/config";
 import { getEnv } from "@/lib/env";
 import { staleWhileRevalidate } from "@/lib/stale-cache";
 import { docker, dockerTry, lines } from "../docker/cli";
+import { toolchainPath } from "../env-utils";
 import { ownedFilters } from "../docker/labels";
 import { UNIT_NAME } from "./render";
 
@@ -36,6 +37,10 @@ async function run(command: string, args: string[]): Promise<Ran> {
     const { stdout, stderr } = await exec(command, args, {
       timeout: PROBE_TIMEOUT,
       windowsHide: true,
+      // Resolve tools the way the panel's children resolve them. Probing with
+      // systemd's bare PATH reports "pm2 non è installato o non è nel PATH" on
+      // a host where pm2 is installed in `~/.bun/bin` and running fine.
+      env: { ...process.env, PATH: toolchainPath(), Path: toolchainPath() },
     });
     return { ok: true, stdout: stdout.toString().trim(), stderr: stderr.toString().trim(), code: 0 };
   } catch (err) {

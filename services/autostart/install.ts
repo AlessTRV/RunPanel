@@ -6,6 +6,7 @@ import { promisify } from "util";
 import { config } from "@/lib/config";
 import { getEnv } from "@/lib/env";
 import { getSetting, setSetting } from "@/lib/settings";
+import { toolchainPath } from "../env-utils";
 import { HOST_CHANNEL, opsEvents } from "../events";
 import {
   autostartProbeCache,
@@ -55,6 +56,11 @@ export function unitInput(probe: AutostartProbe): UnitInput {
     port: probe.environment.port,
     dataDir: config.dataDir,
     envFile: path.join(cwd, ".env"),
+    // Not `process.env.PATH`: reinstalling autostart from a panel that is
+    // already running under systemd would then copy the broken PATH forward and
+    // the reinstall would fix nothing. `toolchainPath()` rebuilds it from where
+    // the tools actually are, so it is right either way.
+    pathEnv: toolchainPath(),
   };
 }
 

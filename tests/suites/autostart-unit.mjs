@@ -20,6 +20,7 @@ const INPUT = {
   port: 3000,
   dataDir: "/srv/runpanel/data",
   envFile: "/srv/runpanel/.env",
+  pathEnv: "/usr/local/bin:/usr/bin:/bin:/home/runpanel/.bun/bin",
 };
 
 export async function run({ repoRoot }) {
@@ -66,6 +67,31 @@ export async function run({ repoRoot }) {
   r.check("it runs as the resolved user", unit.includes(`User=${INPUT.user}`));
   r.check("the data directory is passed explicitly", unit.includes(`RUNPANEL_DATA_DIR=${INPUT.dataDir}`));
 
+  // --- PATH ----------------------------------------------------------------
+  // systemd gives a unit PID 1's PATH: no ~/.bun/bin, no nvm directory. The
+  // panel starts anyway — ExecStart is absolute — and then every build command
+  // it runs exits 127 with `bun: command not found`, which reads as a broken
+  // build command rather than a broken environment. This one line is the
+  // difference between autostart working and autostart looking like it works.
+  r.check(
+    "the toolchain PATH is written into the unit",
+    unit.includes(`Environment="PATH=${INPUT.pathEnv}"`),
+    unit.match(/Environment="PATH=.*/)?.[0] ?? "no PATH line"
+  );
+  // Unquoted, systemd splits the assignment on whitespace and everything after
+  // the first space is dropped — a silently truncated PATH.
+  r.check(
+    "it is quoted, so a directory with a space in it survives",
+    renderUnit({ ...INPUT, pathEnv: "/opt/my tools/bin:/usr/bin" }).includes(
+      `Environment="PATH=/opt/my tools/bin:/usr/bin"`
+    )
+  );
+  // Older callers, and the tests above this file's own change, pass no PATH.
+  r.check(
+    "a caller that supplies none gets no empty PATH line",
+    !/Environment="?PATH=/.test(renderUnit({ ...INPUT, pathEnv: undefined }))
+  );
+
   // --- the cron path -------------------------------------------------------
   const script = renderStartScript(INPUT, "/srv/runpanel/data/logs/autostart.log");
   r.check("the script is a shell script", script.startsWith("#!/bin/sh"));
@@ -73,6 +99,18 @@ export async function run({ repoRoot }) {
   // cron has no Restart=, so the script has to supervise or a crash is final.
   r.check("it supervises, because cron will not", script.includes("while true; do") && script.includes("sleep 5"));
   r.check("it redirects to a log", script.includes("autostart.log"));
+  // cron's PATH is /usr/bin:/bin, narrower still than systemd's.
+  r.check(
+    "the script exports the toolchain PATH too",
+    script.includes(`export PATH='${INPUT.pathEnv}'`),
+    script.split("\n").find((line) => line.startsWith("export PATH")) ?? "no PATH export"
+  );
+  // .env is sourced first, so a PATH set there would otherwise win and the
+  // export would be pointless.
+  r.check(
+    "it exports PATH after sourcing .env, not before",
+    script.indexOf("export PATH") > script.indexOf(INPUT.envFile)
+  );
 
   r.check(
     "the crontab line points at the script, not at a pipeline",
