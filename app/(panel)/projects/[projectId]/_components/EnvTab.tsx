@@ -13,6 +13,7 @@ import { Code, Hint } from "@/components/ui/Hint";
 import { BuildEnvHint, ManagedEnvHint, ServiceLinkHint } from "@/components/DeployHints";
 import { InfoTip } from "@/components/ui/Tooltip";
 import { ServiceLink } from "@/components/ServiceLink";
+import { StickySaveBar } from "@/components/ui/StickySaveBar";
 import type { EnvVar } from "./types";
 
 interface LinkedService {
@@ -65,7 +66,13 @@ export function EnvTab({
   const [vars, onChange] = useState<EnvVar[]>(() =>
     initialVars.map((v) => ({ key: v.key, value: v.value }))
   );
+  // What the server last confirmed, seeded exactly like `vars` above. The
+  // parent reseeds both by remounting on load, which is what we want.
+  const [saved, setSaved] = useState(() =>
+    JSON.stringify(initialVars.map((v) => ({ key: v.key, value: v.value })))
+  );
   const [saving, setSaving] = useState(false);
+  const dirty = JSON.stringify(vars) !== saved;
   // A real file input instead of one created with document.createElement, so
   // the control is part of the tree and keyboard-reachable.
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -80,8 +87,31 @@ export function EnvTab({
     [servicesData, projectId]
   );
 
+  // Added, removed and changed keys, counted off the two lists already in
+  // memory. "3 modifiche non salvate" answers the question the bar raises;
+  // "Modifiche non salvate" only asks it again.
+  const changes = useMemo(() => {
+    const before = new Map((JSON.parse(saved) as EnvVar[]).map((v) => [v.key, v.value]));
+    const after = new Map(vars.filter((v) => v.key.trim()).map((v) => [v.key, v.value]));
+    let n = 0;
+    for (const [key, value] of after) if (before.get(key) !== value) n++;
+    for (const key of before.keys()) if (!after.has(key)) n++;
+    return n;
+  }, [saved, vars]);
+
+  function reset() {
+    onChange(JSON.parse(saved) as EnvVar[]);
+  }
+
   async function save() {
-    const valid = vars.filter((v) => v.key.trim());
+    // Trimmed, not just filtered on the trimmed value. `envVarsSchema` rejects
+    // a name with a space in it, so a key typed as " FOO" used to pass this
+    // check and come back as a 400 that said only "Dati non validi" — and the
+    // change count above, which compares trimmed names, would have disagreed
+    // with what was actually sent.
+    const valid = vars
+      .filter((v) => v.key.trim())
+      .map((v) => ({ key: v.key.trim(), value: v.value }));
     if (valid.length === 0) {
       toast.error("Nessuna variabile da salvare");
       return;
@@ -97,6 +127,10 @@ export function EnvTab({
       if (res.ok) {
         toast.success(`${data.count ?? valid.length} variabili salvate`);
         onChange(valid);
+        // `valid`, not `vars`: the filter above drops blank-key rows, so a
+        // baseline taken from `vars` would never match again and the save bar
+        // would stay up forever after a successful save.
+        setSaved(JSON.stringify(valid));
       } else {
         toast.error(data.error ?? MSG.saveFailed);
       }
@@ -221,16 +255,23 @@ export function EnvTab({
       )}
 
       {vars.length > 0 && (
-        <div className="flex flex-wrap items-center justify-end gap-3">
-          <p className="text-muted mr-auto text-meta">
-            Salvare non riavvia niente: le variabili entrano in vigore al prossimo deploy. Quelle
-            che il build compila nel bundle vanno salvate <em>prima</em> di lanciarlo.
-          </p>
-          <Button variant="primary" isPending={saving} onPress={save}>
-            Salva variabili
-          </Button>
-        </div>
+        <p className="text-muted text-meta">
+          Salvare non riavvia niente: le variabili entrano in vigore al prossimo deploy. Quelle che
+          il build compila nel bundle vanno salvate <em>prima</em> di lanciarlo.
+        </p>
       )}
+
+      {/* Pinned to the viewport instead of parked at the end of the list: with
+          twenty variables the button used to be a scroll away from whichever
+          row you were editing, and the hints below pushed it further still. */}
+      <StickySaveBar
+        isDirty={dirty}
+        isPending={saving}
+        onSave={save}
+        onReset={reset}
+        message={changes === 1 ? "1 modifica non salvata" : `${changes} modifiche non salvate`}
+        saveLabel="Salva variabili"
+      />
 
       {/* Reference rather than instructions: kept under the editor so the thing
           you came here to do is the first thing on screen. */}
