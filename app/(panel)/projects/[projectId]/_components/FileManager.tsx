@@ -190,7 +190,9 @@ export function FileManager({ projectId, runtimeType }: { projectId: string; run
                   onClick={() => open(entry)}
                   className={cn(
                     "flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors",
-                    active ? "bg-accent/10 text-accent" : "text-muted hover:bg-surface-hover"
+                    // Quiet: the tree is an arbitrarily long scrolling list of
+                    // tightly packed rows, and a halo there reads as a smudge.
+                    active ? "selected-quiet text-accent" : "text-muted hover:bg-surface-hover"
                   )}
                 >
                   <Icon

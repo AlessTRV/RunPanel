@@ -213,18 +213,19 @@ export function AppForm({
       <Panel className="space-y-4">
         <PanelHeader title="Sorgente" description="Da dove arriva il codice" />
 
-        <div className="flex gap-2">
-          {(["github", "upload"] as const).map((s) => (
-            <Button
-              key={s}
-              size="sm"
-              variant={sourceType === s ? "primary" : "outline"}
-              onPress={() => setSourceType(s)}
-            >
-              {s === "github" ? "GitHub" : "Upload ZIP"}
-            </Button>
-          ))}
-        </div>
+        {/* Was a pair of Buttons switching between `primary` and `outline` — a
+            filled accent button to mean "selected", which shouts far louder
+            than the thing it is selecting. Segmented is what that pattern was
+            retired in favour of; it just never got applied here. */}
+        <Segmented
+          label="Sorgente"
+          value={sourceType}
+          onChange={setSourceType}
+          options={[
+            { value: "github", label: "GitHub" },
+            { value: "upload", label: "Upload ZIP" },
+          ]}
+        />
 
         {sourceType === "github" ? (
           <>
@@ -441,11 +442,18 @@ export function AppForm({
               aria-pressed={runtime === r.id}
               className={cn(
                 "rounded-[var(--radius)] border px-3 py-3 text-left transition-colors",
-                runtime === r.id ? "border-accent bg-surface-secondary" : "border-border hover:bg-surface-hover"
+                runtime === r.id
+                  ? "selected border-transparent"
+                  : "border-border hover:bg-surface-hover"
               )}
             >
               <span className="text-foreground flex items-center gap-2 text-sm">
-                <Icon icon={r.icon} width={16} className="text-muted" aria-hidden />
+                <Icon
+                  icon={r.icon}
+                  width={16}
+                  className={cn(runtime === r.id ? "text-accent" : "text-muted")}
+                  aria-hidden
+                />
                 {r.label}
               </span>
               <span className="text-muted mt-1 block text-meta">{r.hint}</span>

@@ -61,7 +61,9 @@ export function AccentPicker() {
             onClick={() => choose(preset.id)}
             className={cn(
               "flex items-center gap-2.5 rounded-[var(--radius)] border px-3 py-2.5 text-left transition-colors",
-              active ? "border-accent bg-surface-secondary" : "border-border hover:bg-surface-hover",
+              // The one control where the token and the widget are the same
+              // thing: picking a preset restyles its own highlight as you click.
+              active ? "selected border-transparent" : "border-border hover:bg-surface-hover",
               saving !== null && "opacity-60"
             )}
           >

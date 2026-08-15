@@ -257,10 +257,18 @@ export function CommandPalette() {
                 onMouseEnter={() => setActive(position)}
                 className={cn(
                   "flex w-full items-center gap-3 rounded-[var(--radius)] px-3 py-2 text-left text-sm",
-                  position === active ? "bg-default text-foreground" : "text-muted"
+                  // The palette lists the same destinations as the sidebar, from
+                  // the same array, with the same icons — so the highlighted row
+                  // should look like the sidebar's, not like a grey rectangle.
+                  position === active ? "selected text-foreground" : "text-muted"
                 )}
               >
-                <Icon icon={command.icon} width={16} aria-hidden />
+                <Icon
+                  icon={command.icon}
+                  width={16}
+                  aria-hidden
+                  className={cn(position === active && "text-accent")}
+                />
                 <span className="text-foreground flex-1 truncate">{command.label}</span>
                 {command.hint && <span className="text-muted text-xs">{command.hint}</span>}
               </button>

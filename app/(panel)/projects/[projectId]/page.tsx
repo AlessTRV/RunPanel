@@ -271,7 +271,15 @@ export default function ProjectDetailPage() {
                   : "text-muted hover:text-foreground border-transparent"
               )}
             >
-              <Icon icon={tab.icon} width={15} aria-hidden />
+              {/* No wash here: a tab's grammar is the underline, and a filled
+                  pill fighting a bottom border reads as neither. The accent
+                  icon is what ties it to the rest of the language. */}
+              <Icon
+                icon={tab.icon}
+                width={15}
+                aria-hidden
+                className={cn(active && "text-accent")}
+              />
               {tab.label}
             </button>
           );

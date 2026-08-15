@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Button } from "@heroui/react";
 import { Icon } from "@iconify/react";
 import { toast } from "sonner";
+import { cn } from "@/lib/utils";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -293,12 +294,12 @@ export default function StoragePage() {
                         type="button"
                         onClick={() => setKeepImages(n)}
                         aria-pressed={active}
-                        className={
-                          "rounded-[var(--radius)] border px-2 py-1 text-xs transition-colors " +
-                          (active
-                            ? "border-accent bg-surface-secondary text-foreground"
-                            : "border-border text-muted hover:bg-surface-hover")
-                        }
+                        className={cn(
+                          "rounded-[var(--radius)] border px-2 py-1 text-xs transition-colors",
+                          active
+                            ? "selected text-foreground border-transparent"
+                            : "border-border text-muted hover:bg-surface-hover"
+                        )}
                       >
                         {n}
                       </button>

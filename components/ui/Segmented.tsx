@@ -16,12 +16,23 @@ import { cn } from "@/lib/utils";
  * "selected" looks like — so the same gesture read differently depending on
  * which screen you were on.
  *
- * The look is HeroUI's own, deliberately. Two attempts to impose the policy
- * form's accent-tinted recipe were overridden by the library — it composes a
- * caller's className BEFORE its slot classes, so its own always wins short of
- * `!important` — and a component that has to shout to be heard is a component
- * fighting its foundation. What mattered was one recipe, not this recipe: the
- * four treatments are now one, and it is the one the library maintains.
+ * The structure is HeroUI's; the selected look is now the app's, and the two
+ * are set in different places on purpose.
+ *
+ * An earlier note here claimed the library could not be restyled short of
+ * `!important`, because it "composes a caller's className BEFORE its slot
+ * classes". That was wrong twice over: `compose.js` does `cx(tw, cls)`, so the
+ * caller's classes go last — and the order of names in a class attribute has
+ * never affected the cascade anyway. What actually defeated those attempts is
+ * that React Aria emits `data-selected` only when it is true, so a
+ * `data-[selected=false]:…` variant never matches, while an unconditional
+ * class makes every segment look chosen.
+ *
+ * So the selected state is set in app/globals.css instead, through the
+ * variables HeroUI exposes for it, next to the same recipe the sidebar and the
+ * command palette use. It has to live there rather than here regardless: this
+ * component cannot reach `:focus-visible`, and the focus ring is the one thing
+ * that must not be painted over.
  *
  * Built on ToggleButtonGroup so arrow-key roving focus, `role="radiogroup"` and
  * the selected state come from the library too. `disallowEmptySelection`
@@ -36,7 +47,7 @@ export interface SegmentedOption<T extends string> {
   isDisabled?: boolean;
 }
 
-/** Layout only. Colour and the selected state come from the library's slots. */
+/** Layout only. The selected state is set in app/globals.css — see above. */
 const ITEM = "flex items-center gap-1.5 text-sm";
 
 export function Segmented<T extends string>({

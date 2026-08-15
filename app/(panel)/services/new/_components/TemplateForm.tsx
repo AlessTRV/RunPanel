@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button, Input, Label, TextField } from "@heroui/react";
 import { toast } from "sonner";
+import { cn } from "@/lib/utils";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import type { DockerTemplate } from "../_data/catalog";
 
@@ -69,11 +70,24 @@ export function TemplateForm({
 
         <div>
           <span className="text-muted mb-2 block text-sm font-medium">Versione</span>
+          {/* Same quiet treatment as the database version picker — they are the
+              same control and used to disagree only by accident. */}
           <div className="flex flex-wrap gap-2">
             {template.versions.map((v) => (
-              <Button key={v} size="sm" variant={version === v ? "primary" : "outline"} onPress={() => setVersion(v)}>
+              <button
+                key={v}
+                type="button"
+                aria-pressed={version === v}
+                onClick={() => setVersion(v)}
+                className={cn(
+                  "rounded-[var(--radius)] border px-2.5 py-1 font-mono text-xs transition-colors",
+                  version === v
+                    ? "selected-quiet text-accent border-transparent"
+                    : "border-border text-muted hover:bg-surface-hover"
+                )}
+              >
                 {v}
-              </Button>
+              </button>
             ))}
           </div>
         </div>

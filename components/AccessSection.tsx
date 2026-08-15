@@ -279,7 +279,10 @@ export function AccessSection({
                     key={network.cidr}
                     className={cn(
                       "border-separator hover:bg-surface-hover flex cursor-pointer items-center gap-2.5 rounded-[var(--radius)] border px-3 py-2 transition-colors",
-                      allow.includes(network.cidr) && "border-accent/40 bg-surface-secondary/60"
+                      // Quiet, because this is the one multi-select here: several
+                      // rows are lit at once, and haloing each would turn a
+                      // choice into wallpaper.
+                      allow.includes(network.cidr) && "selected-quiet border-transparent"
                     )}
                   >
                     <input

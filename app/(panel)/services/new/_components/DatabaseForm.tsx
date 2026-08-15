@@ -172,10 +172,17 @@ export function DatabaseForm({ projectId }: { projectId?: string }) {
               aria-pressed={type === opt.type}
               className={cn(
                 "flex flex-col items-center gap-2 rounded-[var(--radius)] border px-3 py-4 transition-colors",
-                type === opt.type ? "border-accent bg-surface-secondary" : "border-border hover:bg-surface-hover"
+                type === opt.type
+                  ? "selected border-transparent"
+                  : "border-border hover:bg-surface-hover"
               )}
             >
-              <Icon icon={opt.icon} width={22} className="text-muted" aria-hidden />
+              <Icon
+                icon={opt.icon}
+                width={22}
+                className={cn(type === opt.type ? "text-accent" : "text-muted")}
+                aria-hidden
+              />
               <span className="text-foreground text-xs">{opt.label}</span>
             </button>
           ))}
@@ -200,11 +207,25 @@ export function DatabaseForm({ projectId }: { projectId?: string }) {
 
           <div>
             <span className="text-muted mb-2 block text-sm font-medium">Versione</span>
+            {/* Quiet rather than the full recipe: a version list can run to
+                eight pills, and a halo on one of eight sitting shoulder to
+                shoulder bleeds into its neighbours. */}
             <div className="flex flex-wrap gap-2">
               {option.versions.map((v) => (
-                <Button key={v} size="sm" variant={version === v ? "primary" : "outline"} onPress={() => setVersion(v)}>
+                <button
+                  key={v}
+                  type="button"
+                  aria-pressed={version === v}
+                  onClick={() => setVersion(v)}
+                  className={cn(
+                    "rounded-[var(--radius)] border px-2.5 py-1 font-mono text-xs transition-colors",
+                    version === v
+                      ? "selected-quiet text-accent border-transparent"
+                      : "border-border text-muted hover:bg-surface-hover"
+                  )}
+                >
                   {v}
-                </Button>
+                </button>
               ))}
             </div>
             <FieldHint>

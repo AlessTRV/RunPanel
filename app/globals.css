@@ -107,6 +107,41 @@
   --surface-shadow: 0 0 0 0 transparent;
   --overlay-shadow: 0 16px 48px -12px oklch(0% 0 0 / 60%);
   --field-shadow: 0 0 0 0 transparent;
+
+  /* The one place the rule directly above bends, and only for the thing that is
+     SELECTED — there, depth is not decoration, it is the only thing telling
+     what you picked apart from what you could pick.
+
+     "This one is chosen" used to be written seven different ways depending on
+     the screen: `border-accent bg-surface-secondary` in three pickers,
+     `bg-accent/10 text-accent` in the file tree, a bare `bg-default` with no
+     accent at all in the command palette, and a filled primary button in three
+     more. Same gesture, different sentence each time. These are that sentence,
+     written once.
+
+     Everything is derived from --accent through color-mix, so all five presets
+     work without a line of preset-specific code, including `mono`, which is
+     near-white and is the default. Measured against a 18.5% surface, the wash
+     lands between 23.5% (blue) and 28.2% (mono) — at or just above the 24% of
+     the `--default` grey this replaces, so no preset needed its own tuning.
+     These are static values: no filter, no blend mode, nothing that costs a
+     repaint while the page scrolls. */
+  --selected-bg: color-mix(in oklab, var(--accent) 10%, transparent);
+  /* Hairline only. For dense grids, long scrolling lists and multi-select,
+     where a halo on several lit elements at once is exactly the noise the
+     flat rule exists to prevent. */
+  --selected-ring: inset 0 0 0 1px color-mix(in oklab, var(--accent) 22%, transparent);
+  --selected-shadow:
+    var(--selected-ring),
+    0 6px 20px -14px color-mix(in oklab, var(--accent) 70%, transparent);
+  /* A single static gradient at the top of the rail, so it does not read as a
+     flat slab. One paint, never repeated. Sidebar chrome, not a selected
+     state — which is why it keeps the `nav` name. */
+  --nav-sheen: linear-gradient(
+    180deg,
+    color-mix(in oklab, var(--accent) 6%, transparent) 0%,
+    transparent 200px
+  );
 }
 
 /* ── Accent presets ──────────────────────────────────────────────────────────
@@ -194,13 +229,57 @@
   }
 }
 
+/*
+ * "This one is chosen", as one class.
+ *
+ * A utility rather than two arbitrary values repeated at every call site —
+ * repeating them is how the seven divergent recipes happened in the first
+ * place, and a token you have to spell out twice is a token that drifts.
+ *
+ * One caveat, because `cn()` is tailwind-merge and tailwind-merge has never
+ * heard of these: it cannot know `selected` conflicts with a `bg-*` on the same
+ * element, so putting both there lets stylesheet order decide instead of class
+ * order. Every call site is a mutually exclusive branch, so it does not come
+ * up — but do not combine them.
+ */
+@utility selected {
+  background-color: var(--selected-bg);
+  box-shadow: var(--selected-shadow);
+
+  /*
+   * The halo is the one part of this system that occupies the same space as
+   * focus: `:focus-visible` draws a 2px accent outline 2px outside the border
+   * box, and the halo bleeds through exactly that transparent gap. In `mono`
+   * both are near-white, so "chosen" and "keyboard is here" merge into one
+   * smear. Dropping to the hairline while focused leaves the outline as the
+   * only outer mark; the fill still says selected.
+   */
+  &:focus-visible {
+    box-shadow: var(--selected-ring);
+  }
+}
+
+/* No guard needed here: with no outer shadow, the focus outline already reads
+   cleanly over it. A second reason this is the right default for anything
+   focusable. */
+@utility selected-quiet {
+  background-color: var(--selected-bg);
+  box-shadow: var(--selected-ring);
+}
+
 @layer components {
   /*
-   * HeroUI hardcodes `rounded-3xl` (24px) on .card and .button rather than
-   * deriving them from --radius, which is why stock components never matched
-   * the hand-rolled ones. Realigning them here is what makes a single radius
-   * scale possible. Kept in the components layer so a deliberate `rounded-full`
-   * utility still wins.
+   * HeroUI puts `rounded-3xl` on .card and .button, which is why stock
+   * components never matched the hand-rolled ones. It does derive from
+   * --radius — `--radius-3xl: calc(var(--radius) * 3)` — but at three times
+   * the scale, so these land at 30px against everything else's 10px.
+   *
+   * Redefining --radius-3xl would not help: @heroui/styles declares it inside
+   * `@theme inline`, so Tailwind inlines the calc() into every utility instead
+   * of emitting a var() to override. Per-class rules are the only route.
+   *
+   * Kept in the components layer so a deliberate `rounded-full` utility still
+   * wins.
    */
   .card {
     border-radius: var(--radius);
@@ -209,5 +288,77 @@
 
   .button {
     border-radius: var(--radius);
+  }
+
+  /* The dialogs were missed the first time: both still came out at 30px while
+     every other surface had moved to 10px.
+
+     The :not() is load bearing. `.modal__dialog--full` sets `rounded-none` at
+     the same (0,1,0) specificity earlier in this layer, so an unguarded rule
+     here would win and round a full-screen modal against the viewport edge.
+     The alert dialog has no such modifier and needs no guard. */
+  .modal__dialog:not(.modal__dialog--full),
+  .alert-dialog__dialog {
+    border-radius: var(--radius);
+  }
+
+  /*
+   * Segmented, aligned without touching the component.
+   *
+   * Segmented.tsx records that two attempts to restyle it through `className`
+   * were overridden, because HeroUI composes the caller's classes BEFORE its
+   * own slots. That is still true — so this does not try. HeroUI exposes the
+   * selected state as variables, and overriding a variable is the mechanism
+   * this whole file is built on. No !important, no specificity fight, and all
+   * fourteen call sites move together.
+   *
+   * The library already transitions box-shadow, so the halo animates for free.
+   */
+  .toggle-button {
+    /* Same `calc(var(--radius) * 3)` as .card — 30px, three times every other
+       control here. The detached selector below is (0,2,0), so this alone
+       loses on the grouped case. */
+    border-radius: var(--radius);
+
+    --toggle-button-bg-selected: var(--selected-bg);
+    /* Overridden too, or hovering a selected segment jumps back to HeroUI's
+       accent-soft-hover at 20% — double the fill it is sitting on. */
+    --toggle-button-bg-selected-hover: color-mix(in oklab, var(--accent) 14%, transparent);
+    --toggle-button-bg-selected-pressed: color-mix(in oklab, var(--accent) 14%, transparent);
+
+    /*
+     * Unselected reads as NO fill, not as a dimmer fill — and this is load
+     * bearing, not tidiness. Violet at 10% over --surface computes to Oklab
+     * L 24.0%, and --default is L 24.0%: identical lightness, so selected and
+     * unselected would differ by hue alone. Raising the fill instead would
+     * take `mono` — the default preset — into glaring territory. Fill against
+     * no fill reads at every preset, and it is HeroUI's own `ghost` token set,
+     * so it is a supported configuration rather than a hack.
+     */
+    --toggle-button-bg: transparent;
+    --toggle-button-bg-hover: var(--color-default);
+    --toggle-button-bg-pressed: var(--color-default);
+  }
+
+  .toggle-button-group .toggle-button,
+  .toggle-button-group--detached .toggle-button {
+    border-radius: var(--radius);
+  }
+
+  /*
+   * The hairline — and deliberately nothing while focused.
+   *
+   * HeroUI's focus affordance on a toggle button IS a box-shadow: `@apply
+   * status-focused` expands to `focus-ring`, which is a 2px ring plus
+   * `outline-none`, so it also removes the global :focus-visible outline. That
+   * ring is therefore the ONLY focus indicator these controls have, and its
+   * selector is the same (0,2,0) as this one but earlier in the layer — an
+   * unguarded rule here wins and leaves a selected, focused segment with no
+   * focus indicator at all. The guard hands the box-shadow back for the
+   * duration of focus rather than re-implementing HeroUI's ring geometry, so
+   * it survives a library upgrade that changes it.
+   */
+  .toggle-button[data-selected="true"]:not(:focus-visible):not([data-focus-visible="true"]) {
+    box-shadow: var(--selected-ring);
   }
 }

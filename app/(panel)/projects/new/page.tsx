@@ -85,7 +85,7 @@ export default function NewProjectPage() {
                   step > n
                     ? "border-accent text-accent"
                     : step === n
-                      ? "border-accent bg-accent/10 text-accent"
+                      ? "selected border-transparent text-accent"
                       : "border-border text-muted"
                 )}
               >

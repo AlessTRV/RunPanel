@@ -17,7 +17,13 @@ import { cn } from "@/lib/utils";
 type Variant = "primary" | "secondary" | "ghost";
 
 const VARIANTS: Record<Variant, string> = {
-  primary: "bg-accent text-accent-foreground hover:opacity-90 border-transparent",
+  /* Hover matches HeroUI's own primary button — it darkens the fill rather than
+     fading the whole control, so a link and a button sitting side by side no
+     longer react differently to the same gesture. Unused today, and kept
+     deliberately: see the note below about a link that really is the primary
+     action on its screen. */
+  primary:
+    "bg-accent text-accent-foreground border-transparent hover:bg-[color-mix(in_oklab,var(--accent)_90%,var(--accent-foreground)_10%)]",
   secondary: "border-border bg-surface hover:bg-surface-hover text-foreground",
   ghost: "border-transparent text-muted hover:bg-surface-hover hover:text-foreground",
 };
