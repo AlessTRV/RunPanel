@@ -7,9 +7,15 @@ live build output, provisioned databases and Docker housekeeping that actually
 reclaims disk.
 
 ![Next.js](https://img.shields.io/badge/Next.js-16-black?logo=next.js)
-![TypeScript](https://img.shields.io/badge/TypeScript-strict-blue?logo=typescript)
-![SQLite](https://img.shields.io/badge/SQLite-or_Postgres-003B57?logo=sqlite)
-![Docker](https://img.shields.io/badge/Docker-supported-2496ED?logo=docker)
+![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)
+![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white)
+![Node.js](https://img.shields.io/badge/Node.js-20+-5FA04E?logo=nodedotjs&logoColor=white)
+
+![Docker](https://img.shields.io/badge/Docker-runtime-2496ED?logo=docker&logoColor=white)
+![PM2](https://img.shields.io/badge/PM2-runtime-2B037A?logo=pm2&logoColor=white)
+![SQLite](https://img.shields.io/badge/SQLite-store-003B57?logo=sqlite&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-store-4169E1?logo=postgresql&logoColor=white)
+![License](https://img.shields.io/badge/License-MIT-green)
 
 ---
 
