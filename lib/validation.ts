@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { isValidTimeZone, parseCron } from "./cron";
+import { ruleProblem } from "./ip-access";
 
 
 
@@ -64,6 +65,44 @@ export const repoUrlSchema = z
     { message: "Repository URL must be a public https:// address" }
   );
 
+/**
+ * Who may reach a published port.
+ *
+ * The messages are exported for the same reason as the two name rules further
+ * down: the form renders the sentence the server would, from the same string.
+ * The arithmetic lives in `lib/ip-access.ts`, which has no imports of its own
+ * so this file stays loadable from a client component.
+ */
+export const IP_RULE_HINT = "Un indirizzo IP o una rete CIDR, es. 192.168.1.0/24";
+
+/**
+ * `/0` is a legal prefix that means everyone. Accepted quietly it would let the
+ * panel report «1 rete consentita» over a port open to the internet — true, and
+ * the opposite of what it looks like. So it is refused, and the message says
+ * what to press instead of what is wrong.
+ */
+export const IP_RULE_EVERYTHING = "Una rete /0 consente tutti: usa l'interruttore Aperto";
+
+export const accessRuleSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(64)
+  .superRefine((value, ctx) => {
+    const problem = ruleProblem(value);
+    if (problem === "everything") {
+      ctx.addIssue({ code: "custom", message: IP_RULE_EVERYTHING });
+    } else if (problem) {
+      ctx.addIssue({ code: "custom", message: IP_RULE_HINT });
+    }
+  });
+
+export const accessSchema = z.object({
+  mode: z.enum(["open", "restricted"]),
+  /** An empty list under `restricted` means "only this machine". */
+  allow: z.array(accessRuleSchema).max(64),
+});
+
 export const createProjectSchema = z.object({
   name: z.string().min(1).max(100),
 });
@@ -92,6 +131,8 @@ export const updateProjectSchema = z.object({
    * no commands at all.
    */
   builderConfig: z.unknown().optional(),
+  /** See `accessSchema`. Changing it restarts the app: the port has to move. */
+  access: accessSchema.optional(),
 });
 
 export const envVarsSchema = z.object({
@@ -157,6 +198,8 @@ export const createServiceSchema = z.object({
     password: z.string().optional(),
     database: z.string().optional(),
   }).optional(),
+  /** Absent means open, which is what every service was before this existed. */
+  access: accessSchema.optional(),
 });
 
 /**
@@ -185,6 +228,7 @@ export const updateServiceSchema = z.object({
   projectId: z.string().min(1).max(32).nullable().optional(),
   injectEnv: z.boolean().optional(),
   envKey: envKeySchema.nullable().optional(),
+  access: accessSchema.optional(),
 });
 
 // --- Backups ---

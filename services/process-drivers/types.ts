@@ -19,6 +19,16 @@ export interface StartOpts {
   deploymentId?: string;
   /** Defaults to `unless-stopped`, so a deploy survives a host reboot. */
   restartPolicy?: RestartPolicy;
+  /**
+   * Set when the panel's access gate is going in front of this app.
+   *
+   * `port` stays the port the operator and every URL know; this is where the
+   * listener actually goes, on loopback, so the gate can hold the public one.
+   * A container gets it as its published host port (it still listens on `port`
+   * inside); a native process gets it as `PORT`, because there is no NAT under
+   * it to translate anything.
+   */
+  loopbackPort?: number;
 
   // --- container-only options, ignored by native drivers ---
   network?: NetworkMode;

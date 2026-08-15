@@ -23,6 +23,7 @@ interface Project {
   source_branch: string;
   deploy_count: number;
   last_deploy_at: string | null;
+  access_mode: string | null;
 }
 
 /**
@@ -40,9 +41,17 @@ const ProjectRow = memo(function ProjectRow({ project }: { project: Project }) {
             <span className="text-foreground truncate text-sm font-medium">{project.name}</span>
             <StatusBadge status={project.status} />
           </div>
-          <p className="text-muted mt-0.5 truncate font-mono text-xs">
-            {project.runtime_type}
-            {project.port ? ` · :${project.port}` : ""} · {project.source_branch}
+          <p className="text-muted mt-0.5 flex items-center gap-x-2 truncate font-mono text-xs">
+            <span className="truncate">
+              {project.runtime_type}
+              {project.port ? ` · :${project.port}` : ""} · {project.source_branch}
+            </span>
+            {project.access_mode === "restricted" && (
+              <span className="inline-flex shrink-0 items-center gap-1" title="Accesso limitato a reti specifiche">
+                <Icon icon="solar:lock-keyhole-minimalistic-linear" width={13} aria-hidden />
+                limitato
+              </span>
+            )}
           </p>
         </div>
 

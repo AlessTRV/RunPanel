@@ -60,6 +60,14 @@ export async function register() {
     return;
   }
 
+  // A restricted port is held open by this process and by nothing else, so
+  // until this runs it is closed. Behind the same flag as the timers, and for
+  // the same reason: it binds real host ports, which a throwaway instance next
+  // to a real one must not do. The failure direction is a shut port, never an
+  // open one.
+  const { reconcileGates } = await import("./services/access");
+  await reconcileGates();
+
   // Housekeeping on a timer, in addition to the per-project sweep after each
   // deploy: a project deleted while Docker was unreachable leaves resources
   // nothing else would ever come back for.

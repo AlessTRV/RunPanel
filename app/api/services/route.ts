@@ -12,6 +12,8 @@ import {
   removeService,
   serviceContainerName,
 } from "@/services/service-provisioner";
+import { AccessRow, syncGate } from "@/services/access";
+import { allocateLoopbackPort } from "@/services/access-gate";
 
 export async function GET() {
   const denied = await requireAuth();
@@ -45,7 +47,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const { name, type, version, port, projectId, credentials: customCreds } = parsed.data;
+  const { name, type, version, port, projectId, credentials: customCreds, access } = parsed.data;
   const id = generateId();
   const defaultCreds = generateCredentials(type);
   const credentials = {
@@ -121,8 +123,17 @@ export async function POST(request: NextRequest) {
   const config = { name, type, version, port, credentials, projectSlug };
   let provisioned = false;
 
+  // Restricting at creation costs nothing to undo and saves a service from ever
+  // having been open, which is not something that can be taken back afterwards.
+  const restricted = access?.mode === "restricted";
+  const accessRow: AccessRow = {
+    access_mode: restricted ? "restricted" : "open",
+    access_allow: JSON.stringify(access?.allow ?? []),
+    access_port: restricted ? await allocateLoopbackPort() : null,
+  };
+
   try {
-    const containerId = await provisionService(config, projectSlug);
+    const containerId = await provisionService(config, projectSlug, accessRow);
     provisioned = true;
     const connString = getConnectionString(config);
     const now = nowIso();
@@ -148,10 +159,17 @@ export async function POST(request: NextRequest) {
         // naming, and there cannot be one on a service that was just created
         // unless another link already claims the same key — checked below.
         env_key: envKey,
+        access_mode: accessRow.access_mode,
+        access_allow: accessRow.access_allow,
+        access_port: accessRow.access_port,
         created_at: now,
         updated_at: now,
       })
       .execute();
+
+    // After the container: it is now publishing on loopback, so the public port
+    // is free for the gate to take.
+    await syncGate("service", id, accessRow, { publicPort: port, label: name });
 
     const service = await db
       .selectFrom("services")

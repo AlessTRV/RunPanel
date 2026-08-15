@@ -26,6 +26,9 @@ reclaims disk.
 - **Comes back after a reboot** — generates and installs the systemd unit (or a
   cron `@reboot` line), checks that Docker itself starts at boot, and brings
   back the projects and services you marked, in order.
+- **Restrict a port to the networks you name** — any database or app can be
+  limited to specific addresses, with the machine's own networks offered as tick
+  boxes and the refused ones listed so you can see who is knocking.
 - **Housekeeping** — image retention per project, orphan detection, and volume
   cleanup that asks before destroying data.
 - **Two runtimes** — PM2 for native processes, Docker for containers, on equal
@@ -148,10 +151,12 @@ app/
 lib/
   db/                   Kysely schema, migrations, both dialects
   deploy-contract.ts    the contract, its parser and preflight checks
+  ip-access.ts          CIDR matching, and the host's own networks
   hooks/                useProjectStream (SSE), useResource (polling)
 services/
   deploy-pipeline.ts    the deploy orchestrator
   deploy-queue.ts       per-project serialisation and coalescing
+  access-gate.ts        the TCP gate in front of a restricted port
   docker/               cli, ownership labels, images, volumes, stats, gc
   builders/             node, docker, static, custom
   process-drivers/      pm2 and docker
@@ -179,7 +184,7 @@ Postgres suites need a database:
 ```bash
 docker run -d --name rp-test-pg -e POSTGRES_PASSWORD=test \
   -e POSTGRES_USER=runpanel -e POSTGRES_DB=runpanel_test \
-  -p 55432:5432 postgres:16-alpine
+  -p 55432:5432 postgres:18-alpine
 
 RUNPANEL_TEST_PG_URL=postgresql://runpanel:test@127.0.0.1:55432/runpanel_test npm test
 ```
@@ -206,6 +211,52 @@ name that does not exist.
   archive and decompressed size
 - Repository URLs must be public `https://`, and the GitHub token is only ever
   attached to requests to GitHub
+- Any published port can be restricted to named networks, in front of a listener
+  that is moved to loopback so there is no way around it
+
+### Restricting who can reach a port
+
+By default RunPanel publishes a port the way Docker does — `-p 5433:5432`, with
+no bind address, on every interface. That is convenient and it means a database
+created from the panel answers to everything on the LAN, and to the internet if
+the host has a public address.
+
+Switching **Chi può collegarsi** on, for a service or a project, changes that:
+
+- the container is recreated (or the app restarted) publishing on `127.0.0.1`
+  and on a port the panel allocates;
+- the panel binds the port your clients already know, and forwards only
+  connections from the addresses you listed;
+- `127.0.0.1` and `::1` are always allowed and cannot be removed — the health
+  probe, the backup dumpers and any `psql` on the box come from there.
+
+Rules are single addresses or CIDR ranges, IPv4 or IPv6. The panel reads the
+host's own interfaces and offers them as tick boxes, labelled: the LAN, VPN
+ranges (Tailscale's `100.64.0.0/10` is recognised, since its interface reports a
+useless `/32`), and virtual switches. Whoever gets turned away is listed on the
+page with an **Consenti** button, because otherwise a refused connection and a
+stopped database look identical from the other end.
+
+Two things worth knowing before turning it on:
+
+- **It fails closed.** The port is held open by the panel process. If the panel
+  is not running, the port is shut. For a security control that is the right
+  direction to fail, but it is a change: an app's database used to stay
+  reachable while the panel was down.
+- **An app on the project network is unaffected.** It reaches its database by
+  container name on `runpanel-net-<slug>`, which never goes through the gate.
+  Traffic arriving via `host.docker.internal` does, which is why the virtual
+  subnets are among the suggestions.
+
+Not offered where it could not be honest: a **Compose** project publishes ports
+from a file you own and RunPanel will not rewrite it, and a container on
+`network: host` has no published port to move. Both say so instead of showing a
+switch that would do nothing.
+
+For a native process the panel also passes `HOST`/`HOSTNAME` and, for the CLIs
+where the spelling is known, the bind flag. An app that ignores all of it stays
+on every interface at the moved port — so the panel checks, and says so on the
+page rather than showing a restriction that is not one.
 
 ### Putting it on the internet
 
@@ -272,10 +323,9 @@ build.
 ## Known gaps
 
 - **Light theme** is not shipped; the token layer is structured for it.
-- Deploy presets exist (`services/deploy-presets`) but are not offered in the
-  wizard yet.
-- Backups only go to local disk. The `Destination` interface is the seam for
-  anything else; adding one is a new file under `services/backup/destinations`.
+- Port restrictions are enforced by the panel process, so they do not survive it
+  being stopped — the port simply closes. A rule set that has to hold with the
+  panel down needs a host firewall as well.
 - Restoring RunPanel's own **Postgres** store is refused from the panel: the
   archive carries the dump and the exact `pg_restore` command, to be run with
   the panel stopped.

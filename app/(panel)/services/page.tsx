@@ -23,6 +23,7 @@ interface Service {
   status: string;
   port: number;
   project_id: string | null;
+  access_mode: string | null;
 }
 
 const TYPE_ICONS: Record<string, string> = {
@@ -62,6 +63,16 @@ const ServiceRow = memo(function ServiceRow({
           <span className="font-mono">
             {service.type} {service.version} · :{service.port}
           </span>
+          {/*
+            Only when limited. Open is the default and marking it would turn a
+            neutral state into a warning on every row.
+          */}
+          {service.access_mode === "restricted" && (
+            <span className="text-muted inline-flex items-center gap-1" title="Accesso limitato a reti specifiche">
+              <Icon icon="solar:lock-keyhole-minimalistic-linear" width={13} aria-hidden />
+              limitato
+            </span>
+          )}
           {projectName ? (
             <span className="text-muted">
               → <span className="text-foreground">{projectName}</span>

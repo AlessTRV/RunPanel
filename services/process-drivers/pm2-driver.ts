@@ -167,9 +167,38 @@ function invalidatePm2Cache(): void {
 /**
  * Resolve the actual start command with explicit port flag.
  * Many frameworks (Next.js, Vite) ignore PORT env var.
+ *
+ * `bindHost` is set only when the panel's gate is going in front, and the same
+ * reasoning applies to it twice over: a CLI that ignores `PORT` also ignores
+ * `HOST`, and there the flag is the difference between an app on loopback and
+ * an app still listening on every interface — which would leave a way past the
+ * gate. The env vars are set too, for everything that does read them.
  */
-function resolveStartCmd(startCmd: string, cwd: string, port: number): string {
+function resolveStartCmd(startCmd: string, cwd: string, port: number, bindHost?: string): string {
+  const withFlags = (cmd: string): string => {
+    const binary = cmd.split(/\s+/)[0];
+    // Only where the spelling is known. Guessing a flag a CLI does not have
+    // turns a restriction into an app that will not boot.
+    const host = !bindHost
+      ? ""
+      : binary === "next"
+        ? ` -H ${bindHost}`
+        : binary === "vite"
+          ? ` --host ${bindHost}`
+          : "";
+    return `${cmd} -p ${port}${host}`;
+  };
+
   if (startCmd.includes("-p ") || startCmd.includes("--port")) return startCmd;
+
+  // `serve` publishes a static build, and its listen flag takes a full address:
+  // the only way to pin a static site to loopback. The trailing `-l` is stripped
+  // because the static builder used to emit one with no value after it, and
+  // deployments recorded before that was fixed still carry it.
+  if (/(^|\s)serve(\s|$)/.test(startCmd)) {
+    const cleaned = startCmd.replace(/\s+-l\s*$/, "");
+    return `${cleaned} -l ${bindHost ? `tcp://${bindHost}:${port}` : port}`;
+  }
 
   // For "pm run start", read package.json to get actual script and run directly
   const pmRunMatch = startCmd.match(/^(bun|npm|yarn|pnpm)\s+run\s+start$/);
@@ -178,14 +207,14 @@ function resolveStartCmd(startCmd: string, cwd: string, port: number): string {
       const pkg = JSON.parse(fs.readFileSync(path.join(cwd, "package.json"), "utf-8"));
       const script = pkg.scripts?.start as string | undefined;
       if (script && /^(next|vite|nuxt)\s+(start|preview|dev)/.test(script)) {
-        return `${pmRunMatch[1]} ${script} -p ${port}`;
+        return `${pmRunMatch[1]} ${withFlags(script)}`;
       }
     } catch { /* fallback */ }
   }
 
   // Direct "next start" etc
   if (/^(next|vite|nuxt)\s+(start|preview|dev)/.test(startCmd)) {
-    return `${startCmd} -p ${port}`;
+    return withFlags(startCmd);
   }
 
   return startCmd;
@@ -204,13 +233,22 @@ export const pm2Driver: IProcessDriver = {
     // are emptying.
     truncateLogs(slug);
 
+    // Where the app actually listens. Under a gate that is a loopback port the
+    // operator never sees; `opts.port` stays the one every URL names.
+    const listenOn = opts.loopbackPort ?? opts.port;
+    const bindHost = opts.loopbackPort ? "127.0.0.1" : undefined;
+    // `HOSTNAME` as well as `HOST`: it is the one Next reads, and it is the
+    // framework most likely to be behind this. Set only while restricted, since
+    // it also shadows the machine name for anything that logs it.
+    const bindEnv: Record<string, string> = bindHost ? { HOST: bindHost, HOSTNAME: bindHost } : {};
+
     // Build env with PATH protection
-    const env = buildEnv({ ...opts.env, PORT: opts.port.toString() });
+    const env = buildEnv({ ...opts.env, ...bindEnv, PORT: listenOn.toString() });
 
     const ecosystemDir = path.join(config.dataDir, "pm2");
     fs.mkdirSync(ecosystemDir, { recursive: true });
 
-    const portAwareCmd = resolveStartCmd(startCmd, opts.cwd, opts.port);
+    const portAwareCmd = resolveStartCmd(startCmd, opts.cwd, listenOn, bindHost);
 
     // Write a .js wrapper that PM2 can run natively.
     // PM2 strips the system PATH when forking, so spawn/exec with shell: true
@@ -218,7 +256,12 @@ export const pm2Driver: IProcessDriver = {
     // split into binary + args, and injects the full system PATH.
     const wrapperFile = path.join(ecosystemDir, `${slug}.js`);
     const envDataFile = path.join(ecosystemDir, `${slug}.env.json`);
-    const projectEnv = { ...opts.env, PORT: opts.port.toString(), NODE_ENV: opts.env.NODE_ENV || "production" };
+    const projectEnv = {
+      ...opts.env,
+      ...bindEnv,
+      PORT: listenOn.toString(),
+      NODE_ENV: opts.env.NODE_ENV || "production",
+    };
 
     // Capture the FULL system PATH now (while we still have it)
     const systemPath = process.env.Path || process.env.PATH || "";

@@ -17,6 +17,8 @@ import {
   stripPanelOnlyFields,
 } from "@/lib/deploy-contract";
 import { internalPort } from "./service-provisioner";
+import { checkLoopbackLeak, listenPort, readAccess, syncGate } from "./access";
+import { closeGate } from "./access-gate";
 import { buildConnectionString, resolveServiceEnv } from "@/lib/service-env";
 import { sweep } from "./docker/gc";
 import { BuildLogFile } from "./build-logs";
@@ -452,10 +454,23 @@ async function runDeploy(
     // its first act, and a viewer told afterwards would clear the lines the new
     // run has already printed.
     projectEvents.emit(project.id, { type: "process:reset" });
+
+    // A restricted project listens on loopback with the panel's gate in front,
+    // so the gate has to let the public port go before the app can be started
+    // on it, and take it back afterwards. `access.port` is null when open, and
+    // then none of this happens.
+    const access = readAccess(project);
+    const restricted = access.mode === "restricted" && access.port !== null;
+    if (restricted) await closeGate("project", project.id);
+    // Everything downstream — the health probe included — has to look at where
+    // the app really is, not where its callers reach it.
+    const listenOn = restricted ? listenPort(project, port) : port;
+
     await processManager.start(project.slug, buildResult.startCmd, project.runtime_type, {
       cwd: buildResult.artifactDir,
       env: envVars,
       port,
+      loopbackPort: restricted ? listenOn : undefined,
       deploymentId,
       onLog: appendLog,
       restartPolicy: contract.runtime.restartPolicy,
@@ -469,11 +484,25 @@ async function runDeploy(
       shmSize: contract.runtime.shmSize,
     });
 
+    if (restricted) {
+      try {
+        await syncGate("project", project.id, project, { publicPort: project.port, label: project.name });
+        appendLog(`Accesso limitato: porta ${project.port} filtrata dal pannello.`);
+        // Whether the app honoured the loopback bind is checked, not assumed.
+        // Not awaited: the answer is a notice on a page, not a deploy step.
+        void checkLoopbackLeak(project.id, listenOn);
+      } catch (err) {
+        // Said out loud rather than swallowed: from the outside a gate that did
+        // not open and a restriction working perfectly look identical.
+        appendLog(`ATTENZIONE: la porta ${project.port} non è stata aperta — ${(err as Error).message}`);
+      }
+    }
+
     appendLog("\n--- Health check ---");
     const health = await waitForHealthy({
       slug: project.slug,
       runtimeType: project.runtime_type,
-      port,
+      port: listenOn,
       contract,
       onLog: appendLog,
     });

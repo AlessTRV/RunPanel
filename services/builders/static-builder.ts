@@ -37,7 +37,11 @@ export const staticBuilder: IBuilder = {
       return {
         success: true,
         artifactDir,
-        startCmd: `npx serve -s "${artifactDir}" -l`,
+        // No trailing `-l`: it is `serve`'s listen flag and it was emitted with
+        // nothing after it, so the value it took was whatever followed — which
+        // was nothing at all. The port is appended by `resolveStartCmd`, which
+        // is the only place that knows it.
+        startCmd: `npx serve -s "${artifactDir}"`,
       };
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Build failed";

@@ -15,6 +15,7 @@ import { DangerZone } from "@/components/ui/DangerAction";
 import { InfoTip } from "@/components/ui/Tooltip";
 import { Code, FieldHint } from "@/components/ui/Hint";
 import { EnvFilePathHint, HealthcheckHint, PortHint } from "@/components/DeployHints";
+import { AccessSection } from "@/components/AccessSection";
 import { parseContractJson, type DeployContract } from "@/lib/deploy-contract";
 import type { Project } from "./types";
 
@@ -123,6 +124,28 @@ export function SettingsTab({
     const pm = contract.packageManager === "auto" ? "package manager automatico" : contract.packageManager;
     return hasCustomCommands ? `${pm} · comandi personalizzati` : `${pm} · comandi dal repository`;
   }, [isDocker, contract.packageManager, contract.commands.release, hasCustomCommands]);
+
+  /**
+   * Why the access restriction cannot be offered here, when it cannot.
+   *
+   * Three shapes the panel would have to lie about. A Compose project publishes
+   * its ports from a file the operator owns, and rewriting it behind their back
+   * is a silent edit to their work. `network: host` gives the container the
+   * host's own stack, so there is no port to move. And with no port configured
+   * there is nothing published to restrict in the first place.
+   */
+  const accessUnavailable = useMemo(() => {
+    if (project.runtime_type === "compose") {
+      return "Le porte le pubblica il tuo compose file. RunPanel non lo riscrive: per limitare l'accesso metti il binding su 127.0.0.1 lì.";
+    }
+    if (isDocker && contract.docker.network === "host") {
+      return "Con rete host il container condivide la rete della macchina: non c'è una porta pubblicata da spostare. Passa a bridge o project.";
+    }
+    if (!project.port) {
+      return "Questo progetto non ha una porta configurata, quindi non c'è niente da limitare.";
+    }
+    return undefined;
+  }, [project.runtime_type, project.port, isDocker, contract.docker.network]);
 
   const containerSummary = useMemo(() => {
     const limits = [contract.runtime.memory, contract.runtime.cpus].filter(Boolean).join(" · ");
@@ -360,6 +383,23 @@ export function SettingsTab({
           </p>
         )}
       </Section>
+
+      {/*
+        Its own save, deliberately, and outside the sticky bar: this one moves
+        the port the app listens on, so it restarts the app. Bundling it with
+        the other settings would make pressing Salva mean "and also restart",
+        which is not what the bar has meant anywhere else in the panel.
+      */}
+      <AccessSection
+        kind="project"
+        targetId={project.id}
+        name={project.name}
+        publicPort={project.port}
+        access={project.access}
+        gate={project.gate}
+        unavailable={accessUnavailable}
+        onSaved={(updated) => onProjectChange({ ...project, ...(updated as Partial<Project>) })}
+      />
 
       <Section
         title="File .env"

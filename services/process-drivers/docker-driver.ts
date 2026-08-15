@@ -42,7 +42,13 @@ export const dockerDriver: IProcessDriver = {
       // `opts.port !== 3000`, which meant the single most common port in the
       // world was never mapped.
       if (opts.port && opts.port > 0) {
-        args.push("-p", `${opts.port}:${opts.port}`);
+        // Under a gate the host side moves to loopback; the container keeps
+        // listening on the port it was built for, so only the left half of the
+        // mapping changes.
+        const publish = opts.loopbackPort
+          ? `127.0.0.1:${opts.loopbackPort}:${opts.port}`
+          : `${opts.port}:${opts.port}`;
+        args.push("-p", publish);
       }
     }
 

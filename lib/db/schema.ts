@@ -21,6 +21,10 @@ export type TriggerType = "manual" | "webhook";
 export type ServiceType = "postgresql" | "mysql" | "redis" | "mongodb";
 export type WebhookStatus = "accepted" | "rejected" | "ignored";
 
+// Declared where the column semantics live, so the two cannot disagree.
+export type { AccessMode } from "../access-columns";
+import type { AccessMode } from "../access-columns";
+
 export type BackupDestinationType = "local" | "telegram" | "s3" | "webdav";
 export type BackupTrigger = "schedule" | "manual" | "pre-restore";
 export type BackupRunStatus = "running" | "success" | "partial" | "failed";
@@ -72,6 +76,10 @@ export interface ProjectsTable {
   autostart_delay_s: number | null;
   /** 0 | 1 — block the queue until a readiness probe passes. */
   autostart_wait_healthy: number | null;
+  /** `'open'` | `'restricted'` — see `ServicesTable.access_mode`. */
+  access_mode: AccessMode | null;
+  access_allow: string | null;
+  access_port: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -138,6 +146,16 @@ export interface ServicesTable {
   autostart_order: number | null;
   autostart_delay_s: number | null;
   autostart_wait_healthy: number | null;
+  /**
+   * `'open'` — published on every interface, which is what every port did
+   * before this column existed — or `'restricted'`, published on loopback with
+   * the panel's access gate in front of it.
+   */
+  access_mode: AccessMode | null;
+  /** JSON array of rules the gate admits, e.g. `["192.168.1.0/24"]`. */
+  access_allow: string | null;
+  /** Where the real listener moved to while restricted. NULL when open. */
+  access_port: number | null;
   created_at: string;
   updated_at: string;
 }

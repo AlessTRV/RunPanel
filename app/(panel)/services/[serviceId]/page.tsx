@@ -19,6 +19,7 @@ import { Section } from "@/components/ui/Section";
 import { Segmented } from "@/components/ui/Segmented";
 import { InfoTip } from "@/components/ui/Tooltip";
 import { StatusBadge } from "@/components/StatusBadge";
+import { AccessSection, type AccessValue, type GateValue } from "@/components/AccessSection";
 import { buildConnectionString, serviceLabel } from "@/lib/service-env";
 import { DatabasesPanel } from "./_components/DatabasesPanel";
 
@@ -50,6 +51,8 @@ interface Service {
   envKey: string;
   projectSlug: string | null;
   networkName: string | null;
+  access: AccessValue;
+  gate: GateValue;
 }
 
 interface Credentials {
@@ -327,6 +330,21 @@ export default function ServiceDetailPage() {
             </>
           )}
         </Panel>
+
+        {/*
+          Here, and not lower down: it answers the same question as the panel
+          above — how one reaches this service — and it has to be read before
+          the per-database URLs, not after them.
+        */}
+        <AccessSection
+          kind="service"
+          targetId={service.id}
+          name={service.name}
+          publicPort={service.port}
+          access={service.access}
+          gate={service.gate}
+          onSaved={refresh}
+        />
 
         <DatabasesPanel
           serviceId={service.id}

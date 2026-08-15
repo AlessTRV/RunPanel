@@ -3,7 +3,12 @@ import { requireAuth } from "@/lib/auth-guard";
 import { getDb, nowIso } from "@/lib/db";
 import { decrypt } from "@/lib/crypto";
 import { updateServiceSchema } from "@/lib/validation";
-import { internalPort, removeService } from "@/services/service-provisioner";
+import {
+  internalPort,
+  provisionService,
+  removeService,
+  stopService,
+} from "@/services/service-provisioner";
 import { networkName } from "@/services/docker/labels";
 import {
   connectToNetwork,
@@ -11,8 +16,53 @@ import {
   ensureProjectNetwork,
 } from "@/services/docker-network";
 import { serviceEnvKey, suggestEnvKey } from "@/lib/service-env";
+import { AccessRow, readAccess, reportGate, syncGate } from "@/services/access";
+import { allocateLoopbackPort, closeGate } from "@/services/access-gate";
+import { ServicesTable } from "@/lib/db/schema";
 
 type Params = { params: Promise<{ serviceId: string }> };
+
+/**
+ * Put the container back with a different publish spec.
+ *
+ * Recreated rather than restarted: `-p` is fixed at `docker run`, and
+ * `docker start` replays whatever the container was created with. Safe because
+ * the data lives in named, labelled volumes that `rm -f` does not touch — this
+ * is the same operation the panel already performs on every redeploy.
+ *
+ * A service that was not running goes back to not running. It does start for a
+ * moment on the way, which is also the only way to find out that the new
+ * binding is one the host will accept.
+ */
+async function recreateWithAccess(
+  service: ServicesTable,
+  projectSlug: string | undefined,
+  access: AccessRow
+): Promise<{ containerId: string; status: ServicesTable["status"] }> {
+  const credentials = service.credentials
+    ? (JSON.parse(decrypt(service.credentials)) as { user: string; password: string; database: string })
+    : { user: "", password: "", database: "" };
+
+  const containerId = await provisionService(
+    {
+      name: service.name,
+      type: service.type,
+      version: service.version,
+      port: service.port,
+      credentials,
+      projectSlug,
+    },
+    projectSlug,
+    access
+  );
+
+  if (service.status === "running") return { containerId, status: "running" };
+
+  await stopService(service.container_name).catch(() => {
+    /* it is recreated either way; the status below is what the panel reports */
+  });
+  return { containerId, status: "stopped" };
+}
 
 export async function GET(request: NextRequest, { params }: Params) {
   const denied = await requireAuth();
@@ -56,6 +106,10 @@ export async function GET(request: NextRequest, { params }: Params) {
     injectEnv: service.inject_env === 1,
     projectSlug: project?.slug ?? null,
     networkName: project ? networkName(project.slug) : null,
+    // Who may reach the published port, and whether the gate that enforces it
+    // is actually up — the row says what was asked for, the gate says what is.
+    access: readAccess(service),
+    gate: reportGate("service", service.id),
     credentials: reveal && service.credentials ? decrypt(service.credentials) : "hidden",
   }, {
     // `?reveal=true` returns the database password in clear. Not cacheable
@@ -105,7 +159,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     return NextResponse.json({ error: "Servizio non trovato" }, { status: 404 });
   }
 
-  const { projectId, injectEnv, envKey } = parsed.data;
+  const { projectId, injectEnv, envKey, access } = parsed.data;
   const detaching = projectId === null && service.project_id !== null;
   const attaching = typeof projectId === "string" && projectId !== service.project_id;
 
@@ -176,16 +230,91 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     }
   }
 
+  // --- who may reach the port ------------------------------------------------
+  const current = readAccess(service);
+  const nextAccess: AccessRow = access
+    ? {
+        access_mode: access.mode,
+        access_allow: JSON.stringify(access.allow),
+        // Allocated the first time a target is restricted and kept for as long
+        // as it stays that way, so the container's publish spec is stable
+        // across edits to the list.
+        access_port:
+          access.mode === "restricted" ? (service.access_port ?? (await allocateLoopbackPort())) : null,
+      }
+    : { access_mode: service.access_mode, access_allow: service.access_allow, access_port: service.access_port };
+
+  const next = readAccess(nextAccess);
+  const bindChanged = next.mode !== current.mode || next.port !== current.port;
+
+  let recreated: { containerId: string; status: ServicesTable["status"] } | null = null;
+
+  if (bindChanged) {
+    // Strict order, and both halves matter. Going restricted: the container
+    // still holds the public port, so it has to be recreated onto loopback
+    // before the gate can bind. Going open: the gate holds the public port, so
+    // it has to let go before the container can take it back.
+    await closeGate("service", serviceId);
+
+    const slug = nextProjectId
+      ? (
+          await db
+            .selectFrom("projects")
+            .select("slug")
+            .where("id", "=", nextProjectId)
+            .executeTakeFirst()
+        )?.slug
+      : undefined;
+
+    try {
+      recreated = await recreateWithAccess(service, slug, nextAccess);
+    } catch (err) {
+      // Nothing is written: the row keeps describing the container that is
+      // actually there. Reopening the previous gate is best-effort — if it
+      // fails too, the port stays shut, which is the safe direction.
+      await syncGate("service", serviceId, service, {
+        publicPort: service.port,
+        label: service.name,
+      }).catch(() => {});
+
+      return NextResponse.json(
+        { error: err instanceof Error ? err.message : "Impossibile applicare la restrizione" },
+        { status: 500 }
+      );
+    }
+  }
+
   await db
     .updateTable("services")
     .set({
       project_id: nextProjectId,
       inject_env: nextInject,
       env_key: nextEnvKey,
+      access_mode: nextAccess.access_mode,
+      access_allow: nextAccess.access_allow,
+      access_port: nextAccess.access_port,
+      ...(recreated ? { container_id: recreated.containerId, status: recreated.status } : {}),
       updated_at: nowIso(),
     })
     .where("id", "=", serviceId)
     .execute();
+
+  // After the container, never before: a gate that binds while the old
+  // container still publishes the port is an EADDRINUSE, not a gate.
+  try {
+    await syncGate("service", serviceId, nextAccess, {
+      publicPort: service.port,
+      label: service.name,
+    });
+  } catch (err) {
+    // The columns are already written and the container is already on loopback,
+    // so the port is simply closed. Reported rather than swallowed, because
+    // "restricted" and "unreachable" look identical from the outside.
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : "Restrizione salvata, ma la porta non è stata aperta" },
+      { status: 500 }
+    );
+  }
 
   const updated = await db
     .selectFrom("services")
@@ -196,6 +325,8 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   return NextResponse.json({
     ...updated,
     envKey: serviceEnvKey({ type: service.type, env_key: nextEnvKey }),
+    access: readAccess(nextAccess),
+    gate: reportGate("service", serviceId),
   });
 }
 
@@ -230,6 +361,11 @@ export async function DELETE(request: NextRequest, { params }: Params) {
   // first. Previously the volume was simply left behind forever, and a service
   // recreated with the same name silently inherited the old database.
   const deleteData = request.nextUrl.searchParams.get("deleteData") === "true";
+
+  // Before the container goes: a gate left open would keep holding the public
+  // port for a service that no longer exists, and the next one to claim that
+  // port would fail to bind for no visible reason.
+  await closeGate("service", serviceId);
 
   let volumesRemoved: string[] = [];
   try {

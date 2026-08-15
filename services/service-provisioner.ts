@@ -8,8 +8,12 @@ import { mongodbTemplate } from "./service-templates/mongodb";
 import { docker, dockerTry } from "./docker/cli";
 import { labelArgs, serviceContainerName } from "./docker/labels";
 import { ensureVolume, listOwnedVolumes, removeVolumes } from "./docker/volumes";
+import { AccessRow, publishArg } from "./access";
 
 export { serviceContainerName };
+
+/** What a service with no access columns yet gets: published as it always was. */
+const OPEN_ACCESS: AccessRow = { access_mode: "open", access_allow: null, access_port: null };
 
 const templates: Record<string, IServiceTemplate> = {
   postgresql: postgresqlTemplate,
@@ -64,7 +68,21 @@ export function internalPort(type: string, fallback: number): number {
   }).port;
 }
 
-export async function provisionService(config: ServiceConfig, projectSlug?: string): Promise<string> {
+/**
+ * Create and start the container for a service.
+ *
+ * `access` decides where the port is published. Open — the default, and what
+ * every service did before the column existed — publishes on every interface.
+ * Restricted publishes on loopback only, on the moved port, and the caller
+ * opens the panel's gate in front of it afterwards. The publish spec is fixed
+ * at `run`, which is why changing the restriction has to come back through
+ * here rather than through `docker start`.
+ */
+export async function provisionService(
+  config: ServiceConfig,
+  projectSlug?: string,
+  access?: AccessRow
+): Promise<string> {
   const template = getTemplate(config.type);
   if (!template) throw new Error(`Unknown service type: ${config.type}`);
 
@@ -94,7 +112,7 @@ export async function provisionService(config: ServiceConfig, projectSlug?: stri
     "run", "-d",
     "--name", containerName,
     "--add-host=host.docker.internal:host-gateway",
-    "-p", `${config.port}:${dockerConfig.port}`,
+    "-p", publishArg(access ?? OPEN_ACCESS, config.port, dockerConfig.port),
     "--restart", "unless-stopped",
     ...labelArgs(ownership),
   ];

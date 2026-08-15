@@ -1,3 +1,5 @@
+import type { AccessValue, GateValue } from "@/components/AccessSection";
+
 export interface Project {
   id: string;
   name: string;
@@ -14,6 +16,9 @@ export interface Project {
   last_deploy_at: string | null;
   webhook_secret: string;
   builder_config: string;
+  /** Who may reach the published port, and whether the gate enforcing it is up. */
+  access: AccessValue;
+  gate: GateValue;
 }
 
 export interface ProcessInfo {

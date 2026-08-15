@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { useResource } from "@/lib/hooks/useResource";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { Code, FieldHint, Hint } from "@/components/ui/Hint";
+import { SettingToggle } from "@/components/ui/SettingToggle";
 import { connectionEnvKey } from "@/lib/service-env";
 import { cn } from "@/lib/utils";
 import { DATABASE_OPTIONS, databaseOption, type ServiceType } from "../_data/catalog";
@@ -21,14 +22,29 @@ export function DatabaseForm({ projectId }: { projectId?: string }) {
 
   const [type, setType] = useState<ServiceType>("postgresql");
   const [name, setName] = useState("");
-  const [version, setVersion] = useState("16");
+  /*
+    Seeded from the catalogue, not written out again. `chooseType` is the only
+    other thing that sets this, and it only runs when a type tile is pressed —
+    so a hand-written literal here is the version anyone who opens the wizard
+    and presses nothing ends up creating, whatever the list says. It had been
+    left at "16" while the list moved on.
+  */
+  const [version, setVersion] = useState(databaseOption("postgresql").versions[0]);
   const [port, setPort] = useState("5432");
   const [user, setUser] = useState("runpanel");
   const [password, setPassword] = useState("");
   const [database, setDatabase] = useState("runpanel_db");
+  const [restrict, setRestrict] = useState(false);
   // Seeded from the entry point, then editable: arriving from a project
   // pre-selects it, arriving from Servizi starts on "nessuno".
   const [project, setProject] = useState(projectId ?? "");
+
+  const { data: networkData } = useResource<{ networks: { cidr: string; kind: string }[] }>(
+    "/api/network/suggestions"
+  );
+  const lanNetworks = (networkData?.networks ?? [])
+    .filter((network) => network.kind === "lan")
+    .map((network) => network.cidr);
 
   const { data: projectsData } = useResource<{ id: string; name: string; slug: string }[]>(
     "/api/projects"
@@ -75,6 +91,7 @@ export function DatabaseForm({ projectId }: { projectId?: string }) {
             password: password || undefined,
             database: database.trim() || undefined,
           },
+          access: restrict ? { mode: "restricted", allow: lanNetworks } : undefined,
         }),
       });
       const data = await res.json();
@@ -208,6 +225,38 @@ export function DatabaseForm({ projectId }: { projectId?: string }) {
             o un altro servizio qui dentro — cambiala pure: dentro la rete del progetto l&apos;app
             continua a usare la porta standard del container, quindi per lei non cambia nulla.
           </FieldHint>
+        </div>
+
+        {/*
+          Off by default, because a database that answers only on this machine
+          is a surprise for anyone who reaches for a client. Turning it on ticks
+          the networks this host is actually on, which is the answer almost
+          everyone wants and is one press away — and restricting from the start
+          means the port is never open, which is not something that can be
+          undone afterwards.
+        */}
+        <div>
+          <SettingToggle
+            label="Limita chi può collegarsi"
+            description="Apre la porta solo alle reti locali trovate. Modificabile dopo, dalla pagina del servizio."
+            isSelected={restrict}
+            onChange={setRestrict}
+          />
+          {restrict && (
+            <FieldHint>
+              {lanNetworks.length > 0 ? (
+                <>
+                  Consentite: <Code>{lanNetworks.join(", ")}</Code>, più questa macchina. Mentre è
+                  attiva, è il pannello a tenere aperta la porta.
+                </>
+              ) : (
+                <>
+                  Nessuna rete locale rilevata: solo questa macchina potrà collegarsi. Aggiungi le
+                  altre dalla pagina del servizio.
+                </>
+              )}
+            </FieldHint>
+          )}
         </div>
       </Panel>
 

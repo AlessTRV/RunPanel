@@ -3,7 +3,10 @@ import { requireAuth } from "@/lib/auth-guard";
 import { getDb, nowIso } from "@/lib/db";
 import type { ProjectsTable } from "@/lib/db/schema";
 import { updateProjectSchema } from "@/lib/validation";
-import { deployContractSchema, normalizeContractInput } from "@/lib/deploy-contract";
+import { deployContractSchema, normalizeContractInput, parseContractJson } from "@/lib/deploy-contract";
+import { readAccess, reportGate, syncGate } from "@/services/access";
+import { allocateLoopbackPort, closeGate } from "@/services/access-gate";
+import { restartFromLastDeployment } from "@/services/project-restart";
 import { getPreset } from "@/services/deploy-presets";
 import { processManager } from "@/services/process-manager";
 import { removeService } from "@/services/service-provisioner";
@@ -48,6 +51,10 @@ export async function GET(_request: NextRequest, { params }: Params) {
     ...project,
     deploy_count: Number(stats?.deploy_count ?? 0),
     last_deploy_at: stats?.last_deploy_at ?? null,
+    // The row says what was asked for; the gate says what is actually holding
+    // the port. They differ whenever the panel restarted and could not bind.
+    access: readAccess(project),
+    gate: reportGate("project", projectId),
   });
 }
 
@@ -74,7 +81,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   const db = await getDb();
   const project = await db
     .selectFrom("projects")
-    .select("id")
+    .selectAll()
     .where("id", "=", projectId)
     .executeTakeFirst();
 
@@ -82,7 +89,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     return NextResponse.json({ error: "Progetto non trovato" }, { status: 404 });
   }
 
-  const { name, appName, sourceType, sourceUrl, sourceBranch, runtimeType, port, autoDeploy, builderConfig, presetId } =
+  const { name, appName, sourceType, sourceUrl, sourceBranch, runtimeType, port, autoDeploy, builderConfig, presetId, access } =
     parsed.data;
 
   const updates: Partial<ProjectsTable> = {};
@@ -126,9 +133,87 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     updates.builder_config = JSON.stringify({ version: 1, ...normalized });
   }
 
+  // --- who may reach the app -------------------------------------------------
+  const currentAccess = readAccess(project);
+  let restartNeeded = false;
+
+  if (access) {
+    const wantsRestriction = access.mode === "restricted";
+    const runtime = runtimeType ?? project.runtime_type;
+
+    // Two shapes the panel cannot honestly restrict, refused up front rather
+    // than accepted and quietly not enforced.
+    if (wantsRestriction && runtime === "compose") {
+      return NextResponse.json(
+        {
+          error:
+            "Le porte di un progetto Compose le pubblica il tuo compose file. RunPanel non lo riscrive: metti il binding su 127.0.0.1 lì.",
+        },
+        { status: 409 }
+      );
+    }
+
+    if (wantsRestriction && parseContractJson(project.builder_config).docker.network === "host") {
+      return NextResponse.json(
+        {
+          error:
+            "Con network: host il container condivide la rete dell'host e non c'è una porta da spostare. Passa a bridge o project per limitare l'accesso.",
+        },
+        { status: 409 }
+      );
+    }
+
+    if (wantsRestriction && !(port ?? project.port)) {
+      return NextResponse.json(
+        { error: "Senza una porta configurata non c'è niente da limitare." },
+        { status: 409 }
+      );
+    }
+
+    updates.access_mode = access.mode;
+    updates.access_allow = JSON.stringify(access.allow);
+    // Allocated once and kept for as long as the target stays restricted, so
+    // editing the list does not move the app.
+    updates.access_port = wantsRestriction
+      ? (project.access_port ?? (await allocateLoopbackPort()))
+      : null;
+
+    restartNeeded =
+      updates.access_mode !== currentAccess.mode || updates.access_port !== currentAccess.port;
+  }
+
   if (Object.keys(updates).length > 0) {
     updates.updated_at = nowIso();
     await db.updateTable("projects").set(updates).where("id", "=", projectId).execute();
+  }
+
+  let restartError: string | null = null;
+
+  if (restartNeeded && project.status === "running") {
+    // The listener has to move, and only a restart moves it. Done after the
+    // columns are written so the restart reads the state it is meant to apply.
+    const result = await restartFromLastDeployment(projectId);
+    if ("error" in result) restartError = result.error;
+  } else if (restartNeeded) {
+    // Nothing is running, so nothing has to move: the binding applies at the
+    // next start, which reads these columns. The gate still goes up, for the
+    // same reason the boot reconciliation puts it up — a container with a
+    // restart policy can come back without the panel starting it, and it comes
+    // back on the loopback port. It also keeps the page from saying "gate non
+    // attivo" about a restriction that is in force.
+    const row = await db
+      .selectFrom("projects")
+      .selectAll()
+      .where("id", "=", projectId)
+      .executeTakeFirst();
+
+    if (row) {
+      await syncGate("project", projectId, row, { publicPort: row.port, label: row.name }).catch(
+        (err: Error) => {
+          restartError = err.message;
+        }
+      );
+    }
   }
 
   const updated = await db
@@ -137,7 +222,14 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     .where("id", "=", projectId)
     .executeTakeFirst();
 
-  return NextResponse.json(updated);
+  return NextResponse.json({
+    ...updated,
+    access: updated ? readAccess(updated) : currentAccess,
+    gate: reportGate("project", projectId),
+    // Saved either way — the columns describe what was asked for — but the app
+    // is still on its old port until it comes back, and that has to be said.
+    accessWarning: restartError,
+  });
 }
 
 export async function DELETE(_request: NextRequest, { params }: Params) {
@@ -163,6 +255,11 @@ export async function DELETE(_request: NextRequest, { params }: Params) {
   // taking anything apart, so nothing tries to redeploy what we are deleting.
   clearQueuedDeploy(projectId);
   processLogHub.detachAll(projectId);
+
+  // A gate left open would keep holding the public port for a project that no
+  // longer exists, and the next thing to claim it would fail to bind for no
+  // visible reason.
+  await closeGate("project", projectId);
 
   // Stop the running process (PM2 delete or Docker rm)
   try {
