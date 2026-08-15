@@ -3,6 +3,7 @@ import { decrypt } from "@/lib/crypto";
 import { parseContractJson } from "@/lib/deploy-contract";
 import { listenPort, readAccess } from "@/lib/access-columns";
 import { processManager } from "./process-manager";
+import { injectLinkedServiceEnv } from "./service-injection";
 import { projectEvents } from "./events";
 import { checkLoopbackLeak, forgetLeak, syncGate } from "./access";
 
@@ -58,6 +59,14 @@ export async function restartFromLastDeployment(
   }
 
   const contract = parseContractJson(project.builder_config);
+
+  // The same connection strings a deploy injects, for the same reason. Without
+  // this a restart handed the app whatever `DATABASE_URL` happened to be stored
+  // on the project — a stale one, or none — while the identical app came back
+  // correctly configured from a deploy. Every project restored after a reboot
+  // goes through here, so the divergence surfaced as "it worked yesterday".
+  await injectLinkedServiceEnv(project, contract.docker.network, envVars);
+
   const port = project.port ?? 3000;
   const access = readAccess(project);
 

@@ -16,10 +16,9 @@ import {
   selectBuildEnv,
   stripPanelOnlyFields,
 } from "@/lib/deploy-contract";
-import { internalPort } from "./service-provisioner";
 import { checkLoopbackLeak, listenPort, readAccess, syncGate } from "./access";
 import { closeGate } from "./access-gate";
-import { buildConnectionString, reachesByContainerName, resolveServiceEnv } from "@/lib/service-env";
+import { injectLinkedServiceEnv } from "./service-injection";
 import { sweep } from "./docker/gc";
 import { BuildLogFile } from "./build-logs";
 import { projectEvents } from "./events";
@@ -266,47 +265,20 @@ async function runDeploy(
       envVars.NODE_ENV = "production";
     }
 
-    // Auto-inject service connection URLs (DB, Redis, etc.)
-    const linkedServices = await db
-      .selectFrom("services")
-      .select(["name", "type", "port", "credentials", "container_name", "inject_env", "env_key"])
-      .where("project_id", "=", project.id)
-      .execute();
-
     const isDockerApp = project.runtime_type === "docker";
 
-    // Only an app on the project network resolves the service by container
-    // name. On `host` the container shares the host's stack, and on `bridge` it
-    // never joins the project network at all — in both cases the way in is the
-    // port published on the host, exactly as for a native process.
+    // Auto-inject service connection URLs (DB, Redis, etc.).
     //
-    // Shared with the service page, which has to show the operator the same
-    // line this injects.
-    const onProjectNetwork = reachesByContainerName(project.runtime_type, contract.docker.network);
-
-    // The rule itself lives in `lib/service-env.ts` as a pure function, so the
-    // whole on/off × key-already-defined matrix is testable without a daemon.
-    // Here we only supply what needs the database and the network topology.
-    const { applied, skipped, conflicts } = resolveServiceEnv(linkedServices, envVars, (svc) => {
-      // Container name and container port travel together: inside the network
-      // the published mapping does not exist, so a service published on 5433 is
-      // still listening on 5432. Pairing the container name with the host port
-      // is what made a database on a non-default port unreachable.
-      const host = onProjectNetwork ? svc.container_name : "localhost";
-      const svcPort = onProjectNetwork ? internalPort(svc.type, svc.port) : svc.port;
-      let creds: { user?: string; password?: string; database?: string } = {};
-      try {
-        creds = JSON.parse(decrypt(svc.credentials));
-      } catch { /* credentials unreadable — fall back to an empty URL */ }
-
-      return buildConnectionString(svc.type, {
-        host,
-        port: svcPort,
-        user: creds.user,
-        password: creds.password,
-        database: creds.database,
-      });
-    });
+    // Shared with `restartFromLastDeployment`, which has to produce the same
+    // environment: see `services/service-injection.ts` for why they used to
+    // differ and what that cost. The rule itself lives in `lib/service-env.ts`
+    // as a pure function, so the whole on/off × key-already-defined matrix is
+    // testable without a daemon.
+    const { applied, skipped, conflicts } = await injectLinkedServiceEnv(
+      project,
+      contract.docker.network,
+      envVars
+    );
 
     for (const injection of applied) {
       appendLog(

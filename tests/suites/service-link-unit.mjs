@@ -140,5 +140,40 @@ export async function run({ repoRoot }) {
     r.check("nor a compose project", !reachesByContainerName("compose", "project"));
   }
 
+  // --- both ways in have to agree ------------------------------------------
+  // A project is started from two places: the deploy pipeline and
+  // `restartFromLastDeployment` — the Restart button, a port change, and every
+  // project the reconciler brings back after a reboot. Only the first injected
+  // the linked service's connection string. Deploying worked, restarting handed
+  // the app whatever was stored on the project, and the gap opened at reboot,
+  // when nobody is watching.
+  //
+  // Asserted on the source because the behavioural version needs a Docker
+  // daemon, a provisioned database and a project with a successful deploy
+  // behind it — so it lives in the `service-link` suite, which is skipped on
+  // every machine without Docker. This one runs everywhere and fails the moment
+  // either path starts building its own environment again.
+  {
+    const read = async (...parts) =>
+      (await import("node:fs")).readFileSync(join(repoRoot, ...parts), "utf8");
+
+    const restart = await read("services", "project-restart.ts");
+    const pipeline = await read("services", "deploy-pipeline.ts");
+
+    r.check(
+      "the restart path injects linked services",
+      /injectLinkedServiceEnv\s*\(/.test(restart)
+    );
+    r.check(
+      "the deploy path injects linked services",
+      /injectLinkedServiceEnv\s*\(/.test(pipeline)
+    );
+    // One implementation, not two that look alike until one of them is edited.
+    r.check(
+      "neither builds the injection itself",
+      !/resolveServiceEnv\s*\(/.test(restart) && !/resolveServiceEnv\s*\(/.test(pipeline)
+    );
+  }
+
   return r.result();
 }
