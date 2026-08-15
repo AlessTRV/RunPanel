@@ -10,6 +10,19 @@ import { SkeletonBlock } from "@/components/ui/Skeletons";
 import { formatDurationBetween } from "@/lib/format";
 import { type Deployment } from "./types";
 
+/**
+ * What started this deploy, when the commit message cannot say.
+ *
+ * A deploy of an uploaded project has no commit, and the fallback used to
+ * render the column value raw — "Deploy manual", an English word in an Italian
+ * panel, and "Deploy poll" once polling existed.
+ */
+const TRIGGER_LABEL: Record<string, string> = {
+  manual: "Deploy manuale",
+  webhook: "Deploy da webhook",
+  poll: "Deploy da controllo periodico",
+};
+
 const DeploymentCard = memo(function DeploymentCard({ deployment }: { deployment: Deployment }) {
   const [buildLog, setBuildLog] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -45,7 +58,7 @@ const DeploymentCard = memo(function DeploymentCard({ deployment }: { deployment
           <StatusBadge status={deployment.status} className="mt-0.5 shrink-0" />
           <div className="min-w-0">
             <p className="text-foreground truncate text-sm">
-              {deployment.commit_message || `Deploy ${deployment.trigger_type}`}
+              {deployment.commit_message || TRIGGER_LABEL[deployment.trigger_type] || "Deploy"}
             </p>
             <p className="text-muted mt-0.5 text-xs">
               {deployment.commit_sha && (

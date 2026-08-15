@@ -17,7 +17,16 @@ export type DeploymentStatus = "pending" | "building" | "running" | "failed" | "
 export type ServiceStatus = "stopped" | "running" | "error";
 export type SourceType = "github" | "upload";
 export type RuntimeType = "node" | "static" | "docker" | "compose" | "custom";
-export type TriggerType = "manual" | "webhook";
+export type TriggerType = "manual" | "webhook" | "poll";
+
+/**
+ * How a project learns that its branch moved.
+ *
+ * `webhook` is GitHub telling the panel; `poll` is the panel asking GitHub. The
+ * second exists because the first needs an inbound connection, which a panel
+ * behind NAT or on a private network does not have.
+ */
+export type DeployTrigger = "webhook" | "poll";
 export type ServiceType = "postgresql" | "mysql" | "redis" | "mongodb";
 export type WebhookStatus = "accepted" | "rejected" | "ignored";
 
@@ -59,6 +68,17 @@ export interface ProjectsTable {
   /** 0 | 1 */
   auto_deploy: number;
   webhook_secret: string;
+  /**
+   * The id of this project's webhook on github.com, when the panel registered
+   * one. A cache over "list the hooks and find mine" — see migration 009 — so a
+   * stale value is expected and every read falls back to the search.
+   */
+  github_hook_id: string | null;
+  /** NULL reads as `'webhook'` — see migration 010 on why it is not backfilled. */
+  deploy_trigger: DeployTrigger | null;
+  /** Last commit the poller saw on `source_branch`. */
+  poll_sha: string | null;
+  poll_checked_at: string | null;
   /**
    * 0 | 1 — whether this should be running after a reboot.
    *

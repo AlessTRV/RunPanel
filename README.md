@@ -231,6 +231,64 @@ automatico**, un push sul branch configurato avvia un deploy. Le firme sono
 verificate con HMAC-SHA256 e confronto a tempo costante; le consegne, accettate o
 rifiutate, restano nello storico con il motivo.
 
+Con un account GitHub collegato il webhook **si registra da solo**: attivare
+l'interruttore lo crea sul repository con l'URL, il segreto, il content type
+`application/json` e il solo evento `push` già impostati. Nessuno dei quattro è
+una scelta — seguono tutti dal progetto — e sbagliarne uno a mano falliva in
+silenzio. Spegnere l'auto-deploy lo disattiva senza cancellarlo, così lo storico
+delle consegne su GitHub resta.
+
+La sezione mostra anche cosa non va: token assente, repository non riconosciuto,
+indirizzo del pannello che GitHub non può raggiungere, webhook disallineato,
+ultima consegna rifiutata. Il pulsante **Invia ping** chiede a GitHub una
+consegna vera — passa da DNS, firewall, TLS e firma, cioè le parti che si
+rompono davvero.
+
+Perché il pannello sappia quale indirizzo scrivere su GitHub, imposta
+**Indirizzo pubblico** in Account → Preferenze. Lasciato vuoto viene dedotto
+dalla richiesta, il che vale finché apri il pannello dallo stesso indirizzo da
+cui lo raggiunge GitHub.
+
+> **Pannello raggiungibile solo via VPN o Tailscale?** Allora i webhook non
+> arrivano: GitHub consegna da internet e non fa parte della tua rete privata.
+> Un indirizzo `100.64–100.127.x.x` viene rifiutato subito; un nome MagicDNS
+> `*.ts.net` viene segnalato, perché funziona **solo** se lo pubblichi con
+> `tailscale funnel`. Non serve esporre niente: usa il **controllo periodico**
+> qui sotto.
+
+### Controllo periodico, quando il pannello non è raggiungibile
+
+Un webhook ha bisogno che GitHub apra una connessione **verso** questa macchina,
+e per moltissime installazioni self-hosted questo non può succedere: dietro NAT
+senza porte aperte, su una rete Tailscale o WireGuard, su un portatile. Lì non
+c'è niente da configurare meglio — la consegna fallisce prima di arrivare, e nei
+log del pannello non resta nulla, perché il problema è la direzione della
+connessione.
+
+Quindi il pannello può anche **chiedere** invece di farsi avvisare. Nelle
+impostazioni del progetto, *Deploy automatico → Come parte il deploy*:
+
+- **Webhook** — GitHub avvisa a ogni push, il deploy parte subito. Richiede un
+  pannello raggiungibile da internet.
+- **Controllo periodico** — RunPanel guarda il branch a intervalli e distribuisce
+  quando il commit cambia. Una richiesta in uscita, nessuna in entrata: funziona
+  ovunque ci sia una connessione a internet.
+
+L'intervallo è in Account → Preferenze, da 30 secondi a 30 minuti (predefinito 5
+minuti). Un branch fermo risponde `304 Not Modified` grazie all'ETag, e GitHub
+non conta le 304 nel limite orario di richieste: anche 30 secondi costano
+praticamente nulla. Il ritardo massimo di un deploy è un intervallo.
+
+Il primo giro dopo l'attivazione **registra** il commit corrente senza
+distribuirlo — «distribuisci quello che arriva», non «distribuisci quello che
+c'è adesso» — e i deploy così avviati compaiono nello storico con trigger
+`poll`. Scegliendo il controllo periodico il webhook eventuale viene
+disattivato, perché due trasporti attivi distribuirebbero lo stesso commit due
+volte.
+
+Il webhook resta configurabile a mano — URL e Secret sono lì da copiare — per i
+repository che il token non amministra o per un pannello senza account collegato.
+
 ### Com'è fatto un deploy
 
 1. **Coda** — i deploy dello stesso progetto sono serializzati, e quelli che si

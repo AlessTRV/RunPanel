@@ -30,6 +30,7 @@ export function Section({
   summary,
   actions,
   defaultExpanded = false,
+  onExpandedChange,
   children,
   className,
 }: {
@@ -38,12 +39,18 @@ export function Section({
   summary?: React.ReactNode;
   actions?: React.ReactNode;
   defaultExpanded?: boolean;
+  /**
+   * Told when the section opens, for content that costs something to produce.
+   * A section whose body queries a third-party API should not pay for it on
+   * every visit to a tab it is closed on.
+   */
+  onExpandedChange?: (expanded: boolean) => void;
   children: React.ReactNode;
   className?: string;
 }) {
   return (
     <Panel padding="flush" className={cn("overflow-hidden", className)}>
-      <Disclosure defaultExpanded={defaultExpanded}>
+      <Disclosure defaultExpanded={defaultExpanded} onExpandedChange={onExpandedChange}>
         <div className="flex items-center gap-2 pr-4">
           <Disclosure.Heading className="min-w-0 flex-1">
             <Disclosure.Trigger className="hover:bg-surface-hover flex w-full items-center gap-2.5 px-4 py-3 text-left transition-colors">

@@ -79,6 +79,12 @@ export async function register() {
   const { startBackupScheduler } = await import("./services/backup/scheduler");
   startBackupScheduler();
 
+  // Auto-deploy for the projects that ask GitHub instead of waiting to be told.
+  // Nothing to reconcile at boot: the poller reads the branch on its first tick
+  // and compares, so a push made while the panel was down is picked up then.
+  const { startDeployPoller } = await import("./services/deploy-poll");
+  startDeployPoller();
+
   // Bring back whatever is marked to start at boot — after a delay, and without
   // being awaited: Docker is still restarting its own containers at this point,
   // and blocking here would delay the first request by a minute or more.

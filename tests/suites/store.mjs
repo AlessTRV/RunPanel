@@ -1,3 +1,4 @@
+import { createHmac } from "node:crypto";
 import { client, createReporter, SETUP_TOKEN } from "../harness.mjs";
 
 /**
@@ -133,6 +134,166 @@ export async function run({ base }) {
     body: JSON.stringify({ ref: "refs/heads/main" }),
   });
   r.check("webhook rejects a bad signature", res.status === 401, String(res.status));
+
+  const secret = (await api.call(`/api/projects/${projectId}`)).body.webhook_secret;
+  const sign = (body) => "sha256=" + createHmac("sha256", secret).update(body).digest("hex");
+  const deliver = (event, body, headers = {}) =>
+    api.call(`/api/webhooks/github/${projectId}`, {
+      method: "POST",
+      headers: { "x-github-event": event, "x-hub-signature-256": sign(body), ...headers },
+      body,
+    });
+
+  /*
+    The push tests below run against a branch the project is not tracking, on
+    purpose: a matching branch would start a real deploy of a project with no
+    source URL, and the suite would be asserting webhook parsing while a build
+    failed in the background. A mismatch answers from the same code path having
+    read `ref`, which is the part under test.
+  */
+  await api.call(`/api/projects/${projectId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ sourceBranch: "release" }),
+  });
+
+  const ping = JSON.stringify({ zen: "Design for failure.", hook_id: 1 });
+  res = await deliver("ping", ping);
+  r.check(
+    "a ping is answered as a ping, not as an unknown event",
+    res.status === 200 && /Pong/.test(res.body.message ?? ""),
+    `${res.status} ${JSON.stringify(res.body)}`
+  );
+
+  // GitHub's webhook form offers both content types, and the signature is over
+  // the raw body either way — so a form-encoded delivery is correctly signed and
+  // used to die in JSON.parse as a bare 400.
+  const inner = JSON.stringify({ ref: "refs/heads/main", head_commit: { id: "abc1234def", message: "m" } });
+  const form = new URLSearchParams({ payload: inner }).toString();
+  res = await deliver("push", form, { "content-type": "application/x-www-form-urlencoded" });
+  r.check(
+    "a form-encoded push is understood",
+    res.status === 200 && res.body.message === "Branch mismatch",
+    `${res.status} ${JSON.stringify(res.body)}`
+  );
+
+  res = await deliver("push", inner);
+  r.check(
+    "a json push is understood",
+    res.status === 200 && res.body.message === "Branch mismatch",
+    `${res.status} ${JSON.stringify(res.body)}`
+  );
+
+  // --- the panel can see what arrived --------------------------------------
+  const unauthStatus = await fetch(`${base}/api/projects/${projectId}/webhook`);
+  r.check("webhook status requires auth", unauthStatus.status === 401, String(unauthStatus.status));
+
+  res = await api.call(`/api/projects/${projectId}/webhook`);
+  const statuses = (res.body.deliveries ?? []).map((d) => d.status);
+  r.check(
+    "the panel records the deliveries it accepted",
+    statuses.includes("accepted"),
+    JSON.stringify(statuses)
+  );
+  r.check(
+    "and the ones it ignored, with the reason",
+    (res.body.deliveries ?? []).some((d) => d.summary?.reason === "branch mismatch"),
+    JSON.stringify(res.body.deliveries?.slice(0, 3))
+  );
+  // Refusals used to be dropped entirely, which left the commonest setup
+  // mistake — a wrong secret — with no evidence anywhere in the panel.
+  r.check(
+    "a refused delivery leaves a trace",
+    statuses.includes("rejected"),
+    JSON.stringify(statuses)
+  );
+  r.check(
+    "status reports no hook without a GitHub token",
+    res.body.connected === false && res.body.hook === null,
+    JSON.stringify({ connected: res.body.connected, hook: res.body.hook })
+  );
+
+  res = await api.call(`/api/projects/${projectId}/webhook`, {
+    method: "POST",
+    body: JSON.stringify({ action: "nonsense" }),
+  });
+  r.check("an unknown webhook action is refused", res.status === 400, String(res.status));
+
+  // --- polling as the other transport --------------------------------------
+  //
+  // The panel behind NAT, a VPN or Tailscale can never receive a webhook: the
+  // delivery fails at connect, outside anything this code can see. Asking
+  // GitHub on a timer is the same feature with the connection reversed, so the
+  // two are one setting with two values rather than two features.
+  res = await api.call(`/api/projects/${projectId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ deployTrigger: "nope" }),
+  });
+  r.check("an unknown deploy trigger is refused", res.status === 400, String(res.status));
+
+  // A project created from the panel starts as an upload, and neither transport
+  // means anything without a repository to watch.
+  await api.call(`/api/projects/${projectId}`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      sourceType: "github",
+      sourceUrl: "https://github.com/runpanel/store-suite.git",
+    }),
+  });
+
+  res = await api.call(`/api/projects/${projectId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ deployTrigger: "poll" }),
+  });
+  r.check("the project can switch to polling", res.body.deploy_trigger === "poll", JSON.stringify(res.body.deploy_trigger));
+
+  res = await api.call(`/api/projects/${projectId}/webhook`);
+  r.check("status reports the polling transport", res.body.trigger === "poll", JSON.stringify(res.body.trigger));
+  r.check(
+    "and the interval it will use",
+    res.body.poll?.intervalSeconds === 300 && res.body.poll?.intervalLabel === "5 minuti",
+    JSON.stringify(res.body.poll)
+  );
+
+  // Under polling there is no hook, no public URL and no deliveries to be right
+  // or wrong about — reporting them anyway is a diagnostic nobody keeps reading.
+  const pollChecks = (res.body.checks ?? []).map((c) => c.id);
+  r.check(
+    "the checks drop the webhook vocabulary",
+    !pollChecks.includes("hook") && !pollChecks.includes("public-url"),
+    JSON.stringify(pollChecks)
+  );
+  r.check("and describe the polling instead", pollChecks.includes("poll"), JSON.stringify(pollChecks));
+
+  const interval = await api.call("/api/settings", {
+    method: "PUT",
+    body: JSON.stringify({ preferences: { deploy_poll_interval: "30" } }),
+  });
+  r.check("30 seconds is an accepted interval", interval.status === 200, String(interval.status));
+
+  res = await api.call(`/api/projects/${projectId}/webhook`);
+  r.check(
+    "a sub-minute interval is spelled in seconds",
+    res.body.poll?.intervalLabel === "30 secondi",
+    JSON.stringify(res.body.poll)
+  );
+
+  res = await api.call("/api/settings", {
+    method: "PUT",
+    body: JSON.stringify({ preferences: { deploy_poll_interval: "7" } }),
+  });
+  r.check("an interval off the list is refused", res.status === 400, String(res.status));
+
+  // Switching away forgets the commit, or coming back would compare today's
+  // branch against a months-old SHA and deploy on the spot.
+  res = await api.call(`/api/projects/${projectId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ deployTrigger: "webhook" }),
+  });
+  r.check(
+    "leaving polling clears the recorded commit",
+    res.body.deploy_trigger === "webhook" && res.body.poll_sha === null,
+    JSON.stringify({ trigger: res.body.deploy_trigger, sha: res.body.poll_sha })
+  );
 
   // --- 404s ----------------------------------------------------------------
   res = await api.call("/api/projects/does-not-exist");

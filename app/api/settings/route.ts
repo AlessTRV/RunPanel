@@ -4,6 +4,9 @@ import { encrypt } from "@/lib/crypto";
 import { z } from "zod";
 import { getAllSettings, setSetting } from "@/lib/settings";
 import { ACCENT_PRESETS, ACCENT_SETTING_KEY } from "@/lib/themes";
+import { PANEL_PUBLIC_URL_SETTING } from "@/lib/panel-url";
+import { panelPublicUrlSchema } from "@/lib/validation";
+import { POLL_INTERVALS } from "@/services/deploy-poll";
 
 /**
  * Settings reported only as present or absent, never by value.
@@ -21,6 +24,16 @@ const preferencesSchema = z
     [ACCENT_SETTING_KEY]: z
       .enum(ACCENT_PRESETS.map((p) => p.id) as [string, ...string[]])
       .optional(),
+    /**
+     * Not a preference in the cosmetic sense, but it belongs to the same
+     * allowlist for the reason the comment further down gives: this is the only
+     * path that writes operator-supplied keys into `settings`, and it stays
+     * closed. An empty string clears it and the panel falls back to the
+     * request's own host.
+     */
+    [PANEL_PUBLIC_URL_SETTING]: panelPublicUrlSchema.optional(),
+    /** Seconds between branch checks for projects deploying by polling. */
+    deploy_poll_interval: z.enum(POLL_INTERVALS).optional(),
   })
   .strict();
 
@@ -33,6 +46,8 @@ const READABLE_SETTINGS: readonly string[] = [
   "timezone",
   ACCENT_SETTING_KEY,
   "github_token",
+  PANEL_PUBLIC_URL_SETTING,
+  "deploy_poll_interval",
 ];
 
 // GET: Read settings

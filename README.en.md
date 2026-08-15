@@ -227,6 +227,59 @@ on, a push to the configured branch starts a deploy. Signatures are verified wit
 HMAC-SHA256 and a constant-time compare; deliveries, accepted or rejected, stay
 in the history with the reason.
 
+With a GitHub account connected the webhook **registers itself**: flipping the
+switch creates it on the repository with the URL, the secret, the
+`application/json` content type and the `push` event alone already set. None of
+the four is a decision — they all follow from the project — and getting one
+wrong by hand failed silently. Turning auto-deploy off deactivates the hook
+rather than deleting it, so its delivery history on GitHub survives.
+
+The section also says what is wrong: no token, an unrecognised repository, a
+panel address GitHub cannot reach, a misconfigured hook, a refused last
+delivery. **Send ping** asks GitHub for a real delivery — across DNS, the
+firewall, TLS and the signature, which are the parts that actually break.
+
+So the panel knows which address to write into GitHub, set **Public address**
+under Account → Preferences. Left empty it is derived from the request, which
+holds as long as you open the panel on the same address GitHub reaches it by.
+
+> **Panel only reachable over a VPN or Tailscale?** Then webhooks never arrive:
+> GitHub delivers from the internet and is not on your private network. A
+> `100.64–100.127.x.x` address is refused outright; a `*.ts.net` MagicDNS name
+> is flagged, because it works **only** if you publish it with
+> `tailscale funnel`. You do not have to expose anything: use **polling** below.
+
+### Polling, for a panel nothing can reach
+
+A webhook needs GitHub to open a connection *to* this machine, and for a great
+many self-hosted installations that cannot happen: behind NAT with no port
+forwarded, on a Tailscale or WireGuard network, on a laptop. There is nothing to
+configure better there — the delivery fails before it arrives, and nothing shows
+up in the panel's logs, because the problem is the direction of the connection.
+
+So the panel can **ask** instead of being told. In the project's settings, under
+*Deploy automatico → Come parte il deploy*:
+
+- **Webhook** — GitHub calls on every push and the deploy starts at once.
+  Requires a panel reachable from the internet.
+- **Polling** — RunPanel reads the branch on a timer and deploys when the commit
+  changes. One outbound request, none inbound: it works anywhere with an
+  internet connection.
+
+The interval lives under Account → Preferences, from 30 seconds to 30 minutes
+(5 minutes by default). An unchanged branch answers `304 Not Modified` thanks to
+the ETag, and GitHub does not count 304s against the hourly rate limit — even 30
+seconds costs practically nothing. A deploy is delayed by at most one interval.
+
+The first pass after switching **records** the current commit without deploying
+it — "deploy what comes next", not "deploy whatever is there now" — and deploys
+started this way appear in the history with the `poll` trigger. Choosing polling
+deactivates any webhook, since two live transports would deploy the same commit
+twice.
+
+The hook stays configurable by hand — the URL and secret are right there — for
+repositories the token cannot administer, or a panel with no account connected.
+
 ### What a deploy actually does
 
 1. **Queue** — deploys of the same project are serialised, and overlapping ones

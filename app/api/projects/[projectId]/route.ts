@@ -17,6 +17,7 @@ import { removePm2Artifacts } from "@/services/process-drivers/pm2-driver";
 import { forgetRun } from "@/services/process-drivers/run-log";
 import { removeEnvFile } from "@/services/env-file";
 import { clearQueuedDeploy } from "@/services/deploy-queue";
+import { syncAutoDeploy } from "@/services/webhook-manage";
 import { processLogHub } from "@/services/process-logs";
 import fs from "fs";
 import path from "path";
@@ -89,7 +90,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     return NextResponse.json({ error: "Progetto non trovato" }, { status: 404 });
   }
 
-  const { name, appName, sourceType, sourceUrl, sourceBranch, runtimeType, port, autoDeploy, builderConfig, presetId, access } =
+  const { name, appName, sourceType, sourceUrl, sourceBranch, runtimeType, port, autoDeploy, deployTrigger, builderConfig, presetId, access } =
     parsed.data;
 
   const updates: Partial<ProjectsTable> = {};
@@ -101,6 +102,19 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   if (runtimeType !== undefined && runtimeType !== null) updates.runtime_type = runtimeType;
   if (port !== undefined) updates.port = port;
   if (autoDeploy !== undefined) updates.auto_deploy = autoDeploy ? 1 : 0;
+
+  if (deployTrigger !== undefined) {
+    updates.deploy_trigger = deployTrigger;
+    /*
+      Switching away from polling forgets the commit it had seen.
+
+      Otherwise a project polled last month, moved to webhooks and moved back
+      would compare today's branch against a month-old SHA and deploy on the
+      spot — which is not what "switch this back to polling" asks for. Cleared
+      here so the first tick after the switch re-establishes a baseline.
+    */
+    if (deployTrigger !== "poll") updates.poll_sha = null;
+  }
 
   if (builderConfig !== undefined) {
     // Normalise first: callers may still send the pre-contract shape
@@ -216,6 +230,35 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     }
   }
 
+  /*
+    Follow the switch onto GitHub.
+
+    Turning auto-deploy on used to change a column and nothing else: the
+    operator was then expected to copy a URL and a secret into GitHub's webhook
+    form by hand, and every way of getting that wrong failed silently. There is
+    no decision in any of those four fields — they all follow from the project —
+    so when an account is connected the panel writes them itself.
+
+    Deliberately after the column is written, and unable to undo it. This is a
+    network call to a third party; a token that has not been authorised for an
+    organisation must not be able to make the switch refuse to move. What it can
+    do is say so, next to a switch that did.
+  */
+  let webhookWarning: string | null = null;
+
+  if (autoDeploy !== undefined || deployTrigger !== undefined) {
+    const row = await db
+      .selectFrom("projects")
+      .selectAll()
+      .where("id", "=", projectId)
+      .executeTakeFirst();
+
+    if (row) {
+      const sync = await syncAutoDeploy(row, request);
+      if (sync && !sync.ok) webhookWarning = sync.message;
+    }
+  }
+
   const updated = await db
     .selectFrom("projects")
     .selectAll()
@@ -229,6 +272,8 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     // Saved either way — the columns describe what was asked for — but the app
     // is still on its old port until it comes back, and that has to be said.
     accessWarning: restartError,
+    // Same contract for the webhook: the flag is saved, GitHub may not agree.
+    webhookWarning,
   });
 }
 

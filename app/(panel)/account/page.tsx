@@ -7,7 +7,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { Section } from "@/components/ui/Section";
 import { Segmented } from "@/components/ui/Segmented";
-import { FieldHint } from "@/components/ui/Hint";
+import { Code, FieldHint } from "@/components/ui/Hint";
 import { AccentPicker } from "@/components/ui/AccentPicker";
 import { SessionList } from "@/components/ui/SessionList";
 import { RegistryList } from "@/components/ui/RegistryList";
@@ -29,6 +29,8 @@ export default function AccountPage() {
 
   const [pollingInterval, setPollingInterval] = useState("5");
   const [timezone, setTimezone] = useState(Intl.DateTimeFormat().resolvedOptions().timeZone);
+  const [publicUrl, setPublicUrl] = useState("");
+  const [pollInterval, setPollInterval] = useState("5");
   const [prefsSaving, setPrefsSaving] = useState(false);
 
   useEffect(() => {
@@ -38,6 +40,8 @@ export default function AccountPage() {
       .then((data) => {
         if (data.polling_interval) setPollingInterval(data.polling_interval);
         if (data.timezone) setTimezone(data.timezone);
+        if (data.panel_public_url) setPublicUrl(data.panel_public_url);
+        if (data.deploy_poll_interval) setPollInterval(data.deploy_poll_interval);
       })
       .catch(() => {});
     return () => controller.abort();
@@ -81,12 +85,21 @@ export default function AccountPage() {
       const res = await fetch("/api/settings", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ preferences: { polling_interval: pollingInterval, timezone } }),
+        body: JSON.stringify({
+          preferences: {
+            polling_interval: pollingInterval,
+            timezone,
+            panel_public_url: publicUrl.trim(),
+            deploy_poll_interval: pollInterval,
+          },
+        }),
       });
       if (res.ok) toast.success("Preferenze salvate");
       else {
         const d = await res.json();
-        toast.error(d.error || "Salvataggio non riuscito");
+        // The public URL is the one preference that can be rejected for a
+        // reason worth reading — a private address GitHub could never reach.
+        toast.error(d.details?.[0]?.message || d.error || "Salvataggio non riuscito");
       }
     } catch {
       toast.error("Salvataggio non riuscito");
@@ -149,6 +162,54 @@ export default function AccountPage() {
             <Label>Fuso orario</Label>
             <Input placeholder="Europe/Rome" />
           </TextField>
+
+          {/*
+            The one address the panel cannot work out for itself.
+
+            Everywhere else an absolute URL is built in the browser from the page
+            it is on, which is right for a link someone clicks. The webhook is
+            the exception: GitHub has to reach it from outside, and behind a
+            reverse proxy or a tunnel the name this machine knows itself by is
+            not the name that resolves from the internet.
+          */}
+          <div>
+            <TextField value={publicUrl} onChange={setPublicUrl}>
+              <Label>Indirizzo pubblico</Label>
+              <Input placeholder="https://panel.esempio.it" className="font-mono text-sm" />
+            </TextField>
+            <FieldHint>
+              Da qui il pannello ricava l&apos;URL dei webhook GitHub. Lascialo vuoto per dedurlo
+              dalla richiesta: va bene finché lo apri dallo stesso indirizzo da cui lo raggiunge
+              GitHub. Se il pannello non è raggiungibile da internet, usa il controllo periodico
+              nelle impostazioni del progetto.
+            </FieldHint>
+          </div>
+
+          <div>
+            <span className="text-muted mb-2 block text-sm font-medium">
+              Controllo periodico dei repository
+            </span>
+            <Segmented
+              label="Controllo periodico dei repository"
+              value={pollInterval}
+              onChange={setPollInterval}
+              options={[
+                { value: "30", label: "30 s" },
+                { value: "60", label: "1 min" },
+                { value: "120", label: "2 min" },
+                { value: "300", label: "5 min" },
+                { value: "600", label: "10 min" },
+                { value: "900", label: "15 min" },
+                { value: "1800", label: "30 min" },
+              ]}
+            />
+            <FieldHint>
+              Ogni quanto RunPanel guarda il branch dei progetti impostati su{" "}
+              <strong className="text-foreground">Controllo periodico</strong>. Un branch fermo
+              risponde <Code>304 Not Modified</Code>, che GitHub non conta nel limite di richieste:
+              anche 30 secondi costano poco.
+            </FieldHint>
+          </div>
 
           <div>
             <Button variant="primary" isPending={prefsSaving} onPress={savePrefs}>

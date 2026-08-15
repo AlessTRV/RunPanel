@@ -10,6 +10,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getDb, nowIso } from "@/lib/db";
 import type { WebhookStatus } from "@/lib/db/schema";
 import { generateId } from "@/lib/utils";
+import { consumeRateLimit } from "@/lib/rate-limit";
 import { verifyWebhookSignature } from "@/services/git-manager";
 import { enqueueDeploy } from "@/services/deploy-queue";
 import type { GitHubPushPayload } from "@/lib/types";
@@ -17,6 +18,24 @@ import type { GitHubPushPayload } from "@/lib/types";
 type Params = { params: Promise<{ projectId: string }> };
 
 const MAX_PAYLOAD_BYTES = 1024 * 1024;
+
+/**
+ * How many refused deliveries a project may write per hour.
+ *
+ * Refusals used to be dropped entirely, and the reasoning was sound: this
+ * endpoint is public, so recording before the signature is checked is an
+ * unauthenticated INSERT that anyone holding a project id can repeat until the
+ * disk is full. But the cost of dropping them is that the single most common
+ * setup mistake — a secret typed wrong, or not typed at all — produces no
+ * evidence anywhere in the panel, which is most of why auto-deploy "just
+ * doesn't work" with nothing to look at.
+ *
+ * A handful an hour is enough for the evidence and not enough for the attack;
+ * the rest stay a log line. The limiter is the DB-backed one, so this survives a
+ * restart along with everything else.
+ */
+const REJECTED_PER_HOUR = 5;
+const HOUR_MS = 60 * 60 * 1000;
 
 export async function POST(request: NextRequest, { params }: Params) {
   const { projectId } = await params;
@@ -52,6 +71,16 @@ export async function POST(request: NextRequest, { params }: Params) {
       .execute();
   }
 
+  /** A refusal, recorded only while this project is under its hourly budget. */
+  async function recordRejection(summary: Record<string, unknown>) {
+    const { allowed } = await consumeRateLimit(
+      `webhook-rejected:${projectId}`,
+      REJECTED_PER_HOUR,
+      HOUR_MS
+    );
+    if (allowed) await recordDelivery("rejected", summary);
+  }
+
   // Verify signature — cap payload size first
   const signature = request.headers.get("x-hub-signature-256") || "";
   const contentLength = Number.parseInt(request.headers.get("content-length") || "0", 10);
@@ -64,21 +93,49 @@ export async function POST(request: NextRequest, { params }: Params) {
   }
 
   if (!verifyWebhookSignature(Buffer.from(body), signature, project.webhook_secret)) {
-    // Not recorded. This endpoint has to stay public, so a row written before
-    // the signature was checked was an unauthenticated INSERT that anyone
-    // holding a project id could repeat until the disk filled. The log line
-    // keeps the signal without the storage.
     console.warn(`[webhook] Rejected delivery for project ${projectId}: invalid signature`);
+    await recordRejection({
+      event: request.headers.get("x-github-event"),
+      reason: signature ? "invalid signature" : "no signature — the webhook has no secret set",
+    });
     return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
   }
 
+  const event = request.headers.get("x-github-event");
+
+  /*
+    Both content types GitHub can send, because it sends whichever one the
+    webhook was configured with and the choice is a dropdown in its form.
+
+    `application/x-www-form-urlencoded` used to pass the signature — the HMAC is
+    over the raw body either way — and then die in `JSON.parse` as a bare
+    400 "Invalid JSON", which reads like a bug in the sender. It is a body with
+    the payload in a `payload` field, so it is read as one.
+  */
+  const contentType = request.headers.get("content-type") ?? "";
+  const formEncoded = contentType.includes("application/x-www-form-urlencoded");
+
   let payload: GitHubPushPayload;
   try {
-    payload = JSON.parse(body);
+    payload = JSON.parse(formEncoded ? (new URLSearchParams(body).get("payload") ?? "") : body);
   } catch {
+    await recordRejection({ event, reason: "unreadable body", contentType });
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
-  const event = request.headers.get("x-github-event");
+
+  /*
+    The ping, answered as what it is.
+
+    GitHub sends one the moment a webhook is created, and its own docs call it
+    the confirmation that the hook is set up correctly. Filed under "not a push
+    event" it was the only feedback the operator got, and it read as a refusal —
+    so the one delivery designed to say "this works" was the one saying the
+    least.
+  */
+  if (event === "ping") {
+    await recordDelivery("accepted", { event, contentType, formEncoded });
+    return NextResponse.json({ message: "Pong — RunPanel received this webhook" });
+  }
 
   if (event !== "push") {
     await recordDelivery("ignored", { event, reason: "not a push event" });
@@ -94,7 +151,12 @@ export async function POST(request: NextRequest, { params }: Params) {
   const ref = typeof payload.ref === "string" ? payload.ref : "";
   const pushBranch = ref.replace("refs/heads/", "").replace(/[^a-zA-Z0-9._/-]/g, "");
   if (pushBranch !== project.source_branch) {
-    await recordDelivery("ignored", { event, branch: pushBranch, reason: "branch mismatch" });
+    await recordDelivery("ignored", {
+      event,
+      branch: pushBranch,
+      expected: project.source_branch,
+      reason: "branch mismatch",
+    });
     return NextResponse.json({ message: "Branch mismatch" });
   }
 

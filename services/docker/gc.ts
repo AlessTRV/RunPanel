@@ -247,8 +247,9 @@ const WEBHOOK_RETENTION_DAYS = 30;
  *
  * Three tables here only ever grew. `deployments` gains a row per push and is
  * read with a `GROUP BY` over the whole table on an endpoint polled every 5
- * seconds; `webhook_deliveries` is written and never read back; `rate_limits`
- * keys on a client address, so every distinct one left something behind.
+ * seconds; `webhook_deliveries` gains one per delivery and is read back only as
+ * the last handful on a project's settings tab; `rate_limits` keys on a client
+ * address, so every distinct one left something behind.
  *
  * The newest deployment of each project is always kept, however old. A project
  * that last shipped a year ago should still be able to say when.

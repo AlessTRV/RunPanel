@@ -8,7 +8,6 @@ import { MSG } from "@/lib/copy";
 import { useResource } from "@/lib/hooks/useResource";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { Section } from "@/components/ui/Section";
-import { CopyField } from "@/components/ui/CopyField";
 import { Segmented } from "@/components/ui/Segmented";
 import { SettingToggle } from "@/components/ui/SettingToggle";
 import { StickySaveBar } from "@/components/ui/StickySaveBar";
@@ -17,6 +16,7 @@ import { InfoTip } from "@/components/ui/Tooltip";
 import { Code, FieldHint } from "@/components/ui/Hint";
 import { EnvFilePathHint, HealthcheckHint, PortHint } from "@/components/DeployHints";
 import { AccessSection } from "@/components/AccessSection";
+import { WebhookSection } from "./WebhookSection";
 import { parseContractJson, type DeployContract } from "@/lib/deploy-contract";
 import type { RuntimeType } from "@/lib/validation";
 import type { Project } from "./types";
@@ -241,26 +241,6 @@ export function SettingsTab({
       setSaving(false);
     }
   }
-
-  async function toggleAutoDeploy(enabled: boolean) {
-    try {
-      const res = await fetch(`/api/projects/${project.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ autoDeploy: enabled }),
-      });
-      if (!res.ok) throw new Error();
-      onProjectChange({ ...project, auto_deploy: enabled ? 1 : 0 });
-      toast.success(enabled ? "Auto-deploy attivo" : "Auto-deploy disattivato");
-    } catch {
-      toast.error(MSG.updateFailed);
-    }
-  }
-
-  const webhookUrl =
-    typeof window !== "undefined"
-      ? `${window.location.origin}/api/webhooks/github/${project.id}`
-      : "";
 
   return (
     <div className="max-w-3xl space-y-4">
@@ -658,30 +638,7 @@ export function SettingsTab({
         </Section>
       )}
 
-      <Section
-        title="Deploy automatico"
-        summary={
-          project.auto_deploy
-            ? "Attivo: ogni push sul branch fa partire un deploy"
-            : "Spento: si distribuisce dal pulsante Deploy"
-        }
-        actions={
-          <SettingToggle
-            label="Attiva auto-deploy"
-            isSelected={Boolean(project.auto_deploy)}
-            onChange={toggleAutoDeploy}
-            className="w-auto"
-          />
-        }
-      >
-        <CopyField label="URL" value={webhookUrl} />
-        <CopyField label="Secret" value={project.webhook_secret} secret />
-        <FieldHint>
-          Su GitHub: Repository → Settings → Webhooks → Add webhook. Content type{" "}
-          <Code>application/json</Code>, e lascia selezionato il solo evento <Code>push</Code>. Una
-          firma sbagliata viene rifiutata, quindi un Secret errato non fa danni.
-        </FieldHint>
-      </Section>
+      <WebhookSection project={project} onProjectChange={onProjectChange} />
 
       <StickySaveBar isDirty={dirty} isPending={saving} onSave={save} onReset={reset} />
 

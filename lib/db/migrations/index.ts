@@ -7,6 +7,8 @@ import * as backupsAndAutostart from "./005-backups-and-autostart";
 import * as historyIndexes from "./006-history-indexes";
 import * as serviceLink from "./007-service-link";
 import * as accessRules from "./008-access-rules";
+import * as webhookHookId from "./009-webhook-hook-id";
+import * as deployPolling from "./010-deploy-polling";
 
 /**
  * Migrations are registered statically rather than read from disk with
@@ -24,6 +26,8 @@ export const migrations: Record<string, Migration> = {
   "006-history-indexes": historyIndexes,
   "007-service-link": serviceLink,
   "008-access-rules": accessRules,
+  "009-webhook-hook-id": webhookHookId,
+  "010-deploy-polling": deployPolling,
 };
 
 export class StaticMigrationProvider implements MigrationProvider {

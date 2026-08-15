@@ -27,8 +27,13 @@ export type RuntimeType = (typeof runtimeTypes)[number];
  * still gets through, because git does the resolving and nothing here can pin
  * the answer it gets. Blocking the literals removes the direct route; the
  * token gating in `git-manager.ts` is what limits the damage of the rest.
+ *
+ * Exported because the same question — "is this address reachable from outside
+ * this machine?" — decides whether GitHub can deliver a webhook to the panel's
+ * own URL. Asking it twice, in two spellings, is how the two answers end up
+ * disagreeing.
  */
-function isBlockedRepoHost(hostname: string): boolean {
+export function isBlockedRepoHost(hostname: string): boolean {
   const host = hostname.replace(/^\[|\]$/g, "").toLowerCase();
 
   if (host === "localhost" || /\.(localhost|local|internal|home\.arpa)$/.test(host)) return true;
@@ -125,6 +130,11 @@ export const updateProjectSchema = z.object({
   port: z.number().int().min(1).max(65535).optional().nullable(),
   autoDeploy: z.boolean().optional(),
   /**
+   * How auto-deploy hears about a push: GitHub calling in, or the panel asking.
+   * Polling exists for the installations no inbound connection can reach.
+   */
+  deployTrigger: z.enum(["webhook", "poll"]).optional(),
+  /**
    * A deploy preset chosen by hand, applied UNDER whatever the caller also
    * sends. Detection still runs at deploy time; this is the answer for a
    * repository whose shape cannot be seen from outside — or that has not been
@@ -153,6 +163,58 @@ export const envVarsSchema = z.object({
 export const controlActionSchema = z.object({
   action: z.enum(["start", "stop", "restart"]),
 });
+
+/**
+ * What the panel may ask GitHub to do with a project's webhook.
+ *
+ * `connect` creates or realigns it, `ping` asks GitHub to send a real delivery,
+ * `disconnect` deactivates it without deleting it — so the hook keeps its
+ * delivery history on GitHub and turning auto-deploy back on does not have to
+ * build a new one.
+ */
+export const webhookActionSchema = z.object({
+  action: z.enum(["connect", "ping", "disconnect"]),
+});
+
+/**
+ * The panel's own address, as GitHub would have to reach it.
+ *
+ * Rejects the same private and loopback literals a repository URL is refused
+ * for, and for the closer of the two reasons: a hook pointed at `localhost` is
+ * accepted by GitHub and then fails every delivery forever, which is exactly
+ * the silent failure this whole feature exists to end.
+ */
+export const PUBLIC_URL_HINT =
+  "L'indirizzo pubblico del pannello, es. https://panel.esempio.it — GitHub deve poterlo raggiungere";
+
+export const panelPublicUrlSchema = z
+  .string()
+  .trim()
+  .max(255)
+  .superRefine((raw, ctx) => {
+    // Empty clears the setting and falls back to the request headers.
+    if (raw === "") return;
+
+    let url: URL;
+    try {
+      url = new URL(raw);
+    } catch {
+      ctx.addIssue({ code: "custom", message: PUBLIC_URL_HINT });
+      return;
+    }
+
+    if (url.protocol !== "https:" && url.protocol !== "http:") {
+      ctx.addIssue({ code: "custom", message: PUBLIC_URL_HINT });
+      return;
+    }
+
+    if (isBlockedRepoHost(url.hostname)) {
+      ctx.addIssue({
+        code: "custom",
+        message: `GitHub non può raggiungere ${url.hostname}: è un indirizzo privato o locale`,
+      });
+    }
+  });
 
 /**
  * A service name is concatenated into a Docker container name and a Docker

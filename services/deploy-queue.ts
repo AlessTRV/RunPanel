@@ -17,7 +17,7 @@ import { executeDeploy } from "./deploy-pipeline";
  * — queueing five pushes would just build the same head five times.
  */
 
-type Trigger = "manual" | "webhook";
+type Trigger = "manual" | "webhook" | "poll";
 
 interface QueuedRequest {
   mode: "deploy" | "rebuild";
