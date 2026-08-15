@@ -2,9 +2,10 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Input, Label, TextField } from "@heroui/react";
+import { Button, Input, Label, TextField } from "@heroui/react";
 import { toast } from "sonner";
 import { MSG } from "@/lib/copy";
+import { useResource } from "@/lib/hooks/useResource";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { Section } from "@/components/ui/Section";
 import { CopyField } from "@/components/ui/CopyField";
@@ -17,6 +18,7 @@ import { Code, FieldHint } from "@/components/ui/Hint";
 import { EnvFilePathHint, HealthcheckHint, PortHint } from "@/components/DeployHints";
 import { AccessSection } from "@/components/AccessSection";
 import { parseContractJson, type DeployContract } from "@/lib/deploy-contract";
+import type { RuntimeType } from "@/lib/validation";
 import type { Project } from "./types";
 
 /** A labelled multi-line field. Six of these were inline copies before. */
@@ -51,8 +53,22 @@ function CommandField({
 }
 
 /** The saved state, so "unsaved changes" is a fact rather than a guess. */
-function snapshot(appName: string, branch: string, port: string, contract: DeployContract): string {
-  return JSON.stringify({ appName, branch, port, contract });
+function snapshot(
+  appName: string,
+  branch: string,
+  port: string,
+  runtimeType: string,
+  contract: DeployContract
+): string {
+  return JSON.stringify({ appName, branch, port, runtimeType, contract });
+}
+
+interface Preset {
+  id: string;
+  label: string;
+  description: string;
+  runtime: RuntimeType;
+  commands: { install?: string; build?: string; start?: string };
 }
 
 export function SettingsTab({
@@ -69,7 +85,20 @@ export function SettingsTab({
   const [appName, setAppName] = useState(project.app_name ?? "");
   const [branch, setBranch] = useState(project.source_branch);
   const [port, setPort] = useState(project.port?.toString() ?? "");
+  const [runtimeType, setRuntimeType] = useState<string>(project.runtime_type);
   const [saving, setSaving] = useState(false);
+
+  /*
+    Which preset the operator is looking at. Local only — nothing about it is
+    saved. It drives the suggestions and it is what "Applica" copies from; the
+    project keeps no memory of having been built from a preset, and pretending
+    otherwise would be a column that goes stale the first time a command is
+    edited by hand.
+  */
+  const [presetId, setPresetId] = useState<string | null>(null);
+  const { data: presetData } = useResource<{ presets: Preset[] }>("/api/presets");
+  const presets = presetData?.presets ?? [];
+  const preset = presets.find((entry) => entry.id === presetId) ?? null;
 
   // What the server last confirmed. Compared against the live values, so the
   // save bar appears on the first edit and leaves again if it is undone.
@@ -78,13 +107,14 @@ export function SettingsTab({
       project.app_name ?? "",
       project.source_branch,
       project.port?.toString() ?? "",
+      project.runtime_type,
       parseContractJson(project.builder_config)
     )
   );
-  const current = snapshot(appName, branch, port, contract);
+  const current = snapshot(appName, branch, port, runtimeType, contract);
   const dirty = current !== saved;
 
-  const isDocker = project.runtime_type === "docker";
+  const isDocker = runtimeType === "docker";
 
   function patchContract(patch: Partial<DeployContract>) {
     setContract((prev) => ({ ...prev, ...patch }));
@@ -95,12 +125,41 @@ export function SettingsTab({
       appName: string;
       branch: string;
       port: string;
+      runtimeType: string;
       contract: DeployContract;
     };
     setAppName(restored.appName);
     setBranch(restored.branch);
     setPort(restored.port);
+    setRuntimeType(restored.runtimeType);
     setContract(restored.contract);
+  }
+
+  /**
+   * Copy a preset's commands into the form.
+   *
+   * The three fields are replaced wholesale rather than merged: applying
+   * "Python" and keeping a leftover `npm run build` from before is exactly the
+   * mismatch this is meant to end. Nothing is written until Salva, and Annulla
+   * puts everything back, so replacing is safe to offer.
+   *
+   * The runtime comes with them, because they are not independent choices. The
+   * node builder reads `package.json` before it looks at the commands it was
+   * given, so pip commands on a Node project fail on a file that isn't there —
+   * a preset that set the commands and left the runtime alone would be handing
+   * out a broken configuration.
+   */
+  function applyPreset(chosen: Preset) {
+    patchContract({
+      commands: {
+        ...contract.commands,
+        install: chosen.commands.install ?? "",
+        build: chosen.commands.build ?? "",
+        start: chosen.commands.start ?? "",
+      },
+    });
+    setRuntimeType(chosen.runtime);
+    toast.success(`Comandi di "${chosen.label}" applicati — controlla e salva`);
   }
 
   /**
@@ -135,7 +194,7 @@ export function SettingsTab({
    * there is nothing published to restrict in the first place.
    */
   const accessUnavailable = useMemo(() => {
-    if (project.runtime_type === "compose") {
+    if (runtimeType === "compose") {
       return "Le porte le pubblica il tuo compose file. RunPanel non lo riscrive: per limitare l'accesso metti il binding su 127.0.0.1 lì.";
     }
     if (isDocker && contract.docker.network === "host") {
@@ -145,7 +204,7 @@ export function SettingsTab({
       return "Questo progetto non ha una porta configurata, quindi non c'è niente da limitare.";
     }
     return undefined;
-  }, [project.runtime_type, project.port, isDocker, contract.docker.network]);
+  }, [runtimeType, project.port, isDocker, contract.docker.network]);
 
   const containerSummary = useMemo(() => {
     const limits = [contract.runtime.memory, contract.runtime.cpus].filter(Boolean).join(" · ");
@@ -162,6 +221,9 @@ export function SettingsTab({
           appName: appName.trim() || null,
           sourceBranch: branch,
           port: port ? Number.parseInt(port, 10) : null,
+          // Sent because applying a preset can change it. Unchanged otherwise,
+          // and the route treats an identical value as no change.
+          runtimeType,
           builderConfig: contract,
         }),
       });
@@ -241,13 +303,50 @@ export function SettingsTab({
               <Label>Porta</Label>
               <Input type="number" placeholder="3000" />
             </TextField>
-            <PortHint runtimeType={project.runtime_type} />
+            <PortHint runtimeType={runtimeType} />
           </div>
         </div>
       </Panel>
 
       <Section title="Build e avvio" summary={buildSummary} defaultExpanded={hasCustomCommands}>
-        {project.runtime_type === "node" && (
+        {presets.length > 0 && (
+          <div>
+            <div className="mb-2 flex items-center gap-1">
+              <span className="text-muted text-sm font-medium">Punto di partenza</span>
+              <InfoTip title="Preset">
+                Una configurazione già pronta per una forma di repository comune. Sceglierne uno
+                qui non cambia niente da solo: mostra i comandi che userebbe, e li scrive nei
+                campi solo se premi Applica.
+              </InfoTip>
+            </div>
+            <Segmented
+              label="Preset di deploy"
+              value={presetId ?? "none"}
+              onChange={(id) => setPresetId(id === "none" ? null : id)}
+              options={[
+                { value: "none", label: "Nessuno" },
+                ...presets.map((entry) => ({ value: entry.id, label: entry.label })),
+              ]}
+            />
+            {preset && (
+              <div className="mt-2 space-y-2">
+                <FieldHint className="mt-0">{preset.description}</FieldHint>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button variant="secondary" onPress={() => applyPreset(preset)}>
+                    Applica i comandi
+                  </Button>
+                  {preset.runtime !== runtimeType && (
+                    <span className="text-warning text-meta">
+                      Cambia anche il runtime: <Code>{runtimeType}</Code> → <Code>{preset.runtime}</Code>
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {runtimeType === "node" && (
           <div>
             <span className="text-muted mb-2 block text-sm font-medium">Package manager</span>
             <Segmented
@@ -271,16 +370,20 @@ export function SettingsTab({
               label="Comandi di install"
               value={contract.commands.install ?? ""}
               /*
-                Il suggerimento era `pip install -r requirements.txt`, che su
-                Debian 12 e Ubuntu 23.04 in su non funziona: PEP 668 marca il
-                Python di sistema come externally-managed e pip rifiuta. Il
-                preset Python del pannello lo sapeva già e crea un venv; questo
-                campo diceva il contrario, ed è il testo che si copia.
+                Con un preset scelto il suggerimento è il suo; senza, il
+                ripiego per un runtime non-node è Python, ed è la forma con il
+                venv. Diceva `pip install -r requirements.txt`, che su Debian 12
+                e Ubuntu 23.04 in su non funziona — PEP 668 marca il Python di
+                sistema come externally-managed e pip rifiuta. Il preset lo
+                sapeva già; questo campo diceva il contrario, ed è il testo che
+                si copia.
               */
               placeholder={
-                project.runtime_type === "node"
-                  ? "rilevato automaticamente"
-                  : "python3 -m venv venv\nvenv/bin/pip install -r requirements.txt"
+                preset
+                  ? (preset.commands.install ?? "")
+                  : runtimeType === "node"
+                    ? "rilevato automaticamente"
+                    : "python3 -m venv venv\nvenv/bin/pip install -r requirements.txt"
               }
               hint="Un comando per riga, eseguiti in ordine nella stessa shell."
               onChange={(v) => patchContract({ commands: { ...contract.commands, install: v } })}
@@ -289,7 +392,11 @@ export function SettingsTab({
               label="Comandi di build"
               value={contract.commands.build ?? ""}
               placeholder={
-                project.runtime_type === "node" ? "rilevato automaticamente" : "go build -o app ."
+                preset
+                  ? (preset.commands.build ?? "")
+                  : runtimeType === "node"
+                    ? "rilevato automaticamente"
+                    : "go build -o app ."
               }
               onChange={(v) => patchContract({ commands: { ...contract.commands, build: v } })}
             />
@@ -300,9 +407,11 @@ export function SettingsTab({
               // Coerente con l'install qui sopra: i tre campi descrivevano tre
               // progetti diversi — install Python, build Go, start Go.
               placeholder={
-                project.runtime_type === "node"
-                  ? "rilevato automaticamente"
-                  : "venv/bin/python -m uvicorn main:app"
+                preset
+                  ? (preset.commands.start ?? "")
+                  : runtimeType === "node"
+                    ? "rilevato automaticamente"
+                    : "venv/bin/python -m uvicorn main:app"
               }
               hint="Solo la prima riga viene usata come comando di avvio."
               onChange={(v) => patchContract({ commands: { ...contract.commands, start: v } })}
@@ -437,7 +546,7 @@ export function SettingsTab({
             <Label>Percorso del file</Label>
             <Input placeholder="/app/.env" className="font-mono text-sm" />
           </TextField>
-          <EnvFilePathHint runtimeType={project.runtime_type} />
+          <EnvFilePathHint runtimeType={runtimeType} />
           <FieldHint>
             Riscritto a ogni deploy con tutte le variabili del progetto: quello che modifichi lì a
             mano sparisce. Il posto giusto è la scheda Variabili.
