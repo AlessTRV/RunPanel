@@ -18,9 +18,8 @@ export const meta = { name: "service-link-unit", needsDocker: false, drivers: []
 
 export async function run({ repoRoot }) {
   const r = createReporter("service-link-unit");
-  const { resolveServiceEnv, serviceEnvKey, suggestEnvKey, connectionEnvKey } = await import(
-    pathToFileURL(join(repoRoot, "lib", "service-env.ts")).href
-  );
+  const { resolveServiceEnv, serviceEnvKey, suggestEnvKey, connectionEnvKey, reachesByContainerName } =
+    await import(pathToFileURL(join(repoRoot, "lib", "service-env.ts")).href);
 
   const url = (svc) => `postgresql://user:pw@host:5432/${svc.name}`;
   const pg = (name, extra = {}) => ({ name, type: "postgresql", inject_env: 1, ...extra });
@@ -118,6 +117,28 @@ export async function run({ repoRoot }) {
     "a name that would start with a digit falls back to the plain key",
     suggestEnvKey("2nd", "postgresql") === connectionEnvKey("postgresql")
   );
+
+  // --- which host the app actually reaches the service on -------------------
+  {
+    // Two places have to agree on this: the deploy builds the URL it injects
+    // from it, and the service page shows the operator which line to copy. They
+    // did not, and the difference was an app that could not resolve its
+    // database — `could not translate host name "runpanel-svc-…"`.
+    r.check("a container on the project network resolves by name", reachesByContainerName("docker", "project"));
+
+    // No Docker DNS at all.
+    r.check("a PM2 process does not", !reachesByContainerName("node", "project"));
+    r.check("nor does a custom runtime", !reachesByContainerName("custom", "project"));
+    r.check("nor a static one", !reachesByContainerName("static", "project"));
+
+    // A container, but not on the network the service joined.
+    r.check("a container on the default bridge does not", !reachesByContainerName("docker", "bridge"));
+    r.check("nor one sharing the host stack", !reachesByContainerName("docker", "host"));
+
+    // Compose publishes its own ports and the panel does not put its services
+    // on that stack's network.
+    r.check("nor a compose project", !reachesByContainerName("compose", "project"));
+  }
 
   return r.result();
 }

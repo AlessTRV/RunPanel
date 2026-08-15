@@ -51,6 +51,8 @@ interface Service {
   envKey: string;
   projectSlug: string | null;
   networkName: string | null;
+  /** Whether the linked app really reaches it by container name — see the API. */
+  reachedByContainerName: boolean;
   access: AccessValue;
   gate: GateValue;
 }
@@ -85,6 +87,15 @@ const FROM_NOTES: Record<From, (service: Service) => React.ReactNode> = {
       non quella pubblicata. È esattamente la riga che RunPanel inietta.
     </>
   ),
+  /*
+    `network` è offerta solo quando l'app del progetto ci arriva davvero per
+    nome del container: gira in un container, sulla rete del progetto. Prima
+    veniva proposta — e preselezionata — a qualunque servizio collegato, con
+    sotto la frase «è esattamente la riga che RunPanel inietta». Per un progetto
+    sotto PM2 quella frase era falsa e quella riga non funziona: il nome del
+    container non si risolve fuori da una rete Docker, e chi la copiava
+    otteneva `could not translate host name`.
+  */
   container: (service) => (
     <>
       <Code>host.docker.internal</Code> è un alias che RunPanel aggiunge a ogni container: il
@@ -92,10 +103,18 @@ const FROM_NOTES: Record<From, (service: Service) => React.ReactNode> = {
       senza reti condivise. Con <Code>network: host</Code> usa <Code>localhost</Code>.
     </>
   ),
-  host: () => (
+  host: (service) => (
     <>
       Per un processo nativo (PM2) e per i tuoi client: psql, TablePlus, uno script sul server. Da
       fuori dalla macchina, per un database, la risposta giusta è quasi sempre un tunnel SSH.
+      {service.project_id && !service.reachedByContainerName && (
+        <>
+          {" "}
+          È anche esattamente la riga che RunPanel inietta in <Code>{service.envKey}</Code>: l&apos;app
+          di questo progetto non gira in un container sulla rete del progetto, quindi ci arriva da
+          qui.
+        </>
+      )}
     </>
   ),
 };
@@ -181,7 +200,12 @@ export default function ServiceDetailPage() {
 
   const running = service.status === "running";
   const label = serviceLabel(service.type);
-  const from: From = fromChoice ?? (service.project_id ? "network" : "container");
+  // Il default è la riga che serve davvero: il nome del container solo se
+  // l'app del progetto ci arriva così, altrimenti l'host — che è anche quello
+  // che il deploy inietta per un progetto nativo.
+  const from: From =
+    fromChoice ??
+    (service.reachedByContainerName ? "network" : service.project_id ? "host" : "container");
 
   // Three ways in, and which one is right depends on where the caller runs.
   // Shown together because the difference is exactly what people get wrong.
@@ -287,7 +311,9 @@ export default function ServiceDetailPage() {
                 label="Da dove ti colleghi"
                 value={from}
                 onChange={setFromChoice}
-                options={FROM_OPTIONS.filter((o) => o.value !== "network" || Boolean(service.project_id))}
+                options={FROM_OPTIONS.filter(
+                  (o) => o.value !== "network" || service.reachedByContainerName
+                )}
               />
 
               <div>
@@ -349,10 +375,21 @@ export default function ServiceDetailPage() {
         <DatabasesPanel
           serviceId={service.id}
           type={service.type}
-          // The same host the paste-ready line above uses, so a per-database URL
-          // is not quietly built for a different caller than the one it is for.
-          host={service.project_id ? service.containerName : "host.docker.internal"}
-          port={service.project_id ? service.internalPort : service.port}
+          /*
+            The same host the paste-ready line above uses, so a per-database URL
+            is not quietly built for a different caller than the one it is for.
+            It follows the chosen viewpoint now: it used to be pinned to the
+            container name for every linked service, which handed a PM2 project
+            a hostname that does not resolve.
+          */
+          host={
+            from === "network"
+              ? service.containerName
+              : from === "container"
+                ? "host.docker.internal"
+                : "localhost"
+          }
+          port={from === "network" ? service.internalPort : service.port}
           envKey={service.envKey}
           credentials={creds}
         />

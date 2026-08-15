@@ -19,7 +19,7 @@ import {
 import { internalPort } from "./service-provisioner";
 import { checkLoopbackLeak, listenPort, readAccess, syncGate } from "./access";
 import { closeGate } from "./access-gate";
-import { buildConnectionString, resolveServiceEnv } from "@/lib/service-env";
+import { buildConnectionString, reachesByContainerName, resolveServiceEnv } from "@/lib/service-env";
 import { sweep } from "./docker/gc";
 import { BuildLogFile } from "./build-logs";
 import { projectEvents } from "./events";
@@ -279,7 +279,10 @@ async function runDeploy(
     // name. On `host` the container shares the host's stack, and on `bridge` it
     // never joins the project network at all — in both cases the way in is the
     // port published on the host, exactly as for a native process.
-    const onProjectNetwork = isDockerApp && contract.docker.network === "project";
+    //
+    // Shared with the service page, which has to show the operator the same
+    // line this injects.
+    const onProjectNetwork = reachesByContainerName(project.runtime_type, contract.docker.network);
 
     // The rule itself lives in `lib/service-env.ts` as a pure function, so the
     // whole on/off × key-already-defined matrix is testable without a daemon.

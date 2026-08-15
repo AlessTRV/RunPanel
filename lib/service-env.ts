@@ -81,6 +81,24 @@ export interface InjectionConflict {
   services: string[];
 }
 
+/**
+ * Does this project reach its services by container name?
+ *
+ * Only from inside a container that shares the project's network. A native
+ * process has no Docker DNS, and a container on `bridge` or `host` never joins
+ * that network — for all of them the way in is the port published on the host.
+ *
+ * A function, and here, because the answer is needed in two places that must
+ * agree: the deploy pipeline builds the URL it injects from it, and the service
+ * page shows the operator which line to copy. They did not agree. The page
+ * offered the container name to every linked service and called it «esattamente
+ * la riga che RunPanel inietta»; for a project under PM2 the deploy injected
+ * `localhost` and the suggested line failed to resolve at all.
+ */
+export function reachesByContainerName(runtimeType: string, dockerNetwork: string): boolean {
+  return runtimeType === "docker" && dockerNetwork === "project";
+}
+
 export function resolveServiceEnv<T extends LinkedService>(
   services: readonly T[],
   envVars: Record<string, string>,

@@ -15,7 +15,8 @@ import {
   disconnectFromNetwork,
   ensureProjectNetwork,
 } from "@/services/docker-network";
-import { serviceEnvKey, suggestEnvKey } from "@/lib/service-env";
+import { reachesByContainerName, serviceEnvKey, suggestEnvKey } from "@/lib/service-env";
+import { parseContractJson } from "@/lib/deploy-contract";
 import { AccessRow, readAccess, reportGate, syncGate } from "@/services/access";
 import { allocateLoopbackPort, closeGate } from "@/services/access-gate";
 import { ServicesTable } from "@/lib/db/schema";
@@ -88,10 +89,30 @@ export async function GET(request: NextRequest, { params }: Params) {
   const project = service.project_id
     ? await db
         .selectFrom("projects")
-        .select("slug")
+        .select(["slug", "runtime_type", "builder_config"])
         .where("id", "=", service.project_id)
         .executeTakeFirst()
     : undefined;
+
+  /**
+   * Whether the linked app actually reaches this service by container name.
+   *
+   * The same condition as `deploy-pipeline.ts`, resolved here so the page
+   * cannot disagree with what a deploy really injects — and it did disagree.
+   * The detail page offered the container-name line by default to every linked
+   * service and said it was «esattamente la riga che RunPanel inietta». For a
+   * project running under PM2 that is false twice over: the deploy injects
+   * `localhost` and the published port, and a container name does not resolve
+   * outside a Docker network at all. Copying the line the panel recommended
+   * produced `could not translate host name`.
+   */
+  const reachedByContainerName = Boolean(
+    project &&
+      reachesByContainerName(
+        project.runtime_type,
+        parseContractJson(project.builder_config).docker.network
+      )
+  );
 
   // The facts the detail page needs to explain how to connect, resolved here
   // because they come from the service templates — server-side knowledge the
@@ -106,6 +127,7 @@ export async function GET(request: NextRequest, { params }: Params) {
     injectEnv: service.inject_env === 1,
     projectSlug: project?.slug ?? null,
     networkName: project ? networkName(project.slug) : null,
+    reachedByContainerName,
     // Who may reach the published port, and whether the gate that enforces it
     // is actually up — the row says what was asked for, the gate says what is.
     access: readAccess(service),
