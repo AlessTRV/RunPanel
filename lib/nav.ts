@@ -12,29 +12,130 @@
  * is an identifier rather than something the reader is meant to read.
  */
 
+/**
+ * Which block of the sidebar an item sits in.
+ *
+ * `main` is the single unlabelled entry at the top, `footer` is pinned to the
+ * bottom of the rail past a rule. The two in between carry a heading.
+ */
+export type NavGroupId = "main" | "infra" | "system" | "footer";
+
 export interface NavItem {
   label: string;
   href: string;
   /** Iconify name. A literal, because the icon bundler greps for these. */
   icon: string;
+  /**
+   * The filled counterpart, shown while the destination is active. Also a
+   * literal, and for the same reason.
+   */
+  iconActive: string;
+  /**
+   * Deliberately not optional. An item with no group would type-check and then
+   * silently fail to render, which is the one failure mode this file exists to
+   * prevent.
+   */
+  group: NavGroupId;
   /** Extra path prefixes that also light this item up. */
   owns?: string[];
   /** Shortcut hint shown in the command palette. */
   keys?: string;
 }
 
+/**
+ * Ordered so the flat list reads the same as the grouped rail. The command
+ * palette aliases this array directly, so the two stay in step for free.
+ */
 export const NAV_ITEMS: NavItem[] = [
-  { label: "Panoramica", href: "/home", icon: "solar:widget-2-linear" },
-  { label: "Progetti", href: "/projects", icon: "solar:folder-linear", keys: "g p" },
-  { label: "Servizi", href: "/services", icon: "solar:database-linear", keys: "g s" },
-  { label: "Monitor", href: "/monitor", icon: "solar:chart-2-linear" },
-  { label: "Storage", href: "/storage", icon: "solar:ssd-square-linear" },
-  { label: "Backup", href: "/backups", icon: "solar:archive-linear", keys: "g b" },
-  { label: "Avvio automatico", href: "/autostart", icon: "solar:power-linear" },
-  { label: "Diagnostica", href: "/diagnostics", icon: "solar:health-linear" },
-  { label: "GitHub", href: "/github", icon: "solar:code-linear" },
-  { label: "Impostazioni", href: "/account", icon: "solar:settings-linear", owns: ["/settings"] },
+  {
+    label: "Panoramica",
+    href: "/home",
+    icon: "solar:widget-2-linear",
+    iconActive: "solar:widget-2-bold-duotone",
+    group: "main",
+  },
+  {
+    label: "Progetti",
+    href: "/projects",
+    icon: "solar:folder-linear",
+    iconActive: "solar:folder-bold-duotone",
+    group: "infra",
+    keys: "g p",
+  },
+  {
+    label: "Servizi",
+    href: "/services",
+    icon: "solar:database-linear",
+    iconActive: "solar:database-bold-duotone",
+    group: "infra",
+    keys: "g s",
+  },
+  {
+    label: "Storage",
+    href: "/storage",
+    icon: "solar:ssd-square-linear",
+    iconActive: "solar:ssd-square-bold-duotone",
+    group: "infra",
+  },
+  {
+    label: "Backup",
+    href: "/backups",
+    icon: "solar:archive-linear",
+    iconActive: "solar:archive-bold-duotone",
+    group: "infra",
+    keys: "g b",
+  },
+  {
+    label: "Monitor",
+    href: "/monitor",
+    icon: "solar:chart-2-linear",
+    iconActive: "solar:chart-2-bold-duotone",
+    group: "system",
+  },
+  {
+    label: "Avvio automatico",
+    href: "/autostart",
+    icon: "solar:power-linear",
+    iconActive: "solar:power-bold-duotone",
+    group: "system",
+  },
+  {
+    label: "Diagnostica",
+    href: "/diagnostics",
+    icon: "solar:health-linear",
+    iconActive: "solar:health-bold-duotone",
+    group: "system",
+  },
+  {
+    label: "GitHub",
+    href: "/github",
+    icon: "solar:code-linear",
+    iconActive: "solar:code-bold-duotone",
+    group: "footer",
+  },
+  {
+    label: "Impostazioni",
+    href: "/account",
+    icon: "solar:settings-linear",
+    iconActive: "solar:settings-bold-duotone",
+    group: "footer",
+    owns: ["/settings"],
+  },
 ];
+
+/**
+ * The labelled blocks, in the order they are drawn. `footer` is absent on
+ * purpose: it is pinned outside the scrolling list, so the sidebar reaches for
+ * it separately rather than mapping over it here.
+ */
+export const NAV_GROUPS: { id: NavGroupId; label?: string }[] = [
+  { id: "main" },
+  { id: "infra", label: "Infrastruttura" },
+  { id: "system", label: "Sistema" },
+];
+
+export const navItemsIn = (group: NavGroupId): NavItem[] =>
+  NAV_ITEMS.filter((item) => item.group === group);
 
 /**
  * Breadcrumb labels, derived from the same list plus the segments that are not

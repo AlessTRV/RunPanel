@@ -93,6 +93,8 @@ export function MobileNav() {
           </button>
         </div>
 
+        {/* Same recipe as the desktop rail, so the two do not drift into
+            separate visual languages. */}
         <nav className="flex-1 space-y-0.5 overflow-y-auto p-2">
           {rest.map((item) => {
             const active = isActiveNav(pathname, item);
@@ -106,14 +108,25 @@ export function MobileNav() {
                 aria-current={active ? "page" : undefined}
                 tabIndex={open ? undefined : -1}
                 className={cn(
-                  "flex items-center gap-3 rounded-[var(--radius)] px-3 py-2.5 text-sm transition-colors",
+                  "relative flex items-center gap-3 rounded-[var(--radius)] px-3 py-2.5 text-sm transition-colors",
                   active
-                    ? "bg-default text-foreground font-medium"
+                    ? "selected text-foreground font-medium"
                     : "text-muted hover:bg-surface-hover hover:text-foreground"
                 )}
               >
-                <Icon icon={item.icon} width={18} aria-hidden />
-                <span>{item.label}</span>
+                {active && (
+                  <span
+                    aria-hidden
+                    className="bg-accent absolute top-1/2 left-0 h-5 w-[3px] -translate-y-1/2 rounded-r-full"
+                  />
+                )}
+                <Icon
+                  icon={active ? item.iconActive : item.icon}
+                  width={18}
+                  aria-hidden
+                  className={cn("shrink-0", active && "text-accent")}
+                />
+                <span className="min-w-0 flex-1 truncate">{item.label}</span>
               </Link>
             );
           })}
@@ -137,11 +150,16 @@ export function MobileNav() {
               href={item.href}
               aria-current={active ? "page" : undefined}
               className={cn(
-                "flex flex-1 flex-col items-center gap-0.5 py-2 text-meta transition-colors",
+                "text-meta flex flex-1 flex-col items-center gap-0.5 py-2 transition-colors",
                 active ? "text-foreground" : "text-muted"
               )}
             >
-              <Icon icon={item.icon} width={20} aria-hidden />
+              <Icon
+                icon={active ? item.iconActive : item.icon}
+                width={20}
+                aria-hidden
+                className={cn(active && "text-accent")}
+              />
               <span className="truncate px-1">{item.label}</span>
               {active && <span className="bg-accent h-0.5 w-6 rounded-full" />}
             </Link>
