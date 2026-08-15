@@ -1,50 +1,71 @@
 # RunPanel
 
-Self-hosted deployment panel. Deploy from GitHub, a ZIP or a Dockerfile, with
-live build output, provisioned databases and Docker housekeeping that actually
-reclaims disk.
+**Italiano** · [English](README.en.md)
+
+Pannello di deploy self-hosted. Distribuisce da GitHub, da uno ZIP o da un
+Dockerfile, con l'output del build in diretta, database creati su richiesta e una
+manutenzione di Docker che il disco lo libera davvero.
 
 ![Next.js](https://img.shields.io/badge/Next.js-16-black?logo=next.js)
 ![TypeScript](https://img.shields.io/badge/TypeScript-strict-blue?logo=typescript)
 ![SQLite](https://img.shields.io/badge/SQLite-or_Postgres-003B57?logo=sqlite)
 ![Docker](https://img.shields.io/badge/Docker-supported-2496ED?logo=docker)
 
-## What it does
+---
 
-- **Deploy anything** — Node.js, Docker, static, or a custom runtime with your
-  own commands. A repository can describe its own deploy contract in
-  `runpanel.json`.
-- **Live deploys** — build output streams to the browser while the deploy runs,
-  over a single SSE connection per project.
-- **Databases on demand** — PostgreSQL, MySQL, Redis and MongoDB provisioned as
-  labelled containers with their own volumes, and their connection URL injected
-  into the app automatically.
-- **Backups that restore** — scheduled dumps of every managed database, of
-  RunPanel's own store, and of project configuration and volumes, into a single
-  verifiable zip. Restoring is guided from the panel, and takes a safety copy of
-  whatever it is about to overwrite first.
-- **Comes back after a reboot** — generates and installs the systemd unit (or a
-  cron `@reboot` line), checks that Docker itself starts at boot, and brings
-  back the projects and services you marked, in order.
-- **Restrict a port to the networks you name** — any database or app can be
-  limited to specific addresses, with the machine's own networks offered as tick
-  boxes and the refused ones listed so you can see who is knocking.
-- **Housekeeping** — image retention per project, orphan detection, and volume
-  cleanup that asks before destroying data.
-- **Two runtimes** — PM2 for native processes, Docker for containers, on equal
-  footing.
-- **Diagnostics** — one page that says what is wrong with this installation and
-  what to press to fix it.
+## Indice
 
-## Requirements
+[Cosa fa](#cosa-fa) · [Requisiti](#requisiti) · [Avvio rapido](#avvio-rapido) ·
+[Configurazione](#configurazione) · [Distribuire un progetto](#distribuire-un-progetto) ·
+[Database e servizi](#database-e-servizi) · [Accesso di rete](#accesso-di-rete) ·
+[Backup e ripristino](#backup-e-ripristino) · [Avvio automatico](#avvio-automatico) ·
+[Registri privati](#registri-privati) · [Il pannello, giorno per giorno](#il-pannello-giorno-per-giorno) ·
+[Sicurezza](#sicurezza) · [Architettura](#architettura) · [Sviluppo](#sviluppo) ·
+[Limiti noti](#limiti-noti)
 
-- Node.js 20+
-- Docker (for container runtimes, provisioned databases and database backups)
-- PM2, for projects with a native runtime (`node`, `static`, `custom`). It is
-  **not** vendored: install it globally with `npm i -g pm2`, or keep to the
-  Docker runtimes. The Diagnostics page tells you which of the two you are in.
+---
 
-## Quick start
+## Cosa fa
+
+- **Distribuisce qualsiasi cosa** — Node.js, siti statici, Docker, Compose, o un
+  runtime personalizzato con i tuoi comandi. Un repository può dichiarare il
+  proprio contratto di deploy in `runpanel.json`.
+- **Deploy in diretta** — l'output del build arriva al browser mentre il deploy
+  gira, su una sola connessione SSE per progetto.
+- **Database su richiesta** — PostgreSQL, MySQL, Redis e MongoDB creati come
+  container etichettati con i propri volumi, e la loro connection URL iniettata
+  nell'app tramite un interruttore esplicito.
+- **Backup che si ripristinano** — dump programmati dei database, dello store del
+  pannello e della configurazione e dei volumi dei progetti, in un unico zip
+  verificabile, su disco locale o su un bucket S3-compatibile.
+- **Torna su dopo un riavvio** — genera e installa la unit systemd (o una riga
+  cron `@reboot`), controlla che Docker stesso parta all'avvio, e rimette su i
+  progetti e i servizi che hai indicato, nell'ordine che hai scelto.
+- **Limita una porta alle reti che indichi** — qualunque database o app può
+  essere ristretto a indirizzi specifici, con le reti della macchina proposte
+  come caselle da spuntare.
+- **Manutenzione** — retention delle immagini per progetto, rilevamento degli
+  orfani, e pulizia dei volumi che chiede prima di distruggere dati.
+- **Diagnostica** — una pagina che dice cosa non va in questa installazione e
+  cosa premere per sistemarlo.
+
+## Requisiti
+
+| | |
+|---|---|
+| **Node.js** | 20 o superiore |
+| **Docker** | per i runtime a container, i database creati dal pannello e i loro backup |
+| **PM2** | per i progetti con runtime nativo (`node`, `static`, `custom`) |
+
+PM2 **non** è incluso: installalo globalmente con `npm i -g pm2`, oppure resta
+sui runtime Docker. La pagina Diagnostica ti dice in quale dei due casi sei, e
+cosa manca.
+
+Il pannello gira su Linux, macOS e Windows. L'installazione automatica all'avvio
+è disponibile solo su Linux; le differenze di piattaforma sono trattate dove
+contano — l'avvio dei processi, il rilevamento dei binari, i permessi dei file.
+
+## Avvio rapido
 
 ```bash
 git clone https://github.com/AlessTRV/RunPanel.git
@@ -54,8 +75,9 @@ npm run build
 npm start
 ```
 
-Open `http://localhost:3000`. The first visit asks you to set an admin password,
-along with the **setup token** the panel prints to its own log at startup:
+Apri `http://localhost:3000`. Alla prima visita ti viene chiesto di impostare una
+password di amministratore, insieme al **token di setup** che il pannello scrive
+nel proprio log all'avvio:
 
 ```
 [RunPanel] Not set up yet. Enter this token on the setup screen:
@@ -63,62 +85,105 @@ along with the **setup token** the panel prints to its own log at startup:
     3f9c1a...
 ```
 
-Until a password exists, that endpoint has to be open — the token is what stops
-whoever finds the port first from claiming the panel, and an admin here has a
-shell on the host. A restart issues a new one.
+Finché non esiste una password quell'endpoint deve restare aperto: il token è
+ciò che impedisce a chi trova la porta per primo di prendersi il pannello, e qui
+un amministratore ha una shell sull'host. A ogni riavvio ne viene emesso uno
+nuovo, a meno che non lo fissi con `RUNPANEL_SETUP_TOKEN`.
 
-## Configuration
+## Configurazione
 
-Everything lives in `.env` — see `.env.example` for the annotated version. The
-environment is validated at boot, so a mistake fails immediately with a message
-rather than on the first request that happens to need it.
+Tutto sta in `.env` — vedi `.env.example` per la versione commentata.
+L'ambiente viene validato all'avvio, così un errore fallisce subito con un
+messaggio invece che alla prima richiesta che per caso ne ha bisogno.
 
-```bash
-RUNPANEL_SECRET=            # hex, ≥64 chars. Generated at data/.secret if unset
-RUNPANEL_DATA_DIR=./data
-PORT=3000
+| Variabile | Default | Cosa fa |
+|---|---|---|
+| `RUNPANEL_SECRET` | generata in `data/.secret` | Chiave di cifratura, esadecimale, ≥64 caratteri |
+| `RUNPANEL_DATA_DIR` | `./data` | Store, repository, log, archivi |
+| `PORT` | `3000` | Porta del pannello |
+| `RUNPANEL_DB_DRIVER` | `sqlite` | `sqlite` o `postgres` |
+| `RUNPANEL_DB_FILE` | `<data>/runpanel.db` | Solo con `sqlite` |
+| `RUNPANEL_DATABASE_URL` | — | Solo con `postgres` |
+| `RUNPANEL_PG_HOST` `_PORT` `_USER` `_PASSWORD` `_DATABASE` | — | Alternativa all'URL, a credenziali separate |
+| `RUNPANEL_PG_SSL` | `disable` | `disable`, `require`, `no-verify` |
+| `RUNPANEL_PG_POOL_MAX` | `10` | Connessioni massime del pool |
+| `RUNPANEL_TRUSTED_PROXY_HOPS` | `0` | Quanti reverse proxy stanno davanti — vedi [Metterlo su internet](#metterlo-su-internet) |
+| `RUNPANEL_SETUP_TOKEN` | generato a ogni avvio | Fissa il token del primo accesso |
+| `RUNPANEL_DISABLE_SCHEDULERS` | spento | Silenzia i timer di fondo **e i gate d'accesso** |
+| `RUNPANEL_DEV_ORIGINS` | — | Origini aggiuntive accettate da `next dev` |
 
-RUNPANEL_DB_DRIVER=sqlite   # sqlite (default) | postgres
-```
+> Nessuna delle variabili `RUNPANEL_*` raggiunge i progetti che distribuisci.
+> Vengono rimosse dall'ambiente dei processi figli, perché `RUNPANEL_SECRET` è la
+> chiave con cui sono cifrati i segreti dei progetti stessi.
 
-### Using Postgres instead of the local file
+### Lo store: SQLite o Postgres
 
 ```bash
 RUNPANEL_DB_DRIVER=postgres
 RUNPANEL_DATABASE_URL=postgresql://user:pass@host:5432/runpanel
-# ...or discrete credentials: RUNPANEL_PG_HOST / _PORT / _USER / _PASSWORD / _DATABASE
 ```
 
-The schema and every query are identical on both drivers — the test suite runs
-against each to keep it that way.
+Lo schema e ogni query sono identici sui due driver — la suite di test gira su
+entrambi proprio per tenerli tali. Le migrazioni vengono applicate all'avvio,
+prima che la prima richiesta arrivi.
 
-> None of the `RUNPANEL_*` variables reach the projects you deploy. They are
-> stripped from the child environment, because `RUNPANEL_SECRET` is the key your
-> projects' own secrets are encrypted with.
+SQLite è il default e va benissimo: è il caso per cui il pannello è progettato.
+Postgres serve se lo store deve stare fuori dalla macchina, o se vuoi backup
+gestiti dalla tua infrastruttura invece che da qui.
 
-## The deploy contract
+## Distribuire un progetto
 
-What RunPanel needs to know to deploy a project. The fields are runtime-neutral;
-each runtime maps them its own way.
+### Sorgenti
 
-| Field | Docker | PM2 / native |
+- **GitHub** — collega un token nella pagina GitHub e scegli il repository da un
+  elenco, con i branch caricati dall'API. In alternativa incolla un URL
+  `https://` pubblico.
+- **Upload ZIP** — per il codice che non sta su GitHub. L'archivio viene
+  spacchettato in-process, rifiutando le voci con traversal e i link, con un
+  limite sia sull'archivio sia sul decompresso.
+
+### Runtime e preset
+
+| Runtime | Cosa fa | Chi lo esegue |
 |---|---|---|
-| `buildEnv` | `--build-arg` per entry | environment during install/build |
-| `envFile` | written 0600 and mounted read-only | written into the working directory |
-| `commands.release` | one-off container before start | one-off command in the repo dir |
-| `healthcheck` | probed by RunPanel after start | identical |
-| `runtime.restartPolicy` | `--restart` | PM2 `autorestart` |
-| `runtime.memory` / `cpus` / `shmSize` | container limits | `max_memory_restart` where applicable |
-| `docker.network` / `hostname` / `capAdd` | `docker run` flags | not applicable |
+| `node` | Rileva il package manager dal lockfile e usa gli script | PM2 |
+| `static` | Serve una cartella di build | PM2 |
+| `custom` | Solo i comandi che scrivi tu — qualsiasi linguaggio | PM2 |
+| `docker` | Costruisce il Dockerfile del repository | Docker |
+| `compose` | Avvia lo stack descritto dal compose file | Docker |
 
-Variables prefixed `NEXT_PUBLIC_`, `VITE_`, `PUBLIC_` or `REACT_APP_` are passed
-to the **build** as well as the runtime. Frontends inline those into the client
-bundle, so supplying them only at runtime ships the wrong value — or fails a
-Dockerfile that asserts on them.
+I **preset** sono punti di partenza per una forma di repository comune:
+Dockerfile, Next.js server, Vite/SPA statica, Python (uvicorn/gunicorn), Go.
+Ognuno porta con sé un runtime e i comandi che gli servono.
 
-### `runpanel.json`
+- In fase di creazione il pannello ne rileva uno guardando i file del repository,
+  e puoi sceglierlo a mano per un repository la cui forma non si vede da fuori.
+- In **Impostazioni → Build e avvio** puoi selezionare un preset e premere
+  **Applica i comandi**: i tre campi vengono riempiti con i suoi, insieme al
+  runtime, che con quei comandi viaggia sempre in coppia. Niente viene scritto
+  finché non salvi.
 
-A repository can declare how it wants to be deployed:
+La precedenza, dal basso: il preset rilevato, poi il `runpanel.json` del
+repository, poi quello che hai impostato nel pannello.
+
+### Il contratto di deploy
+
+Quello che a RunPanel serve sapere per distribuire un progetto. I campi sono
+neutri rispetto al runtime; ogni runtime li traduce a modo suo.
+
+| Campo | Docker | PM2 / nativo |
+|---|---|---|
+| `buildEnv` | un `--build-arg` per voce | ambiente durante install e build |
+| `envFile` | scritto 0600 e montato in sola lettura | scritto nella directory di lavoro |
+| `commands.release` | container usa-e-getta prima dell'avvio | comando singolo nella cartella del repo |
+| `healthcheck` | sondato da RunPanel dopo l'avvio | identico |
+| `runtime.restartPolicy` | `--restart` | `autorestart` di PM2 |
+| `runtime.memory` / `cpus` / `shmSize` | limiti del container | `max_memory_restart` dove applicabile |
+| `docker.network` / `hostname` / `capAdd` | flag di `docker run` | non applicabile |
+
+#### `runpanel.json`
+
+Un repository può dichiarare come vuole essere distribuito:
 
 ```json
 {
@@ -130,56 +195,343 @@ A repository can declare how it wants to be deployed:
 }
 ```
 
-Panel settings win where both specify a value — the operator can see the target
-machine, the repository cannot.
+Dove entrambi indicano un valore vince l'impostazione del pannello: l'operatore
+vede la macchina di destinazione, il repository no.
 
-Some fields are **panel-only** and are ignored when they come from a repository:
-`docker.mounts`, `docker.capAdd`, `docker.network`, `docker.extraHosts` and
-`envFile.path`. The rest of the contract describes how to build and run the app,
-which is the repository's business; these describe what it may reach outside its
-own container, which is yours. Choosing a Docker runtime is a choice for
-isolation, and a `runpanel.json` must not be able to hand itself the host. When
-one tries, the deploy log names the fields it dropped.
+Alcuni campi sono **solo del pannello** e vengono ignorati se arrivano da un
+repository: `docker.mounts`, `docker.capAdd`, `docker.network`,
+`docker.extraHosts` e `envFile.path`. Il resto del contratto descrive come
+costruire e avviare l'app, che è affare del repository; questi descrivono cosa
+può raggiungere fuori dal proprio container, che è affare tuo. Scegliere un
+runtime Docker è una scelta di isolamento, e un `runpanel.json` non deve poter
+consegnare a sé stesso l'host. Quando ci prova, il log del deploy nomina i campi
+che ha scartato.
 
-## Architecture
+### Variabili d'ambiente
+
+Le variabili del progetto si gestiscono nella scheda **Variabili** e sono cifrate
+a riposo. Vengono passate al processo o al container, e — se `envFile` è
+attivo — scritte anche in un file che l'app può leggere da sola.
+
+Le variabili con prefisso `NEXT_PUBLIC_`, `VITE_`, `PUBLIC_` o `REACT_APP_`
+vengono passate anche al **build**, non solo al runtime. I frontend le incorporano
+nel bundle client, quindi fornirle solo a runtime spedisce il valore sbagliato —
+o fa fallire un Dockerfile che le pretende.
+
+### Deploy automatico
+
+Ogni progetto ha un URL webhook con un segreto proprio. Attivando **Deploy
+automatico**, un push sul branch configurato avvia un deploy. Le firme sono
+verificate con HMAC-SHA256 e confronto a tempo costante; le consegne, accettate o
+rifiutate, restano nello storico con il motivo.
+
+### Com'è fatto un deploy
+
+1. **Coda** — i deploy dello stesso progetto sono serializzati, e quelli che si
+   accavallano vengono accorpati: una raffica di push produce un deploy, non sei.
+2. **Sorgente** — clone o pull del branch, con il commit registrato.
+3. **Contratto** — preset rilevato, `runpanel.json`, impostazioni del pannello.
+4. **Build** — install e build secondo il runtime, con l'output in streaming.
+5. **Release command** — eseguito una volta prima dell'avvio, in un container
+   usa-e-getta o nella cartella del repository. Se fallisce, la nuova versione
+   non parte: è il posto giusto per le migrazioni.
+6. **Avvio** — PM2 o Docker, con la policy di riavvio e i limiti del contratto.
+7. **Health check** — RunPanel sonda l'app finché non risponde. Senza, un'app che
+   parte e muore un secondo dopo risulterebbe distribuita con successo.
+
+Il **Re-Build** è la variante che pulisce prima: rimuove `node_modules`, `.next`,
+`venv` e simili secondo il runtime, e poi rifà tutto dal codice già presente.
+
+## Database e servizi
+
+Un *servizio* è un database gestito dal pannello: un container etichettato, con
+il proprio volume nominato e le credenziali cifrate.
+
+| Motore | Versioni offerte |
+|---|---|
+| PostgreSQL | 18, 17, 16, 15, 14 |
+| MySQL | 9, 8 |
+| Redis | 8, 7, 6 |
+| MongoDB | 8.0, 7.0 |
+
+Sono le major che l'immagine ufficiale supporta oggi, meno i canali di anteprima
+e quelli a cadenza breve. Un servizio già esistente non viene toccato quando
+l'elenco cambia: la versione è salvata per riga e le ricreazioni usano quella.
+
+### Il collegamento a un progetto
+
+Un servizio può essere collegato a un progetto, e allora gli fornisce la propria
+connection URL in una variabile d'ambiente. Il collegamento ha un **interruttore
+esplicito**:
+
+- **Acceso**, il valore iniettato vince su una variabile che avessi definito a
+  mano, e il pannello lo scrive nel log del deploy.
+- **Spento**, il progetto usa le proprie variabili e il pannello non tocca niente.
+
+La variabile ha un nome modificabile (`DATABASE_URL` per default, derivato dal
+tipo). Due collegamenti attivi nello stesso progetto non possono rispondere alla
+stessa chiave: il secondo viene rifiutato nominando il primo e proponendo un nome
+alternativo, invece di sovrascriverlo in silenzio.
+
+**L'host dipende da chi si collega**, e il pannello mostra la riga giusta per
+ognuno: un container sulla rete del progetto raggiunge il servizio per nome del
+container e sulla porta *interna*; tutto il resto — un processo PM2, un container
+su bridge, il tuo `psql` — passa dalla porta pubblicata sull'host.
+
+Un servizio può anche essere **autonomo**, senza progetto: allora non inietta
+niente e resta un database che gestisci dal pannello.
+
+### I database dentro un servizio
+
+Un server di database ne ospita più d'uno. La pagina del servizio li elenca
+leggendoli dal motore, non da una lista del pannello, e permette di crearli ed
+eliminarli con la connection URL pronta per ognuno.
+
+## Accesso di rete
+
+Di default RunPanel pubblica una porta come fa Docker — `-p 5433:5432`, senza
+indirizzo di bind, su tutte le interfacce. È comodo, e vuol dire che un database
+creato dal pannello risponde a tutto ciò che sta sulla LAN, e a internet se la
+macchina ha un indirizzo pubblico.
+
+Accendendo **Chi può collegarsi**, su un servizio o su un progetto, cambia così:
+
+- il container viene ricreato (o l'app riavviata) pubblicando su `127.0.0.1` e su
+  una porta che il pannello alloca;
+- il pannello occupa la porta che i tuoi client già conoscono, e inoltra solo le
+  connessioni dagli indirizzi che hai elencato;
+- `127.0.0.1` e `::1` sono sempre consentiti e non si possono togliere: da lì
+  arrivano la sonda di health check, i dumper dei backup e qualsiasi `psql` sulla
+  macchina.
+
+Le regole sono singoli indirizzi o intervalli CIDR, IPv4 o IPv6. Il pannello
+legge le interfacce della macchina e le propone come caselle da spuntare,
+etichettate: la LAN, gli intervalli VPN (la `100.64.0.0/10` di Tailscale è
+riconosciuta, visto che la sua interfaccia dichiara una `/32` inutile), e gli
+switch virtuali. Chi viene respinto compare nella pagina con un pulsante
+**Consenti**, perché altrimenti una connessione rifiutata e un database fermo si
+somigliano troppo visti dall'altra parte.
+
+Due cose da sapere prima di accenderlo:
+
+- **Fallisce in chiusura.** La porta è tenuta aperta dal processo del pannello.
+  Se il pannello non gira, la porta è chiusa. Per un controllo di sicurezza è la
+  direzione giusta in cui rompersi, ma è un cambiamento: prima il database di
+  un'app restava raggiungibile anche a pannello spento.
+- **Un'app sulla rete del progetto non è toccata.** Raggiunge il proprio database
+  per nome del container su `runpanel-net-<slug>`, che non passa mai dal gate. Ci
+  passa invece il traffico che arriva da `host.docker.internal`, ed è il motivo
+  per cui fra i suggerimenti ci sono anche le sottoreti virtuali.
+
+Non viene offerto dove non potrebbe essere onesto: un progetto **Compose**
+pubblica le porte da un file che è tuo e RunPanel non lo riscrive, e un container
+su `network: host` non ha una porta pubblicata da spostare. In entrambi i casi lo
+dice, invece di mostrare un interruttore che non farebbe niente.
+
+Per un processo nativo il pannello passa anche `HOST`/`HOSTNAME` e, per le CLI di
+cui conosce la sintassi, il flag di bind. Un'app che ignora tutto questo resta su
+tutte le interfacce alla porta spostata — quindi il pannello lo verifica, e lo
+scrive nella pagina invece di mostrare una restrizione che non è tale.
+
+## Backup e ripristino
+
+Una *policy* dice cosa salvare, ogni quanto, e quanto tenerne.
+
+### Cosa si può salvare
+
+| Target | Cosa comprende |
+|---|---|
+| Un servizio | il dump del database, per intero o di un singolo database |
+| Tutti i servizi | selettore: comprende quelli che creerai domani |
+| Un progetto | configurazione, volumi, repository — a scelta |
+| Tutti i progetti | stesso criterio |
+| Il pannello | lo store di RunPanel, con o senza la chiave di cifratura |
+
+I target sono selettori invece che elenchi fissi, così «ogni database» continua a
+significare quelli che esistono quando il backup parte.
+
+### Come vengono presi
+
+Ogni dump gira **dentro il container a cui appartiene**, che è l'unico modo di
+garantire che client e server siano della stessa versione: un `pg_dump` indietro
+di una major produce un file che `pg_restore` rifiuta, e lo produce senza
+lamentarsi. Lo store SQLite di RunPanel viene catturato con `VACUUM INTO` e poi
+verificato con `PRAGMA integrity_check`, mai copiato — una copia presa sotto WAL
+omette in silenzio le scritture più recenti.
+
+### Dove finiscono
+
+- **Disco locale** — `data/backups/archives/<anno>/<mese>`, con permessi 0600.
+- **S3-compatibile** — AWS S3, Cloudflare R2, MinIO, Backblaze B2. La firma è
+  SigV4 calcolata in casa, senza SDK. L'endpoint accetta `https://` ovunque e
+  `http://` solo verso un indirizzo privato: un archivio contiene ogni variabile
+  d'ambiente del pannello, e verso internet è il TLS a proteggerlo.
+
+L'archivio è un normale zip con un `manifest.json` e un `checksums.txt` in
+formato `sha256sum -c`, così si può verificare e spacchettare senza RunPanel. Le
+variabili d'ambiente e le credenziali dei servizi al suo interno sono ricifrate
+con la chiave di questo pannello; includere la chiave stessa è una scelta a
+parte, ed esplicita.
+
+### Pianificazione, retention, ripristino
+
+| | |
+|---|---|
+| Pianificazione | cron a cinque campi più la famiglia `@daily`, nel fuso che scegli |
+| Retention | numero, età e dimensione totale, insieme — l'archivio valido più recente non viene mai raccolto |
+| Ripristino | guidato, con un backup automatico pre-ripristino che interrompe il ripristino se fallisce |
+
+Il ripristino mostra il contenuto dell'archivio e ti fa scegliere voce per voce.
+Lo store del pannello è l'unica cosa che non viene ripristinata a caldo: un file
+che questo processo tiene aperto non può essere sostituito sotto di lui, quindi
+il database ripristinato viene messo da parte e entra in servizio al riavvio
+successivo, con il precedente conservato accanto.
+
+## Avvio automatico
+
+La pagina Autostart riferisce cosa questa macchina fa già e genera quello che non
+fa: una unit systemd con percorsi assoluti, ordinata dopo `docker.service` e che
+lo richiede, oppure uno script `@reboot` supervisionato quando systemd non c'è.
+Se RunPanel gira da root la installa; altrimenti produce un unico blocco da
+incollare. Non esegue mai `systemctl start`: metterebbe un secondo pannello sulla
+porta accanto a quello in esecuzione.
+
+Controlla anche le cose che rendono inutile l'avvio automatico quando mancano: se
+Docker stesso è abilitato all'avvio, e se `pm2 save` è mai stato eseguito — senza,
+PM2 non rimette su niente dopo un riavvio, anche quando il pannello torna.
+
+Dentro il pannello, ogni progetto e ogni servizio ha un interruttore, un ordine,
+un ritardo, e se aspettare che risponda prima di avviare il successivo. Il
+riconciliatore che applica tutto questo all'avvio è una passata di **riparazione**:
+aspetta che i riavvii automatici di Docker si assestino e avvia solo ciò che è
+ancora giù, e non innesca mai un build.
+
+## Registri privati
+
+Le credenziali dei registri Docker si inseriscono dal pannello, sono cifrate a
+riposo e riscritte nella configurazione di Docker all'avvio — la directory dei
+dati può sopravvivere a una ricostruzione del container, e un file di
+autenticazione mancante si manifesta come un `pull access denied` che non dice
+niente di utile.
+
+## Il pannello, giorno per giorno
+
+| Pagina | A cosa serve |
+|---|---|
+| **Panoramica** | stato di tutto, in una schermata |
+| **Progetti** | deploy, log in diretta, storico, variabili, file, terminale, impostazioni |
+| **Servizi** | database gestiti, i loro database interni, collegamenti ai progetti |
+| **Monitor** | CPU, memoria, carico, uptime dell'host e dei container |
+| **Storage** | cosa occupa il disco: immagini, volumi, archivi, repository |
+| **Backup** | policy, esecuzioni, archivi, ripristini |
+| **Autostart** | cosa torna su dopo un riavvio |
+| **Diagnostica** | cosa manca a questa installazione e cosa premere |
+| **GitHub** | token, repository, branch |
+| **Account** | password, sessioni per dispositivo, preferenze |
+
+Dettagli che tornano utili:
+
+- **Terminale** — una shell vera sulla cartella del progetto o dentro il suo
+  container, con le sessioni inattive raccolte automaticamente.
+- **File** — un browser confinato alla cartella del progetto, che risolve i
+  symlink prima di aprire qualsiasi cosa.
+- **Log** — in diretta via SSE mentre il deploy gira, e su file dopo.
+- **Sessioni** — una per dispositivo, revocabili singolarmente dall'account.
+- **Preferenze** — intervallo di aggiornamento (2, 5, 10 secondi), fuso orario,
+  cinque temi di accento.
+- **Palette comandi** e navigazione da tastiera; su mobile una barra in basso e
+  il menu che entra da destra.
+
+## Sicurezza
+
+- Password con hash bcrypt; le sessioni sono per dispositivo e memorizzate come
+  SHA-256 del cookie, così una copia del database non può essere riusata
+- Il setup iniziale richiede il token stampato all'avvio, così un pannello non
+  ancora reclamato non può esserlo da chi arriva per primo
+- Il limite sui tentativi di accesso sopravvive a un riavvio, conta in modo
+  atomico, ed è legato a un indirizzo solo dove un proxy configurato lo garantisce
+- Ogni route `/api` viene rifiutata senza sessione da `proxy.ts` prima ancora di
+  essere raggiunta, in aggiunta al controllo di ciascun handler
+- Variabili d'ambiente dei progetti, credenziali dei servizi e dei registri
+  cifrate a riposo (AES-256-GCM)
+- La configurazione di RunPanel non raggiunge mai i progetti distribuiti
+- Firme dei webhook verificate con HMAC-SHA256 e confronto a tempo costante
+- Le operazioni sui file risolvono i symlink e restano confinate al progetto; gli
+  upload ZIP sono spacchettati in-process, rifiutando voci con traversal e link,
+  con un limite sia sull'archivio sia sul decompresso
+- Gli URL dei repository devono essere `https://` pubblici, e il token GitHub è
+  allegato soltanto alle richieste verso GitHub
+- I comandi esterni passano sempre da un array di argomenti, mai da una stringa
+  di shell
+- Qualunque porta pubblicata può essere limitata a reti indicate, davanti a un
+  ascoltatore spostato su loopback perché non ci sia modo di aggirarla
+
+### Metterlo su internet
+
+Termina il TLS davanti al pannello e digli dietro quanti proxy si trova:
+
+```bash
+RUNPANEL_TRUSTED_PROXY_HOPS=1
+```
+
+Senza, il pannello non può credere a nessun indirizzo del client —
+`X-Forwarded-For` viene esteso da ogni hop, quindi la prima voce è quella scelta
+dal client — e ripiega su un unico limite di accesso valido per tutto l'account.
+Il cookie di sessione è marcato `Secure` nelle build di produzione, e i browser
+lo accettano solo su HTTPS o su localhost.
+
+## Architettura
 
 ```
 app/
-  (auth)/login          first-run setup and sign-in
-  (panel)/              overview, projects, services, monitor, storage, settings
-  api/                  REST handlers; /projects/:id/stream is the SSE channel
+  (auth)/login          setup iniziale e accesso
+  (panel)/              panoramica, progetti, servizi, monitor, storage, backup, impostazioni
+  api/                  handler REST; /projects/:id/stream è il canale SSE
 lib/
-  db/                   Kysely schema, migrations, both dialects
-  deploy-contract.ts    the contract, its parser and preflight checks
-  ip-access.ts          CIDR matching, and the host's own networks
+  db/                   schema Kysely, migrazioni, entrambi i dialetti
+  deploy-contract.ts    il contratto, il suo parser e i controlli preliminari
+  ip-access.ts          confronto CIDR, e le reti della macchina
+  service-versions.ts   quali versioni dei motori sono offerte
   hooks/                useProjectStream (SSE), useResource (polling)
 services/
-  deploy-pipeline.ts    the deploy orchestrator
-  deploy-queue.ts       per-project serialisation and coalescing
-  access-gate.ts        the TCP gate in front of a restricted port
-  docker/               cli, ownership labels, images, volumes, stats, gc
-  builders/             node, docker, static, custom
-  process-drivers/      pm2 and docker
-tests/                  end-to-end suites, one isolated server each
-data/                   runtime state (gitignored)
+  deploy-pipeline.ts    l'orchestratore del deploy
+  deploy-queue.ts       serializzazione e accorpamento per progetto
+  access-gate.ts        il gate TCP davanti a una porta limitata
+  backup/               policy, dump, archivi, destinazioni, ripristino
+  autostart/            rilevamento, generazione della unit, riconciliazione
+  docker/               cli, etichette di proprietà, immagini, volumi, statistiche, gc
+  builders/             node, docker, static, compose, custom
+  process-drivers/      pm2, docker, compose
+  service-templates/    postgresql, mysql, redis, mongodb
+tests/                  suite end-to-end, un server isolato ciascuna
+data/                   stato a runtime (in gitignore)
 ```
 
-## Development
+Tutte le route `/api` richiedono una sessione, tranne l'accesso e i webhook. Le
+uniche superfici pensate per l'esterno sono il webhook GitHub per progetto e i
+canali SSE, che comunque richiedono la sessione.
+
+## Sviluppo
 
 ```bash
-npm run dev        # dev server
+npm run dev        # server di sviluppo
 npm run typecheck
 npm run lint
-npm test           # full suite
-npm run test:quick # skip the Docker suites
+npm test           # suite completa
+npm run test:quick # salta le suite che richiedono Docker
 ```
 
-The runner reports what the machine can do and skips the rest rather than
-failing: suites needing a Docker daemon, and the native-runtime suite needing a
-real PM2 (`npm i -g pm2`). Both are listed as `SKIP` in the summary, so a green
-run never hides untested ground.
+Il runner dichiara cosa la macchina è in grado di fare e salta il resto invece
+di fallire: le suite che richiedono un daemon Docker, e quella sul runtime nativo
+che richiede un PM2 vero (`npm i -g pm2`). Entrambe compaiono come `SKIP` nel
+riepilogo, così una corsa verde non nasconde mai terreno non testato.
 
-Postgres suites need a database:
+Ogni suite riceve un server tutto suo su una directory dati temporanea. Alcune
+sono *standalone*: caricano direttamente il modulo da testare, senza server né
+daemon, e coprono le regole pure — confronto CIDR, contratto di deploy, firma
+SigV4, iniezione delle variabili, versioni dei motori.
+
+Le suite Postgres richiedono un database:
 
 ```bash
 docker run -d --name rp-test-pg -e POSTGRES_PASSWORD=test \
@@ -189,147 +541,27 @@ docker run -d --name rp-test-pg -e POSTGRES_PASSWORD=test \
 RUNPANEL_TEST_PG_URL=postgresql://runpanel:test@127.0.0.1:55432/runpanel_test npm test
 ```
 
-Icons are bundled from a generated subset. After adding one, `npm run icons` —
-though `predev` and `prebuild` run it for you, and the build fails on an icon
-name that does not exist.
+Le icone sono raccolte in un sottoinsieme generato. Dopo averne aggiunta una,
+`npm run icons` — anche se `predev` e `prebuild` lo eseguono già per te, e il
+build fallisce su un nome di icona che non esiste.
 
-## Security
+## Limiti noti
 
-- Passwords hashed with bcrypt; sessions are per device and stored as a SHA-256
-  of the cookie, so a database copy cannot be replayed
-- First-run setup requires the token printed at boot, so an unclaimed panel
-  cannot be claimed by whoever arrives first
-- Login rate limiting survives a restart, counts atomically, and is keyed on an
-  address only where a configured proxy vouches for it
-- Every `/api` route is refused without a session by `proxy.ts` before it is
-  reached, in addition to each handler's own check
-- Project env vars and service credentials encrypted at rest (AES-256-GCM)
-- RunPanel's own configuration never reaches deployed projects
-- Webhook signatures verified with HMAC-SHA256 and a constant-time compare
-- File operations resolve symlinks and are confined to the project; ZIP uploads
-  are unpacked in-process, refusing traversal entries and links, capped by both
-  archive and decompressed size
-- Repository URLs must be public `https://`, and the GitHub token is only ever
-  attached to requests to GitHub
-- Any published port can be restricted to named networks, in front of a listener
-  that is moved to loopback so there is no way around it
+- Il **tema chiaro** non è incluso; il livello dei token è strutturato per
+  accoglierlo.
+- Le restrizioni sulle porte sono applicate dal processo del pannello, quindi non
+  sopravvivono al suo arresto — la porta semplicemente si chiude. Un insieme di
+  regole che deve valere anche a pannello spento richiede in più un firewall
+  sull'host.
+- Il ripristino dello store **Postgres** di RunPanel è rifiutato dal pannello:
+  l'archivio contiene il dump e il comando `pg_restore` esatto, da eseguire con
+  il pannello fermo.
+- Il ripristino non confronta le versioni: un dump preso da una major e
+  ripristinato su un'altra viene accettato e fallisce durante l'esecuzione, con
+  la copia di sicurezza già presa.
+- L'installazione automatica all'avvio è **solo per Linux**; altrove il pannello
+  mostra cosa fare a mano.
 
-### Restricting who can reach a port
-
-By default RunPanel publishes a port the way Docker does — `-p 5433:5432`, with
-no bind address, on every interface. That is convenient and it means a database
-created from the panel answers to everything on the LAN, and to the internet if
-the host has a public address.
-
-Switching **Chi può collegarsi** on, for a service or a project, changes that:
-
-- the container is recreated (or the app restarted) publishing on `127.0.0.1`
-  and on a port the panel allocates;
-- the panel binds the port your clients already know, and forwards only
-  connections from the addresses you listed;
-- `127.0.0.1` and `::1` are always allowed and cannot be removed — the health
-  probe, the backup dumpers and any `psql` on the box come from there.
-
-Rules are single addresses or CIDR ranges, IPv4 or IPv6. The panel reads the
-host's own interfaces and offers them as tick boxes, labelled: the LAN, VPN
-ranges (Tailscale's `100.64.0.0/10` is recognised, since its interface reports a
-useless `/32`), and virtual switches. Whoever gets turned away is listed on the
-page with an **Consenti** button, because otherwise a refused connection and a
-stopped database look identical from the other end.
-
-Two things worth knowing before turning it on:
-
-- **It fails closed.** The port is held open by the panel process. If the panel
-  is not running, the port is shut. For a security control that is the right
-  direction to fail, but it is a change: an app's database used to stay
-  reachable while the panel was down.
-- **An app on the project network is unaffected.** It reaches its database by
-  container name on `runpanel-net-<slug>`, which never goes through the gate.
-  Traffic arriving via `host.docker.internal` does, which is why the virtual
-  subnets are among the suggestions.
-
-Not offered where it could not be honest: a **Compose** project publishes ports
-from a file you own and RunPanel will not rewrite it, and a container on
-`network: host` has no published port to move. Both say so instead of showing a
-switch that would do nothing.
-
-For a native process the panel also passes `HOST`/`HOSTNAME` and, for the CLIs
-where the spelling is known, the bind flag. An app that ignores all of it stays
-on every interface at the moved port — so the panel checks, and says so on the
-page rather than showing a restriction that is not one.
-
-### Putting it on the internet
-
-Terminate TLS in front of the panel and tell it how many proxies it is behind:
-
-```bash
-RUNPANEL_TRUSTED_PROXY_HOPS=1
-```
-
-Without it the panel cannot believe any client address — `X-Forwarded-For` is
-appended to by each hop, so the first entry is the client's own — and falls back
-to a single account-wide login limit. The session cookie is marked `Secure` in
-production builds, which browsers only accept over HTTPS or on localhost.
-
-## Backups
-
-A *policy* says what to save, how often, and how much of it to keep. Targets are
-selectors rather than fixed lists, so "every database" keeps meaning the ones
-that exist when the backup runs — including the service you create tomorrow.
-
-Every dump runs **inside the container it belongs to**, which is the only way to
-guarantee the client and the server are the same version: a `pg_dump` a major
-behind produces a file `pg_restore` refuses, and produces it without complaining.
-RunPanel's own SQLite store is captured with `VACUUM INTO` and then verified with
-`PRAGMA integrity_check`, never copied — a copy taken under WAL silently omits
-the most recent writes.
-
-The archive is a plain zip with a `manifest.json` and a `checksums.txt` in
-`sha256sum -c` format, so it can be verified and unpacked without RunPanel. Env
-vars and service credentials inside it are re-encrypted with this panel's key;
-including the key itself is a separate, explicit choice.
-
-| | |
-|---|---|
-| Schedules | five-field cron plus the `@daily` family, in the timezone you pick |
-| Retention | count, age and total size, together — the newest good archive is never collected |
-| Restore | guided, with an automatic pre-restore backup that aborts the restore if it fails |
-| Where | `data/backups/archives/<year>/<month>`, 0600 |
-
-The panel's own store is the one thing not restored live: a file this process
-has open cannot be swapped underneath it, so the restored database is staged and
-put into service at the next boot, with the previous one kept beside it.
-
-## Starting at boot
-
-The Autostart page reports what this host already does and generates what it
-does not: a systemd unit with absolute paths, ordered after `docker.service` and
-requiring it, or a supervised `@reboot` script when systemd is not available. If
-RunPanel runs as root it installs it; otherwise it renders a single block to
-paste. It never runs `systemctl start` — that would put a second panel on the
-port next to the running one.
-
-It also checks the things that make autostart useless when they are missing:
-whether Docker itself is enabled at boot, and whether `pm2 save` has ever been
-run — without it, PM2 brings back nothing after a reboot even when the panel
-comes back.
-
-Inside the panel, each project and service has a switch, an order, a delay, and
-whether to wait for it to answer before starting the next one. The reconciler
-that applies this at boot is a **repair** pass: it waits for Docker's own
-restarts to settle and starts only what is still down, and it never triggers a
-build.
-
-## Known gaps
-
-- **Light theme** is not shipped; the token layer is structured for it.
-- Port restrictions are enforced by the panel process, so they do not survive it
-  being stopped — the port simply closes. A rule set that has to hold with the
-  panel down needs a host firewall as well.
-- Restoring RunPanel's own **Postgres** store is refused from the panel: the
-  archive carries the dump and the exact `pg_restore` command, to be run with
-  the panel stopped.
-
-## License
+## Licenza
 
 MIT
