@@ -1,9 +1,9 @@
 import { IServiceTemplate, ServiceConfig, DockerRunConfig } from "./types";
+import { defaultVersionFor } from "@/lib/service-versions";
 
 export const redisTemplate: IServiceTemplate = {
   type: "redis",
-  defaultVersion: "7",
-  availableVersions: ["7", "6"],
+  defaultVersion: defaultVersionFor("redis"),
 
   getDockerConfig(config: ServiceConfig): DockerRunConfig {
     return {

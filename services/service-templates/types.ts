@@ -16,8 +16,16 @@ export interface DockerRunConfig {
 
 export interface IServiceTemplate {
   type: string;
+  /**
+   * Only ever used to fill in a probe config in `service-provisioner.ts`, where
+   * the answer being computed does not depend on it. Read from
+   * `lib/service-versions.ts` so it cannot contradict what the wizard offers.
+   *
+   * The sibling `availableVersions` that used to live here was read by nothing
+   * at all, and had quietly drifted out of agreement with the list the wizard
+   * actually shows. There is one list now, and it is not here.
+   */
   defaultVersion: string;
-  availableVersions: string[];
   getDockerConfig(config: ServiceConfig): DockerRunConfig;
   getConnectionString(config: ServiceConfig): string;
 }

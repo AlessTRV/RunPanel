@@ -10,7 +10,7 @@
  *
  * Postgres suites need RUNPANEL_TEST_PG_URL, e.g.
  *   docker run -d --name rp-test-pg -e POSTGRES_PASSWORD=test \
- *     -e POSTGRES_USER=runpanel -e POSTGRES_DB=runpanel_test -p 55432:5432 postgres:16-alpine
+ *     -e POSTGRES_USER=runpanel -e POSTGRES_DB=runpanel_test -p 55432:5432 postgres:18-alpine
  *   RUNPANEL_TEST_PG_URL=postgresql://runpanel:test@127.0.0.1:55432/runpanel_test npm test
  *
  * Each suite gets its own server on its own data directory. Several of them

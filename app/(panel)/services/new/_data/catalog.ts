@@ -6,23 +6,26 @@
  * keystroke in the wizard allocated it again.
  */
 
-export type ServiceType = "postgresql" | "mysql" | "redis" | "mongodb";
+import { SERVICE_VERSIONS, type ServiceType } from "@/lib/service-versions";
+
+export type { ServiceType };
 
 export interface DatabaseOption {
   type: ServiceType;
   label: string;
   icon: string;
   defaultPort: number;
-  versions: string[];
+  /** Newest first. Not declared here — see `lib/service-versions.ts`. */
+  versions: readonly string[];
   /** Redis has no user or database name, only a password. */
   credentialled: boolean;
 }
 
 export const DATABASE_OPTIONS: DatabaseOption[] = [
-  { type: "postgresql", label: "PostgreSQL", icon: "solar:database-linear", defaultPort: 5432, versions: ["16", "15", "14"], credentialled: true },
-  { type: "mysql", label: "MySQL", icon: "solar:database-linear", defaultPort: 3306, versions: ["8", "5.7"], credentialled: true },
-  { type: "redis", label: "Redis", icon: "solar:bolt-linear", defaultPort: 6379, versions: ["7", "6"], credentialled: false },
-  { type: "mongodb", label: "MongoDB", icon: "solar:database-linear", defaultPort: 27017, versions: ["7", "6", "5"], credentialled: true },
+  { type: "postgresql", label: "PostgreSQL", icon: "solar:database-linear", defaultPort: 5432, versions: SERVICE_VERSIONS.postgresql.available, credentialled: true },
+  { type: "mysql", label: "MySQL", icon: "solar:database-linear", defaultPort: 3306, versions: SERVICE_VERSIONS.mysql.available, credentialled: true },
+  { type: "redis", label: "Redis", icon: "solar:bolt-linear", defaultPort: 6379, versions: SERVICE_VERSIONS.redis.available, credentialled: false },
+  { type: "mongodb", label: "MongoDB", icon: "solar:database-linear", defaultPort: 27017, versions: SERVICE_VERSIONS.mongodb.available, credentialled: true },
 ];
 
 export interface TemplateField {

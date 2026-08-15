@@ -1,9 +1,9 @@
 import { IServiceTemplate, ServiceConfig, DockerRunConfig } from "./types";
+import { defaultVersionFor } from "@/lib/service-versions";
 
 export const mysqlTemplate: IServiceTemplate = {
   type: "mysql",
-  defaultVersion: "8",
-  availableVersions: ["8", "5.7"],
+  defaultVersion: defaultVersionFor("mysql"),
 
   getDockerConfig(config: ServiceConfig): DockerRunConfig {
     return {

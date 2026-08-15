@@ -1,9 +1,9 @@
 import { IServiceTemplate, ServiceConfig, DockerRunConfig } from "./types";
+import { defaultVersionFor, postgresVolumePath } from "@/lib/service-versions";
 
 export const postgresqlTemplate: IServiceTemplate = {
   type: "postgresql",
-  defaultVersion: "16",
-  availableVersions: ["16", "15", "14", "13"],
+  defaultVersion: defaultVersionFor("postgresql"),
 
   getDockerConfig(config: ServiceConfig): DockerRunConfig {
     return {
@@ -13,7 +13,17 @@ export const postgresqlTemplate: IServiceTemplate = {
         POSTGRES_PASSWORD: config.credentials.password,
         POSTGRES_DB: config.credentials.database,
       },
-      volumes: [`runpanel-pg-${config.projectSlug ? config.projectSlug + "-" : ""}${config.name}:/var/lib/postgresql/data`],
+      /*
+        The mount point follows the major — see `postgresVolumePath`. The volume
+        NAME deliberately does not: `serviceVolumeNames` probes this function
+        with the template's default version rather than the service's own, and
+        takes only the part before the colon. A name that varied by version
+        would make deleting a PostgreSQL 15 service compute the volume of a
+        PostgreSQL 18 one.
+      */
+      volumes: [
+        `runpanel-pg-${config.projectSlug ? config.projectSlug + "-" : ""}${config.name}:${postgresVolumePath(config.version)}`,
+      ],
       port: 5432,
     };
   },

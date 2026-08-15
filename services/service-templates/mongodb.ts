@@ -1,9 +1,9 @@
 import { IServiceTemplate, ServiceConfig, DockerRunConfig } from "./types";
+import { defaultVersionFor } from "@/lib/service-versions";
 
 export const mongodbTemplate: IServiceTemplate = {
   type: "mongodb",
-  defaultVersion: "7",
-  availableVersions: ["7", "6", "5"],
+  defaultVersion: defaultVersionFor("mongodb"),
 
   getDockerConfig(config: ServiceConfig): DockerRunConfig {
     return {
