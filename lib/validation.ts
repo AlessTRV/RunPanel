@@ -4,7 +4,15 @@ import { ruleProblem } from "./ip-access";
 
 
 
-export const runtimeTypes = ["node", "docker", "compose", "custom"] as const;
+/**
+ * `static` belongs here even though the manual runtime picker does not offer
+ * it: the "Vite / SPA statica" preset declares it, and picking a preset picks
+ * its runtime. Left out, choosing that preset produced a PATCH the schema
+ * rejected — the project could not be created at all, with "Dati non validi"
+ * and nothing pointing at the runtime. `ProjectsTable.runtime_type` and the
+ * builder registry have always known the value.
+ */
+export const runtimeTypes = ["node", "static", "docker", "compose", "custom"] as const;
 export type RuntimeType = (typeof runtimeTypes)[number];
 
 /**
