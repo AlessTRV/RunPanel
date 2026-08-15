@@ -26,6 +26,14 @@ export async function GET() {
       label: preset.label,
       description: preset.description,
       runtime: preset.runtime,
+      /*
+        The commands too, so the form can suggest the ones that belong to the
+        shape the operator picked. They used to be hardcoded to `npm ci` /
+        `npm run build` / `npm start` whatever was selected, which meant
+        choosing "Python" and being shown Node — and a suggestion that is wrong
+        for the project is worse than none, because it is the thing people copy.
+      */
+      commands: preset.contract.commands ?? {},
     })),
   });
 }

@@ -103,9 +103,16 @@ export function AppForm({
   const zipInputRef = useRef<HTMLInputElement>(null);
 
   const { data: presetData } = useResource<{
-    presets: { id: string; label: string; description: string; runtime: RuntimeType }[];
+    presets: {
+      id: string;
+      label: string;
+      description: string;
+      runtime: RuntimeType;
+      commands: { install?: string; build?: string; start?: string };
+    }[];
   }>("/api/presets");
   const presets = presetData?.presets ?? [];
+  const selectedPreset = presets.find((preset) => preset.id === presetId) ?? null;
 
   const { data: repoData, loading: reposLoading } = useResource<{
     connected?: boolean;
@@ -462,10 +469,23 @@ export function AppForm({
               Un comando per riga, eseguiti in ordine nella stessa shell. Lasciando vuoto, RunPanel
               prova a dedurli dal repository — per un progetto Node.js quasi sempre ci riesce.
             </p>
+            {/*
+              The suggestions follow the preset that was chosen, not the
+              language the panel was written in. They were fixed at `npm ci` /
+              `npm run build` / `npm start`, so picking "Python (uvicorn)" and
+              then copying the placeholder produced a Node command — and for
+              Python it produced the one that fails on any current Debian, since
+              a bare `pip install` there is refused as an externally managed
+              environment.
+
+              An empty placeholder where the preset has no command for a slot is
+              the honest answer: a Python project has no build step, and saying
+              `npm run build` there is worse than saying nothing.
+            */}
             {[
-              { label: "Install", value: installCmd, set: setInstallCmd, ph: "npm ci" },
-              { label: "Build", value: buildCmd, set: setBuildCmd, ph: "npm run build" },
-              { label: "Start", value: startCmd, set: setStartCmd, ph: "npm start" },
+              { label: "Install", value: installCmd, set: setInstallCmd, slot: "install" as const, fallback: "npm ci" },
+              { label: "Build", value: buildCmd, set: setBuildCmd, slot: "build" as const, fallback: "npm run build" },
+              { label: "Start", value: startCmd, set: setStartCmd, slot: "start" as const, fallback: "npm start" },
             ].map((field) => (
               <div key={field.label}>
                 <label className="text-muted mb-1 block text-sm font-medium">{field.label}</label>
@@ -473,7 +493,9 @@ export function AppForm({
                   value={field.value}
                   onChange={(e) => field.set(e.target.value)}
                   rows={field.label === "Start" ? 1 : 2}
-                  placeholder={field.ph}
+                  placeholder={
+                    selectedPreset ? (selectedPreset.commands[field.slot] ?? "") : field.fallback
+                  }
                   className="border-border bg-background text-foreground focus:border-accent/60 w-full resize-y rounded-[var(--radius)] border px-3 py-2 font-mono text-sm outline-none"
                 />
               </div>

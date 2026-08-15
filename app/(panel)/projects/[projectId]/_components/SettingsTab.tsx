@@ -270,10 +270,17 @@ export function SettingsTab({
             <CommandField
               label="Comandi di install"
               value={contract.commands.install ?? ""}
+              /*
+                Il suggerimento era `pip install -r requirements.txt`, che su
+                Debian 12 e Ubuntu 23.04 in su non funziona: PEP 668 marca il
+                Python di sistema come externally-managed e pip rifiuta. Il
+                preset Python del pannello lo sapeva già e crea un venv; questo
+                campo diceva il contrario, ed è il testo che si copia.
+              */
               placeholder={
                 project.runtime_type === "node"
                   ? "rilevato automaticamente"
-                  : "pip install -r requirements.txt"
+                  : "python3 -m venv venv\nvenv/bin/pip install -r requirements.txt"
               }
               hint="Un comando per riga, eseguiti in ordine nella stessa shell."
               onChange={(v) => patchContract({ commands: { ...contract.commands, install: v } })}
@@ -290,7 +297,13 @@ export function SettingsTab({
               label="Comando di start"
               rows={1}
               value={contract.commands.start ?? ""}
-              placeholder={project.runtime_type === "node" ? "rilevato automaticamente" : "./app"}
+              // Coerente con l'install qui sopra: i tre campi descrivevano tre
+              // progetti diversi — install Python, build Go, start Go.
+              placeholder={
+                project.runtime_type === "node"
+                  ? "rilevato automaticamente"
+                  : "venv/bin/python -m uvicorn main:app"
+              }
               hint="Solo la prima riga viene usata come comando di avvio."
               onChange={(v) => patchContract({ commands: { ...contract.commands, start: v } })}
             />
