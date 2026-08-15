@@ -11,6 +11,12 @@ import { Code, FieldHint } from "@/components/ui/Hint";
 import { AccentPicker } from "@/components/ui/AccentPicker";
 import { SessionList } from "@/components/ui/SessionList";
 import { RegistryList } from "@/components/ui/RegistryList";
+import {
+  DEFAULT_POLL_INTERVAL,
+  isPollInterval,
+  POLL_INTERVALS,
+  type PollInterval,
+} from "@/lib/polling";
 
 /**
  * Password, devices, and the handful of preferences the panel has.
@@ -21,6 +27,29 @@ import { RegistryList } from "@/components/ui/RegistryList";
  * "Preferences". Password and preferences stay open because they are why anyone
  * comes here; devices, registries and theme are read once and then not again.
  */
+/**
+ * Labels for the shared interval list.
+ *
+ * A `Record` over the union rather than a hand-written array of pairs: the list
+ * lives in lib/polling.ts and is also what the settings schema validates
+ * against, so adding an interval there now fails to compile here until it has a
+ * label, instead of quietly rendering a picker the API would reject.
+ */
+const POLL_INTERVAL_LABELS: Record<PollInterval, string> = {
+  "30": "30 s",
+  "60": "1 min",
+  "120": "2 min",
+  "300": "5 min",
+  "600": "10 min",
+  "900": "15 min",
+  "1800": "30 min",
+};
+
+const POLL_INTERVAL_OPTIONS = POLL_INTERVALS.map((value) => ({
+  value,
+  label: POLL_INTERVAL_LABELS[value],
+}));
+
 export default function AccountPage() {
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -30,7 +59,11 @@ export default function AccountPage() {
   const [pollingInterval, setPollingInterval] = useState("5");
   const [timezone, setTimezone] = useState(Intl.DateTimeFormat().resolvedOptions().timeZone);
   const [publicUrl, setPublicUrl] = useState("");
-  const [pollInterval, setPollInterval] = useState("5");
+  // Seeded from the shared default, not from "5": that is a value belonging to
+  // the refresh picker above, and it is not one of this control's options — so
+  // until the setting had been saved once, a "pick one" that disallows an empty
+  // selection rendered with nothing picked at all.
+  const [pollInterval, setPollInterval] = useState<PollInterval>(DEFAULT_POLL_INTERVAL);
   const [prefsSaving, setPrefsSaving] = useState(false);
 
   useEffect(() => {
@@ -41,7 +74,12 @@ export default function AccountPage() {
         if (data.polling_interval) setPollingInterval(data.polling_interval);
         if (data.timezone) setTimezone(data.timezone);
         if (data.panel_public_url) setPublicUrl(data.panel_public_url);
-        if (data.deploy_poll_interval) setPollInterval(data.deploy_poll_interval);
+        // Narrowed rather than trusted: this arrives as JSON, and a stored
+        // value that is not on the list is the same empty-picker bug the
+        // default above was fixing, just arriving from the other direction.
+        if (isPollInterval(data.deploy_poll_interval)) {
+          setPollInterval(data.deploy_poll_interval);
+        }
       })
       .catch(() => {});
     return () => controller.abort();
@@ -193,15 +231,7 @@ export default function AccountPage() {
               label="Controllo periodico dei repository"
               value={pollInterval}
               onChange={setPollInterval}
-              options={[
-                { value: "30", label: "30 s" },
-                { value: "60", label: "1 min" },
-                { value: "120", label: "2 min" },
-                { value: "300", label: "5 min" },
-                { value: "600", label: "10 min" },
-                { value: "900", label: "15 min" },
-                { value: "1800", label: "30 min" },
-              ]}
+              options={POLL_INTERVAL_OPTIONS}
             />
             <FieldHint>
               Ogni quanto RunPanel guarda il branch dei progetti impostati su{" "}

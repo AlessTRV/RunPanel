@@ -2,6 +2,7 @@ import { getDb, nowIso } from "@/lib/db";
 import type { ProjectsTable } from "@/lib/db/schema";
 import { githubRequest, githubToken, parseRepoSlug, type RepoSlug } from "@/lib/github";
 import { getSetting } from "@/lib/settings";
+import { DEFAULT_POLL_INTERVAL, POLL_INTERVAL_SETTING } from "@/lib/polling";
 import { enqueueDeploy } from "./deploy-queue";
 
 /**
@@ -35,12 +36,7 @@ import { enqueueDeploy } from "./deploy-queue";
 const TICK_MS = 15_000;
 /** Long enough after boot for the store to be ready. */
 const FIRST_TICK_DELAY_MS = 20_000;
-const INTERVAL_SETTING = "deploy_poll_interval";
-/** Seconds. Five minutes is slow enough to be free and fast enough to feel automatic. */
-const DEFAULT_INTERVAL_SECONDS = 300;
-
-/** The intervals the panel offers, in seconds. Shared with the settings schema. */
-export const POLL_INTERVALS = ["30", "60", "120", "300", "600", "900", "1800"] as const;
+const DEFAULT_INTERVAL_SECONDS = Number(DEFAULT_POLL_INTERVAL);
 
 const globalRef = globalThis as typeof globalThis & {
   __runpanelPollTimer?: NodeJS.Timeout;
@@ -67,7 +63,7 @@ export function startDeployPoller(): void {
 }
 
 export async function pollIntervalSeconds(): Promise<number> {
-  const raw = await getSetting(INTERVAL_SETTING);
+  const raw = await getSetting(POLL_INTERVAL_SETTING);
   const parsed = Number.parseInt(raw ?? "", 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_INTERVAL_SECONDS;
 }

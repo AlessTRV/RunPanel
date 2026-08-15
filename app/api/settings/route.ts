@@ -6,7 +6,7 @@ import { getAllSettings, setSetting } from "@/lib/settings";
 import { ACCENT_PRESETS, ACCENT_SETTING_KEY } from "@/lib/themes";
 import { PANEL_PUBLIC_URL_SETTING } from "@/lib/panel-url";
 import { panelPublicUrlSchema } from "@/lib/validation";
-import { POLL_INTERVALS } from "@/services/deploy-poll";
+import { POLL_INTERVALS } from "@/lib/polling";
 
 /**
  * Settings reported only as present or absent, never by value.
