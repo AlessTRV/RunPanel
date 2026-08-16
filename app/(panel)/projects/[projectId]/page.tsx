@@ -22,6 +22,7 @@ import { DeploymentsTab } from "./_components/DeploymentsTab";
 import { EnvTab } from "./_components/EnvTab";
 import { TerminalTab } from "./_components/TerminalTab";
 import { SettingsTab } from "./_components/SettingsTab";
+import { VersionDialog } from "./_components/VersionDialog";
 import { FileManager } from "./_components/FileManager";
 import type { Deployment, EnvVar, ProcessInfo, Project, TabId } from "./_components/types";
 
@@ -72,6 +73,7 @@ export default function ProjectDetailPage() {
   // form you came for.
   const [renameOpen, setRenameOpen] = useState(false);
   const [renameValue, setRenameValue] = useState("");
+  const [versionsOpen, setVersionsOpen] = useState(false);
 
   const prevStatus = useRef<string | undefined>(undefined);
 
@@ -181,29 +183,112 @@ export default function ProjectDetailPage() {
     [project?.builder_config]
   );
 
-  async function handleDeploy(mode: "deploy" | "rebuild") {
+  /**
+   * Start a deploy, optionally of one specific commit.
+   *
+   * With a `commitSha` the route pins the project to it first, so from then on
+   * Deploy rebuilds that commit and auto-deploy stays suspended until the pin is
+   * released. `branch` is persisted before the deploy when the version dialog
+   * picked a different one — the project tracks one branch everywhere else, and
+   * a deploy from a branch the header does not name would be a lie in four
+   * places at once.
+   */
+  async function startDeploy(
+    mode: "deploy" | "rebuild",
+    options: { commitSha?: string; branch?: string } = {}
+  ) {
     setDeploying(true);
     try {
+      if (options.branch && options.branch !== project?.source_branch) {
+        const patch = await fetch(`/api/projects/${projectId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sourceBranch: options.branch }),
+        });
+        if (!patch.ok) {
+          const data = await patch.json().catch(() => ({}));
+          toast.error(data.details?.[0]?.message ?? data.error ?? "Salvataggio non riuscito");
+          return;
+        }
+        setProject(await patch.json());
+      }
+
       const res = await fetch(`/api/projects/${projectId}/deploy`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode }),
+        body: JSON.stringify({ mode, ...(options.commitSha ? { commitSha: options.commitSha } : {}) }),
       });
       const data = await res.json();
       if (!res.ok) {
-        toast.error(data.error ?? "Avvio non riuscito");
+        // The validation detail names the field; the error says what happened.
+        toast.error(data.details?.[0]?.message ?? data.error ?? "Avvio non riuscito");
         return;
       }
-      toast.success(data.status === "queued" ? "Messo in coda dopo il deploy in corso" : "Deploy avviato");
+      toast.success(
+        data.status === "queued"
+          ? "Messo in coda dopo il deploy in corso"
+          : options.commitSha
+            ? `Deploy di ${options.commitSha.slice(0, 7)} avviato`
+            : "Deploy avviato"
+      );
       if (data.status !== "queued") {
         setProject((p) => (p ? { ...p, status: "deploying" } : p));
       }
+      // The pin lives on the project row, so the header and the banner only
+      // learn about it by re-reading it.
+      if (options.commitSha) void refreshProject();
     } catch {
       toast.error("Avvio non riuscito");
     } finally {
       setDeploying(false);
     }
   }
+
+  function handleDeploy(mode: "deploy" | "rebuild") {
+    void startDeploy(mode);
+  }
+
+  // Not closed here: the dialog closes itself once this settles, which is what
+  // keeps its submit button pending while the request is in flight. Closing it
+  // first would unmount the pending state mid-request.
+  async function handleDeployCommit(commitSha: string, branch: string) {
+    await startDeploy("deploy", { commitSha, branch });
+  }
+
+  /**
+   * Release the pin and go back to the branch, in one request.
+   *
+   * Split into "unpin" then "deploy" the project would sit unpinned while still
+   * running the old commit, and a poller tick landing in that gap would be the
+   * panel deploying on its own.
+   *
+   * Wrapped, like `openVersions` below, because `DeploymentsTab` is memo()'d:
+   * an inline arrow here would hand it a new prop on every log line and undo
+   * the split this file exists for.
+   */
+  const handleReleasePin = useCallback(async () => {
+    setDeploying(true);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/pin`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "release", deploy: true }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error ?? "Sblocco non riuscito");
+        return;
+      }
+      toast.success(`Sbloccato: distribuisco l'ultimo commit di ${data.branch ?? "branch"}`);
+      void refreshProject();
+    } catch {
+      toast.error("Sblocco non riuscito");
+    } finally {
+      setDeploying(false);
+    }
+  }, [projectId, refreshProject]);
+
+  const openVersions = useCallback(() => setVersionsOpen(true), []);
 
   async function handleControl(action: "start" | "stop" | "restart") {
     try {
@@ -247,6 +332,8 @@ export default function ProjectDetailPage() {
         onDeploy={handleDeploy}
         onControl={handleControl}
         onOpenSettings={() => setRenameOpen(true)}
+        onOpenVersions={openVersions}
+        onReleasePin={handleReleasePin}
       />
 
       <ProjectStats info={processInfo} />
@@ -296,7 +383,13 @@ export default function ProjectDetailPage() {
       )}
 
       {activeTab === "deployments" && (
-        <DeploymentsTab deployments={deployments} loading={deploymentsLoading} />
+        <DeploymentsTab
+          project={project}
+          deployments={deployments}
+          loading={deploymentsLoading}
+          onOpenVersions={openVersions}
+          onReleasePin={handleReleasePin}
+        />
       )}
 
       {activeTab === "env" && (
@@ -365,6 +458,19 @@ export default function ProjectDetailPage() {
         </TextField>
       </FormDialog>
 
+      {/*
+        Keyed on the open state so each opening starts from the project as it is
+        now — the branch it tracks, nothing selected. Seeding that with an effect
+        that copies props into state is the pattern this file avoids everywhere
+        else.
+      */}
+      <VersionDialog
+        key={versionsOpen ? "versions-open" : "versions-closed"}
+        isOpen={versionsOpen}
+        onOpenChange={setVersionsOpen}
+        project={project}
+        onDeployCommit={handleDeployCommit}
+      />
     </div>
   );
 }

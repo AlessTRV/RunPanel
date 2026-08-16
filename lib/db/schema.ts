@@ -80,6 +80,15 @@ export interface ProjectsTable {
   poll_sha: string | null;
   poll_checked_at: string | null;
   /**
+   * The commit this project is held at. NULL means it follows `source_branch`.
+   *
+   * While it is set every deploy rebuilds this SHA and auto-deploy is suspended
+   * — see migration 011. It belongs to a branch, so changing `source_branch`
+   * releases it.
+   */
+  pinned_sha: string | null;
+  pinned_at: string | null;
+  /**
    * 0 | 1 — whether this should be running after a reboot.
    *
    * It is the *declared* state, not a mirror of the current one: pressing Stop

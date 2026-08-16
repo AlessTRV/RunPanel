@@ -577,6 +577,12 @@ async function restoreProjectConfig(
         source_url: payload.project.source_url,
         source_branch: payload.project.source_branch,
         app_name: payload.project.app_name,
+        // The archive describes a configuration, and a pin is not part of one —
+        // it is where this installation happened to hold the project. Left in
+        // place, the restored configuration would go out built from a commit
+        // that has nothing to do with it.
+        pinned_sha: null,
+        pinned_at: null,
         updated_at: nowIso(),
       })
       .where("id", "=", targetId)

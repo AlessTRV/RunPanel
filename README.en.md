@@ -38,6 +38,9 @@ reclaims disk.
   contract in `runpanel.json`.
 - **Live deploys** — build output streams to the browser while the deploy runs,
   over a single SSE connection per project.
+- **Go back a version** — pick any commit from the branch's history and deploy
+  it. The project holds there, and auto-deploy is suspended rather than quietly
+  carrying it forward again.
 - **Databases on demand** — PostgreSQL, MySQL, Redis and MongoDB provisioned as
   labelled containers with their own volumes, and their connection URL injected
   into the app through an explicit switch.
@@ -280,11 +283,37 @@ twice.
 The hook stays configurable by hand — the URL and secret are right there — for
 repositories the token cannot administer, or a panel with no account connected.
 
+### Going back to a specific commit
+
+The button next to **Deploy** opens the repository's history: pick the branch,
+pick the commit, and the project is rebuilt from there. It is for when the commit
+that just went out is the one that broke the app, and the alternative is a revert
+on GitHub and another push — a fix that needs the repository to cooperate at the
+moment production is down.
+
+The choice **holds**. The project stops at that commit: every deploy rebuilds it,
+the header says so with a badge, and **auto-deploy is suspended** rather than
+carrying the project forward on the next push. Deliveries that arrive meanwhile
+stay in the history as ignored, with the reason — a webhook that does not deploy
+has to say why. **Back to the latest commit** releases the hold and deploys the
+branch head again.
+
+Choosing a different branch here changes the project's branch: from then on it is
+the one the webhook and the poller follow. The commit list comes from the GitHub
+API, so it wants a connected account; without one, or for a commit older than the
+last hundred, there is a field to paste a SHA into.
+
+One warning the panel repeats before going ahead, because it is the only way this
+feature breaks an app invisibly: **database migrations do not roll back**. If the
+restored version expects an older schema than the one that is there, it may not
+start.
+
 ### What a deploy actually does
 
 1. **Queue** — deploys of the same project are serialised, and overlapping ones
    are coalesced: a burst of pushes produces one deploy, not six.
-2. **Source** — clone or pull the branch, recording the commit.
+2. **Source** — clone or pull the branch, recording the commit; or, when the
+   project is held at a commit, restore that one.
 3. **Contract** — detected preset, `runpanel.json`, panel settings.
 4. **Build** — install and build per runtime, with the output streaming.
 5. **Release command** — run once before start, in a throwaway container or in

@@ -1,7 +1,14 @@
 import { getDb, nowIso } from "@/lib/db";
 import type { DeploymentsTable, ProjectsTable } from "@/lib/db/schema";
 import { decrypt } from "@/lib/crypto";
-import { gitPull, gitClone, repoExists, getRepoPath, getLatestCommit } from "./git-manager";
+import {
+  gitPull,
+  gitClone,
+  gitCheckoutCommit,
+  repoExists,
+  getRepoPath,
+  getLatestCommit,
+} from "./git-manager";
 import { buildProject } from "./builder-registry";
 import { processManager } from "./process-manager";
 import { isWindows } from "./env-utils";
@@ -179,7 +186,27 @@ async function runDeploy(
 
     if (mode === "deploy" && project.source_type === "github" && project.source_url) {
       appendLog("\n--- Fetching source ---");
-      if (repoExists(project.slug)) {
+      if (project.pinned_sha) {
+        /*
+          The project is held at a commit, so that is what gets built — not the
+          head of the branch.
+
+          The row is fresh: the queue re-reads it inside `claim()` before every
+          run, including the coalesced follow-up. That is why the pin does not
+          need to travel through the request; a webhook delivery that slipped
+          through the suspension check would land here and build the pinned
+          commit, which is the right outcome rather than a race to lose.
+        */
+        appendLog(`Restoring commit ${project.pinned_sha.slice(0, 7)} from ${project.source_branch}...`);
+        const commit = await gitCheckoutCommit(
+          project.slug,
+          project.source_branch,
+          project.pinned_sha,
+          { repoUrl: project.source_url, onLog: appendLog }
+        );
+        await updateDeployment({ commit_sha: commit.sha, commit_message: commit.message });
+        appendLog(`Commit: ${commit.sha.slice(0, 7)} - ${commit.message}`);
+      } else if (repoExists(project.slug)) {
         appendLog(`Pulling latest from ${project.source_branch}...`);
         const commit = await gitPull(project.slug, project.source_branch);
         await updateDeployment({ commit_sha: commit.sha, commit_message: commit.message });

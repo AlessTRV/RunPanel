@@ -7,8 +7,8 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { Panel } from "@/components/ui/Panel";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { SkeletonBlock } from "@/components/ui/Skeletons";
-import { formatDurationBetween } from "@/lib/format";
-import { type Deployment } from "./types";
+import { formatDurationBetween, formatRelative } from "@/lib/format";
+import { type Deployment, type Project } from "./types";
 
 /**
  * What started this deploy, when the commit message cannot say.
@@ -110,40 +110,92 @@ const DeploymentCard = memo(function DeploymentCard({ deployment }: { deployment
   );
 });
 
-export const DeploymentsTab = memo(function DeploymentsTab({
-  deployments,
-  loading,
+/**
+ * Why this project is not on its branch, and the two ways out.
+ *
+ * A banner rather than a toast: being held at a commit is a state, not an
+ * event, and it has to still be there when someone opens the tab tomorrow
+ * wondering why a push changed nothing.
+ */
+const PinnedBanner = memo(function PinnedBanner({
+  project,
+  onOpenVersions,
+  onReleasePin,
 }: {
-  deployments: Deployment[];
-  loading: boolean;
+  project: Project;
+  onOpenVersions: () => void;
+  onReleasePin: () => void;
 }) {
-  if (loading) {
-    return (
-      <div className="space-y-3">
-        {Array.from({ length: 3 }, (_, i) => (
-          <SkeletonBlock key={i} className="h-20" />
-        ))}
-      </div>
-    );
-  }
-
-  if (deployments.length === 0) {
-    return (
-      <Panel>
-        <EmptyState
-          icon="solar:history-linear"
-          title="Nessun deploy"
-          description="La cronologia comparirà qui dopo il primo deploy del progetto."
-        />
-      </Panel>
-    );
-  }
+  if (!project.pinned_sha) return null;
 
   return (
+    <Panel padding="compact">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex min-w-0 items-start gap-2.5">
+          <Icon icon="solar:pin-linear" width={16} className="text-warning mt-0.5 shrink-0" aria-hidden />
+          <div className="min-w-0">
+            <p className="text-foreground text-sm">
+              Fermo su <span className="font-mono">{project.pinned_sha.slice(0, 7)}</span>
+              {project.pinned_at && ` · ${formatRelative(project.pinned_at)}`}
+            </p>
+            <p className="text-muted mt-0.5 text-xs">
+              Ogni deploy ricostruisce questo commit di {project.source_branch}, e l&apos;auto-deploy
+              è sospeso finché resta fermo.
+            </p>
+          </div>
+        </div>
+
+        <div className="flex shrink-0 flex-wrap gap-2">
+          <Button variant="ghost" size="sm" onPress={onOpenVersions}>
+            Cambia versione
+          </Button>
+          <Button variant="outline" size="sm" onPress={onReleasePin}>
+            <Icon icon="solar:rewind-back-linear" width={16} aria-hidden />
+            Torna all&apos;ultimo commit
+          </Button>
+        </div>
+      </div>
+    </Panel>
+  );
+});
+
+export const DeploymentsTab = memo(function DeploymentsTab({
+  project,
+  deployments,
+  loading,
+  onOpenVersions,
+  onReleasePin,
+}: {
+  project: Project;
+  deployments: Deployment[];
+  loading: boolean;
+  onOpenVersions: () => void;
+  onReleasePin: () => void;
+}) {
+  return (
     <div className="space-y-3">
-      {deployments.map((d) => (
-        <DeploymentCard key={d.id} deployment={d} />
-      ))}
+      <PinnedBanner
+        project={project}
+        onOpenVersions={onOpenVersions}
+        onReleasePin={onReleasePin}
+      />
+
+      {/* Both the skeleton and the empty state belong to the list alone. As the
+          whole tab's body they hid the banner above, so a pinned project with no
+          deploys yet showed nothing about being pinned. */}
+      {loading ? (
+        Array.from({ length: 3 }, (_, i) => <SkeletonBlock key={i} className="h-20" />)
+      ) : deployments.length === 0 ? (
+        <Panel>
+          <EmptyState
+            icon="solar:history-linear"
+            title="Nessun deploy"
+            description="La cronologia comparirà qui dopo il primo deploy del progetto."
+          />
+        </Panel>
+      ) : (
+        deployments.map((d) => <DeploymentCard key={d.id} deployment={d} />)
+      )}
     </div>
   );
 });

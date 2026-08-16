@@ -18,16 +18,21 @@ export function ProjectHeader({
   onDeploy,
   onControl,
   onOpenSettings,
+  onOpenVersions,
+  onReleasePin,
 }: {
   project: Project;
   busy: boolean;
   onDeploy: (mode: "deploy" | "rebuild") => void;
   onControl: (action: "start" | "stop" | "restart") => void;
   onOpenSettings: () => void;
+  onOpenVersions: () => void;
+  onReleasePin: () => void;
 }) {
   const deploying = project.status === "deploying";
   const canStop = project.status === "running" || project.status === "error";
   const canStart = project.status === "stopped" || project.status === "error";
+  const canPickVersion = project.source_type === "github" && Boolean(project.source_url);
 
   return (
     <header className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -46,6 +51,21 @@ export function ProjectHeader({
               {project.name}
             </h1>
             <StatusBadge status={project.status} />
+            {/* Next to the status because it qualifies it: the app is running,
+                but not from where the branch says. */}
+            {project.pinned_sha && (
+              <span
+                title={
+                  project.pinned_at
+                    ? `Fermo dal ${new Date(project.pinned_at).toLocaleString()}`
+                    : undefined
+                }
+                className="border-warning/35 text-warning inline-flex items-center gap-1 rounded-[var(--radius)] border px-1.5 py-0.5 text-meta"
+              >
+                <Icon icon="solar:pin-linear" width={12} aria-hidden />
+                Fermo su <span className="font-mono">{project.pinned_sha.slice(0, 7)}</span>
+              </span>
+            )}
             <button
               type="button"
               onClick={onOpenSettings}
@@ -71,10 +91,38 @@ export function ProjectHeader({
           <Icon icon="solar:upload-linear" width={16} aria-hidden />
           Deploy
         </Button>
+        {/* Deploy sends what the project points at; this is where you change
+            what that is. Icon-only and adjacent, so the pair reads as one
+            control rather than as two competing actions.
+
+            Absent for an uploaded ZIP: there is no timeline behind it, and a
+            button whose only outcome is an explanation of why it cannot work is
+            worse than no button. */}
+        {canPickVersion && (
+          <Button
+            variant="outline"
+            size="sm"
+            isIconOnly
+            isDisabled={busy || deploying}
+            aria-label="Scegli la versione da distribuire"
+            onPress={onOpenVersions}
+          >
+            <Icon icon="solar:branching-paths-up-linear" width={16} aria-hidden />
+          </Button>
+        )}
         <Button variant="outline" size="sm" isDisabled={busy || deploying} onPress={() => onDeploy("rebuild")}>
           <Icon icon="solar:refresh-circle-linear" width={16} aria-hidden />
           Re-build
         </Button>
+
+        {/* Only while pinned, so the header is not permanently crowded by an
+            action that means nothing most of the time. */}
+        {project.pinned_sha && (
+          <Button variant="outline" size="sm" isDisabled={busy || deploying} onPress={onReleasePin}>
+            <Icon icon="solar:rewind-back-linear" width={16} aria-hidden />
+            Torna all&apos;ultimo commit
+          </Button>
+        )}
 
         {canStop && (
           <>

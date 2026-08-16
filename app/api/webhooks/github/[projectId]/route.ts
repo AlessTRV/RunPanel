@@ -160,6 +160,30 @@ export async function POST(request: NextRequest, { params }: Params) {
     return NextResponse.json({ message: "Branch mismatch" });
   }
 
+  /*
+    A pinned project is held at a commit on purpose, so a push does not move it.
+
+    After the branch check, not before: reported earlier, every push to an
+    unrelated branch would be filed as "pinned", and the reason would stop
+    meaning anything. Here it appears on exactly the deliveries that would
+    otherwise have deployed — which is the case the operator is looking for when
+    they wonder why a push changed nothing.
+
+    Recorded as `ignored` rather than `rejected`: the signature was valid and the
+    payload was understood — it is the panel that chose not to act, and that is
+    the distinction this table exists to make (`rejected` is reserved for bad
+    signatures and is what the rate limiter counts).
+  */
+  if (project.pinned_sha) {
+    await recordDelivery("ignored", {
+      event,
+      branch: pushBranch,
+      reason: "project pinned to a commit",
+      pinned: project.pinned_sha.slice(0, 7),
+    });
+    return NextResponse.json({ message: "Project pinned to a commit" });
+  }
+
   // Queued rather than refused. Rejecting a push that arrives during a deploy
   // silently drops it — someone pushes a fix while a build is running and
   // nothing ever picks it up.

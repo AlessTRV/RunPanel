@@ -156,14 +156,20 @@ export async function run({ base }) {
     body: JSON.stringify({ sourceBranch: "release" }),
   });
 
-  // `poll_sha` kept across a switch makes the next poller tick compare the new
-  // branch's head against a SHA from the old one, find them different, and
-  // deploy unasked — the baseline guard does not fire because it tests for null.
+  // Both of these describe the branch the project just left. `poll_sha` kept
+  // across a switch makes the next poller tick compare the new branch's head
+  // against a SHA from the old one, find them different, and deploy unasked —
+  // the baseline guard does not fire because it tests for null.
   const afterBranch = await api.call(`/api/projects/${projectId}`);
   r.check(
     "changing branch forgets the commit the poller had seen",
     afterBranch.body.poll_sha === null,
     String(afterBranch.body.poll_sha)
+  );
+  r.check(
+    "changing branch releases a pin belonging to the old branch",
+    afterBranch.body.pinned_sha === null,
+    String(afterBranch.body.pinned_sha)
   );
 
   const ping = JSON.stringify({ zen: "Design for failure.", hook_id: 1 });

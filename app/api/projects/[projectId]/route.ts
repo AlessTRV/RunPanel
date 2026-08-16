@@ -3,6 +3,7 @@ import { requireAuth } from "@/lib/auth-guard";
 import { getDb, nowIso } from "@/lib/db";
 import type { ProjectsTable } from "@/lib/db/schema";
 import { updateProjectSchema } from "@/lib/validation";
+import { parseRepoSlug } from "@/lib/github";
 import { deployContractSchema, normalizeContractInput, parseContractJson } from "@/lib/deploy-contract";
 import { readAccess, reportGate, syncGate } from "@/services/access";
 import { allocateLoopbackPort, closeGate } from "@/services/access-gate";
@@ -56,6 +57,11 @@ export async function GET(_request: NextRequest, { params }: Params) {
     // the port. They differ whenever the panel restarted and could not bind.
     access: readAccess(project),
     gate: reportGate("project", projectId),
+    // `owner/name`, worked out here because `parseRepoSlug` sits next to
+    // `getSetting` and cannot travel to a client component. Null for an
+    // uploaded ZIP or a URL on some other host, which is what the version
+    // picker keys off to know there is no commit history to browse.
+    repo: parseRepoSlug(project.source_url)?.full ?? null,
   });
 }
 
@@ -101,17 +107,26 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   if (sourceBranch !== undefined) {
     updates.source_branch = sourceBranch;
     /*
-      A different branch is a different timeline, and `poll_sha` describes the
+      A different branch is a different timeline, and two columns describe the
       old one.
 
-      Left in place, the first tick after the switch compares the new branch's
-      head against a SHA that came from somewhere else, finds them different,
-      and deploys on the spot — and the guard written for exactly this ("the
-      first look records and does not deploy") never fires, because it tests
-      `poll_sha === null`. Same column, same reason and same care as the
-      `deployTrigger` guard below.
+      `poll_sha` is the commit the poller last saw on the branch it was
+      watching. Left in place, the first tick after the switch compares the new
+      branch's head against a SHA that came from somewhere else, finds them
+      different, and deploys on the spot — and the guard written for exactly
+      this ("the first look records and does not deploy") never fires, because
+      it tests `poll_sha === null`. Same column, same reason and same care as
+      the `deployTrigger` guard below.
+
+      A pin is a commit *of a branch*, so it cannot survive one either: held
+      against a branch it does not belong to, every deploy would try to fetch it
+      from a history that may not reach it.
     */
-    if (sourceBranch !== project.source_branch) updates.poll_sha = null;
+    if (sourceBranch !== project.source_branch) {
+      updates.poll_sha = null;
+      updates.pinned_sha = null;
+      updates.pinned_at = null;
+    }
   }
   if (runtimeType !== undefined && runtimeType !== null) updates.runtime_type = runtimeType;
   if (port !== undefined) updates.port = port;

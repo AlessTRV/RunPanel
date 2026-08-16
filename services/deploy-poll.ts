@@ -91,6 +91,13 @@ async function pollableProjects(): Promise<ProjectsTable[]> {
     .where("auto_deploy", "=", 1)
     .where("source_type", "=", "github")
     .where("deploy_trigger", "=", "poll")
+    /*
+      A pinned project is left out entirely, and `poll_checked_at` is
+      deliberately not touched for it: the panel is not checking, and a timestamp
+      moving forward would say the opposite — the webhook section reads it to
+      decide whether polling is actually running.
+    */
+    .where("pinned_sha", "is", null)
     .execute();
 }
 

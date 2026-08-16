@@ -38,6 +38,9 @@ manutenzione di Docker che il disco lo libera davvero.
   proprio contratto di deploy in `runpanel.json`.
 - **Deploy in diretta** — l'output del build arriva al browser mentre il deploy
   gira, su una sola connessione SSE per progetto.
+- **Torna a una versione precedente** — scegli un commit qualsiasi dalla
+  cronologia del branch e distribuisci quello. Il progetto ci resta fermo, e
+  l'auto-deploy viene sospeso invece di riportarlo avanti in silenzio.
 - **Database su richiesta** — PostgreSQL, MySQL, Redis e MongoDB creati come
   container etichettati con i propri volumi, e la loro connection URL iniettata
   nell'app tramite un interruttore esplicito.
@@ -289,11 +292,37 @@ volte.
 Il webhook resta configurabile a mano — URL e Secret sono lì da copiare — per i
 repository che il token non amministra o per un pannello senza account collegato.
 
+### Tornare a un commit preciso
+
+Il pulsante accanto a **Deploy** apre la cronologia del repository: si sceglie il
+branch, si sceglie il commit, e il progetto viene ricostruito da lì. Serve per
+quando il commit appena distribuito è quello che ha rotto l'app, e l'alternativa
+sarebbe un revert su GitHub e un altro push — una correzione che ha bisogno del
+repository proprio mentre la produzione è ferma.
+
+La scelta **resta**. Il progetto si ferma su quel commit: ogni deploy ricostruisce
+quello, l'header lo dice con un'etichetta, e l'**auto-deploy viene sospeso** invece
+di riportare il progetto in avanti al primo push. Le consegne che arrivano nel
+frattempo restano nello storico come ignorate, con il motivo — un webhook che non
+distribuisce deve dire perché. **Torna all'ultimo commit** scioglie il blocco e
+distribuisce di nuovo la testa del branch.
+
+Scegliere un branch diverso qui cambia il branch del progetto: da lì in avanti è
+quello che webhook e controllo periodico seguono. L'elenco dei commit arriva
+dall'API di GitHub, quindi vuole un account collegato; senza, o per un commit più
+vecchio degli ultimi cento, c'è un campo dove incollare lo SHA.
+
+Un avvertimento che il pannello ripete prima di procedere, perché è l'unico modo
+in cui questa funzione rompe un'app senza che si veda: **le migrazioni del
+database non tornano indietro**. Se la versione ripristinata si aspetta uno schema
+più vecchio di quello che c'è, può non partire.
+
 ### Com'è fatto un deploy
 
 1. **Coda** — i deploy dello stesso progetto sono serializzati, e quelli che si
    accavallano vengono accorpati: una raffica di push produce un deploy, non sei.
-2. **Sorgente** — clone o pull del branch, con il commit registrato.
+2. **Sorgente** — clone o pull del branch, con il commit registrato; oppure, se il
+   progetto è fermo su un commit, il ripristino di quello.
 3. **Contratto** — preset rilevato, `runpanel.json`, impostazioni del pannello.
 4. **Build** — install e build secondo il runtime, con l'output in streaming.
 5. **Release command** — eseguito una volta prima dell'avvio, in un container

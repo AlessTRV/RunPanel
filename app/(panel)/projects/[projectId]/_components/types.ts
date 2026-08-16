@@ -16,9 +16,46 @@ export interface Project {
   last_deploy_at: string | null;
   webhook_secret: string;
   builder_config: string;
+  /**
+   * The commit this project is held at, or null when it follows its branch.
+   *
+   * While it is set, Deploy rebuilds this commit and auto-deploy is suspended.
+   */
+  pinned_sha: string | null;
+  pinned_at: string | null;
+  /** `owner/name` when the source is a GitHub URL, null for a ZIP or another host. */
+  repo: string | null;
   /** Who may reach the published port, and whether the gate enforcing it is up. */
   access: AccessValue;
   gate: GateValue;
+}
+
+/** One entry of the branch's timeline, as the version picker renders it. */
+export interface CommitSummary {
+  sha: string;
+  shortSha: string;
+  message: string;
+  author: string;
+  date: string;
+  url: string;
+}
+
+/**
+ * Why the list is empty is as much of an answer as the list.
+ *
+ * `available: false` arrives with a 200 on purpose — `useResource` throws away
+ * the body of anything else — so `message` is the sentence to render, already
+ * written by the route.
+ */
+export interface CommitsResponse {
+  available: boolean;
+  reason?: "no-repo" | "no-token" | "not-found" | "rate-limited";
+  message?: string;
+  retryAt?: string | null;
+  branch: string | null;
+  commits: CommitSummary[];
+  page: number;
+  hasMore: boolean;
 }
 
 export interface ProcessInfo {

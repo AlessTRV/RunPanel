@@ -194,7 +194,12 @@ export function WebhookSection({
     is a label, not an answer. Before the status is loaded it says what the flag
     says, which is all the panel knows without asking GitHub.
   */
-  const summary = !project.auto_deploy
+  const summary = project.pinned_sha
+    ? // Ahead of every other branch: while the project is held at a commit
+      // nothing here fires, and a summary reading "Attivo" over an auto-deploy
+      // that will not run is the one sentence this line must never say.
+      `Sospeso: progetto fermo su ${project.pinned_sha.slice(0, 7)}`
+    : !project.auto_deploy
     ? "Spento: si distribuisce dal pulsante Deploy"
     : !status
       ? "Attivo: ogni push sul branch fa partire un deploy"

@@ -171,6 +171,24 @@ function buildChecks(project: ProjectsTable, status: WebhookStatus): Check[] {
     return checks;
   }
 
+  /*
+    First, because it overrides every answer below it.
+
+    A pinned project is held at a commit on purpose, and while it is held nothing
+    here deploys: the webhook files its deliveries as ignored and the poller does
+    not consider the project at all. Reported before the rest so the section
+    cannot show a row of green checks over an auto-deploy that will not fire.
+  */
+  if (project.pinned_sha) {
+    checks.push({
+      id: "pinned",
+      title: `Progetto fermo su ${project.pinned_sha.slice(0, 7)}`,
+      tone: "warn",
+      detail: "L'auto-deploy è sospeso finché il progetto resta fermo su questo commit.",
+      href: `/projects/${project.id}?tab=deployments`,
+    });
+  }
+
   checks.push(
     status.repo
       ? {
@@ -226,7 +244,19 @@ function buildChecks(project: ProjectsTable, status: WebhookStatus): Check[] {
       staleBy(status.poll.lastCheckedAt, status.poll.intervalSeconds);
 
     checks.push(
-      !status.autoDeploy
+      project.pinned_sha
+        ? // Before the staleness branch, and that is the point: while the
+          // project is held the poller skips it and deliberately leaves
+          // `poll_checked_at` where it was — so the timestamp goes stale by
+          // design, and reporting "il pannello potrebbe essere stato fermo"
+          // would blame an outage for something the operator asked for.
+          {
+            id: "poll",
+            title: "Controllo periodico sospeso",
+            tone: "neutral",
+            detail: "Riprende quando il progetto non è più fermo su un commit.",
+          }
+        : !status.autoDeploy
         ? {
             id: "poll",
             title: `Controllo ogni ${status.poll.intervalLabel}`,

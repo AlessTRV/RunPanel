@@ -184,6 +184,38 @@ export const controlActionSchema = z.object({
 });
 
 /**
+ * What a deploy request may ask for.
+ *
+ * `commitSha` is what pins the project to one commit: the route writes it onto
+ * the project row, and from then on every deploy rebuilds that commit until the
+ * pin is released. It is deliberately not a branch or a tag — see
+ * `commitShaSchema` for why the character set is the whole defence.
+ */
+export const deployRequestSchema = z.object({
+  mode: z.enum(["deploy", "rebuild"]).optional(),
+  commitSha: commitShaSchema.optional(),
+});
+
+/**
+ * Releasing the pin, with the redeploy that almost always follows it.
+ *
+ * One action rather than "clear the pin" plus "now deploy": between the two
+ * calls the project sits unpinned while still running the old commit, and a
+ * poller tick landing in that gap would be the panel deploying on its own.
+ */
+export const pinActionSchema = z.object({
+  action: z.literal("release"),
+  deploy: z.boolean().optional(),
+});
+
+/** The commit list behind the version picker. */
+export const commitsQuerySchema = z.object({
+  branch: branchNameSchema.optional(),
+  perPage: z.coerce.number().int().min(1).max(100).optional(),
+  page: z.coerce.number().int().min(1).max(20).optional(),
+});
+
+/**
  * What the panel may ask GitHub to do with a project's webhook.
  *
  * `connect` creates or realigns it, `ping` asks GitHub to send a real delivery,

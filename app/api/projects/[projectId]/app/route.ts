@@ -64,6 +64,12 @@ export async function DELETE(_request: NextRequest, { params }: Params) {
       port: null,
       app_name: null,
       status: "stopped",
+      // Both describe a source that is no longer there: the commit the poller
+      // last saw, and the commit the project was held at. Kept, they would come
+      // back to life the moment a new repository is connected.
+      poll_sha: null,
+      pinned_sha: null,
+      pinned_at: null,
       updated_at: nowIso(),
     })
     .where("id", "=", projectId)
