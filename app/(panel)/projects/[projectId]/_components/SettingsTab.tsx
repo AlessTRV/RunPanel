@@ -233,7 +233,10 @@ export function SettingsTab({
         setSaved(current);
         onProjectChange(data);
       } else {
-        toast.error(data.error ?? MSG.saveFailed);
+        // Details first: "Dati non validi" does not say which field, and the
+        // branch name is now validated — an empty one has to come back as
+        // "Nome del branch non valido" rather than as a shrug.
+        toast.error(data.details?.[0]?.message ?? data.error ?? MSG.saveFailed);
       }
     } catch {
       toast.error(MSG.saveFailed);

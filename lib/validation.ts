@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { isValidTimeZone, parseCron } from "./cron";
+import { BRANCH_NAME_RULE, COMMIT_SHA_RULE, isBranchName, isCommitSha } from "./git-ref";
 import { ruleProblem } from "./ip-access";
 
 
@@ -116,6 +117,24 @@ export const accessSchema = z.object({
   allow: z.array(accessRuleSchema).max(64),
 });
 
+/**
+ * The two values that reach `git` as arguments, in zod.
+ *
+ * The rules themselves live in `lib/git-ref.ts`, which has no imports — both so
+ * a standalone suite can load them and because they are git's rules, not this
+ * file's. Here they only get a schema and a message.
+ */
+export const commitShaSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .refine(isCommitSha, { message: COMMIT_SHA_RULE });
+
+export const branchNameSchema = z
+  .string()
+  .trim()
+  .refine(isBranchName, { message: BRANCH_NAME_RULE });
+
 export const createProjectSchema = z.object({
   name: z.string().min(1).max(100),
 });
@@ -125,7 +144,7 @@ export const updateProjectSchema = z.object({
   appName: z.string().max(100).optional().nullable(),
   sourceType: z.enum(["github", "upload"]).optional(),
   sourceUrl: repoUrlSchema.optional().nullable(),
-  sourceBranch: z.string().optional(),
+  sourceBranch: branchNameSchema.optional(),
   runtimeType: z.enum(runtimeTypes).optional().nullable(),
   port: z.number().int().min(1).max(65535).optional().nullable(),
   autoDeploy: z.boolean().optional(),

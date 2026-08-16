@@ -106,6 +106,30 @@ export async function run({ repoRoot }) {
     rmSync(root, { recursive: true, force: true });
   }
 
+  // --- what may reach `git` as an argument ---------------------------------
+  //
+  // `execFile` spawns git directly, so there is no shell to escape into — but
+  // git itself reads a leading `-` as an option, and `--upload-pack=<cmd>` is
+  // command execution on this machine. The character set is the whole defence,
+  // so it is the thing under test.
+  const { isCommitSha, isBranchName } = await load("lib", "git-ref.ts");
+
+  r.check("a commit that starts with a hyphen is refused", !isCommitSha("-upload-pack=touch"));
+  r.check("an abbreviated sha is refused", !isCommitSha("3f9a2b1"));
+  r.check("a ref name does not pass for a sha", !isCommitSha("refs/heads/main"));
+  r.check("a traversal does not pass for a sha", !isCommitSha("../../etc/passwd"));
+  r.check("uppercase is not a second spelling", !isCommitSha("A".repeat(40)));
+  r.check("a trailing argument is refused", !isCommitSha(`${"a".repeat(40)} --upload-pack=x`));
+  r.check("a real sha passes", isCommitSha("a".repeat(40)));
+  r.check("a sha-256 object id passes", isCommitSha("b".repeat(64)));
+
+  r.check("a branch containing .. is refused", !isBranchName("a/../b"));
+  r.check("a branch starting with a hyphen is refused", !isBranchName("-x"));
+  r.check("a branch with a space is refused", !isBranchName("my branch"));
+  r.check("a branch ending in .lock is refused", !isBranchName("main.lock"));
+  r.check("an empty branch is refused", !isBranchName(""));
+  r.check("an ordinary branch passes", isBranchName("feature/login"));
+
   // --- archive entries -----------------------------------------------------
   const { isSafeEntryPath } = await load("services", "backup", "archive-read.ts");
   r.check("zip-slip entry refused", !isSafeEntryPath("../../etc/cron.d/x"));
