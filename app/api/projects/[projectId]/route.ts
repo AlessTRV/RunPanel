@@ -98,7 +98,21 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   if (appName !== undefined) updates.app_name = appName || null;
   if (sourceType !== undefined) updates.source_type = sourceType;
   if (sourceUrl !== undefined) updates.source_url = sourceUrl;
-  if (sourceBranch !== undefined) updates.source_branch = sourceBranch;
+  if (sourceBranch !== undefined) {
+    updates.source_branch = sourceBranch;
+    /*
+      A different branch is a different timeline, and `poll_sha` describes the
+      old one.
+
+      Left in place, the first tick after the switch compares the new branch's
+      head against a SHA that came from somewhere else, finds them different,
+      and deploys on the spot — and the guard written for exactly this ("the
+      first look records and does not deploy") never fires, because it tests
+      `poll_sha === null`. Same column, same reason and same care as the
+      `deployTrigger` guard below.
+    */
+    if (sourceBranch !== project.source_branch) updates.poll_sha = null;
+  }
   if (runtimeType !== undefined && runtimeType !== null) updates.runtime_type = runtimeType;
   if (port !== undefined) updates.port = port;
   if (autoDeploy !== undefined) updates.auto_deploy = autoDeploy ? 1 : 0;
