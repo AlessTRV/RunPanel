@@ -11,6 +11,27 @@ const exec = promisify(execFile);
 const processName = (slug: string) => `runpanel-${slug}`;
 
 /**
+ * Quote a value for a POSIX shell.
+ *
+ * Everything between single quotes is literal, so the only character that needs
+ * work is the quote itself: close, escape, reopen. Values here are the project's
+ * environment — newlines (a PEM key), `$`, backticks, quotes — and every one of
+ * them has to arrive at the app byte for byte. A value mangled on the way in
+ * fails much later and much more quietly than a syntax error would.
+ */
+function shQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+/**
+ * What `KEY=value` in a sourced file can actually set. A name outside this shape
+ * is not assignable by any POSIX shell, so it gets skipped rather than turned
+ * into a syntax error that would take the whole app down — and the wrapper says
+ * so on stderr, because a silently missing variable is the worse failure.
+ */
+const SHELL_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+/**
  * Every file the PM2 driver generates for a project.
  *
  * Defined here, next to the code that writes them, so a new artefact cannot be
@@ -20,7 +41,8 @@ const processName = (slug: string) => `runpanel-${slug}`;
  */
 export function pm2ArtifactPaths(slug: string): string[] {
   const dir = path.join(config.dataDir, "pm2");
-  return [".js", ".json", ".env.json", ".cmd", ".sh"].map((ext) => path.join(dir, `${slug}${ext}`));
+  return [".js", ".json", ".env.json", ".env.sh", ".cmd", ".sh"]
+    .map((ext) => path.join(dir, `${slug}${ext}`));
 }
 
 /** Generated files and process logs both go: neither outlives the project. */
@@ -260,12 +282,23 @@ export const pm2Driver: IProcessDriver = {
 
     const portAwareCmd = resolveStartCmd(startCmd, opts.cwd, listenOn, bindHost);
 
-    // Write a .js wrapper that PM2 can run natively.
-    // PM2 strips the system PATH when forking, so spawn/exec with shell: true
-    // fails with ENOENT on cmd.exe. The wrapper uses execFile with the command
-    // split into binary + args, and injects the full system PATH.
-    const wrapperFile = path.join(ecosystemDir, `${slug}.js`);
-    const envDataFile = path.join(ecosystemDir, `${slug}.env.json`);
+    // The wrapper PM2 actually runs.
+    //
+    // On POSIX it is a shell script that `exec`s the command, so the shell is
+    // REPLACED by the app and PM2 ends up holding the pid of the real process.
+    // It used to be a Node wrapper that spawned the command as a child instead,
+    // and that cost twice: a whole Node runtime per project doing nothing but
+    // exporting variables (66 MB RSS, measured), and a PM2 pointed at the
+    // wrapper rather than at the app. Everything PM2 does per-process was
+    // therefore aimed at the wrong target — `max_memory_restart` below watched a
+    // process that never grows, the panel's memory column read 64 MB for an app
+    // using 414, and stop signals arrived at the parent instead of the app.
+    //
+    // On Windows it stays the Node wrapper: PM2 strips the system PATH when
+    // forking, so spawn/exec with shell: true fails with ENOENT on cmd.exe, and
+    // there is no Windows here to test a replacement on.
+    const wrapperFile = path.join(ecosystemDir, `${slug}${isWindows ? ".js" : ".sh"}`);
+    const envDataFile = path.join(ecosystemDir, `${slug}${isWindows ? ".env.json" : ".env.sh"}`);
     const projectEnv = {
       ...opts.env,
       ...bindEnv,
@@ -283,18 +316,34 @@ export const pm2Driver: IProcessDriver = {
     const cmdParts = portAwareCmd.split(/\s+/);
 
     // Secrets go into a 0600 sidecar the wrapper reads at startup, not inlined
-    // into the wrapper source. The generated .js used to contain every
+    // into the wrapper source. The generated wrapper used to contain every
     // environment variable of the project in cleartext, world-readable.
-    fs.writeFileSync(envDataFile, JSON.stringify({ path: systemPath, env: projectEnv }), {
-      mode: 0o600,
-    });
+    const unassignable: string[] = [];
+    const envContent = isWindows
+      ? JSON.stringify({ path: systemPath, env: projectEnv })
+      : [
+        "# Generato da RunPanel a ogni avvio del progetto: viene riscritto, non",
+        "# modificarlo a mano. Lo legge il wrapper con `set -a`, non l'app.",
+        `PATH=${shQuote(systemPath)}`,
+        ...Object.entries(projectEnv).flatMap(([key, value]) => {
+          if (!SHELL_NAME.test(key)) {
+            unassignable.push(key);
+            return [];
+          }
+          return [`${key}=${shQuote(String(value))}`];
+        }),
+        "",
+      ].join("\n");
+
+    fs.writeFileSync(envDataFile, envContent, { mode: 0o600 });
     try {
       fs.chmodSync(envDataFile, 0o600);
     } catch {
       /* chmod is a no-op on some Windows filesystems */
     }
 
-    const wrapperContent = `const { execFile } = require("child_process");
+    const wrapperContent = isWindows
+      ? `const { execFile } = require("child_process");
 const { readFileSync } = require("fs");
 
 // Environment is read from a 0600 sidecar rather than inlined here, so this
@@ -317,11 +366,41 @@ child.stdout.pipe(process.stdout);
 child.stderr.pipe(process.stderr);
 child.on("exit", (code) => process.exit(code || 0));
 child.on("error", (e) => { console.error("Process error:", e.message); process.exit(1); });
-`;
+`
+      : [
+        "#!/bin/bash",
+        "# Generato da RunPanel a ogni avvio del progetto: viene riscritto, non",
+        "# modificarlo a mano.",
+        ...unassignable.map((key) =>
+          `echo ${shQuote(`[runpanel] variabile ignorata, il nome non e' assegnabile da una shell: ${key}`)} >&2`
+        ),
+        "",
+        "# `set -a` esporta tutto quello che il sidecar assegna; senza, le",
+        "# variabili resterebbero locali alla shell e l'app non ne vedrebbe una.",
+        "set -a",
+        `. ${shQuote(envDataFile)} || { echo ${shQuote("[runpanel] sidecar dell'ambiente illeggibile")} >&2; exit 1; }`,
+        "set +a",
+        `cd ${shQuote(opts.cwd)} || exit 1`,
+        "",
+        "# `exec`: da qui in poi questo pid E' l'applicazione. E' tutto il punto",
+        "# del wrapper — vedi il commento sopra, in pm2-driver.ts.",
+        `exec ${cmdParts.map(shQuote).join(" ")}`,
+        "",
+      ].join("\n");
 
-    fs.writeFileSync(wrapperFile, wrapperContent);
+    fs.writeFileSync(wrapperFile, wrapperContent, { mode: isWindows ? 0o644 : 0o700 });
 
-    // Ecosystem file — PM2 runs the .js natively with Node.js
+    // A project started before the driver changed wrapper flavour still has the
+    // other flavour on disk, and the Node one comes with a `.env.json` holding
+    // every secret of the project in cleartext. Whatever we are not writing goes.
+    for (const stale of isWindows
+      ? [`${slug}.sh`, `${slug}.env.sh`]
+      : [`${slug}.js`, `${slug}.env.json`]) {
+      fs.rmSync(path.join(ecosystemDir, stale), { force: true });
+    }
+
+    // Ecosystem file — PM2 runs the .js natively with Node.js, and needs to be
+    // told which interpreter the shell wrapper wants.
     const ecosystemFile = path.join(ecosystemDir, `${slug}.json`);
     const logDir = path.join(config.logsDir, "pm2");
     fs.mkdirSync(logDir, { recursive: true });
@@ -330,6 +409,7 @@ child.on("error", (e) => { console.error("Process error:", e.message); process.e
       apps: [{
         name,
         script: wrapperFile,
+        ...(isWindows ? {} : { interpreter: "bash" }),
         cwd: opts.cwd,
         // Restart on crash, matching the Docker driver's default. `false` meant
         // a process that died stayed dead until someone noticed.

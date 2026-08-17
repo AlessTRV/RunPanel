@@ -170,12 +170,32 @@ export async function run({ base, dataDir }) {
   // the two halves of that arrangement are asserted separately — a wrapper that
   // stopped reading the sidecar would still pass a test that only checked the
   // sidecar's mode.
+  // The wrapper comes in two flavours: a shell script that `exec`s the command
+  // where there is a POSIX shell, and the Node one everywhere else. They are
+  // asserted through the same checks — only the file names differ.
+  const posix = process.platform !== "win32";
   const pm2Dir = join(dataDir, "pm2");
-  const wrapper = join(pm2Dir, `${slug}.js`);
-  const sidecar = join(pm2Dir, `${slug}.env.json`);
+  const wrapper = join(pm2Dir, `${slug}${posix ? ".sh" : ".js"}`);
+  const sidecar = join(pm2Dir, `${slug}${posix ? ".env.sh" : ".env.json"}`);
 
   r.check("a wrapper was generated", existsSync(wrapper));
   r.check("an env sidecar was generated", existsSync(sidecar));
+
+  if (posix) {
+    // The point of the shell flavour: the shell is replaced by the app, so what
+    // PM2 supervises is the app itself. A wrapper that forked instead would
+    // leave PM2 measuring and signalling a parent that never grows and never
+    // dies — which is what `max_memory_restart` used to watch.
+    r.check(
+      "the wrapper execs the command instead of forking it",
+      existsSync(wrapper) && /^exec /m.test(readFileSync(wrapper, "utf8")),
+      "no `exec` line in the wrapper"
+    );
+    // Migrating from the Node flavour has to take the old sidecar with it: that
+    // file holds every secret of the project in cleartext.
+    r.check("no Node wrapper is left behind", !existsSync(join(pm2Dir, `${slug}.js`)));
+    r.check("no Node sidecar is left behind", !existsSync(join(pm2Dir, `${slug}.env.json`)));
+  }
   r.check(
     "the wrapper does not contain the project's secrets",
     existsSync(wrapper) && !readFileSync(wrapper, "utf8").includes(SECRET)
@@ -196,6 +216,18 @@ export async function run({ base, dataDir }) {
   const live = await api.call(`/api/projects/${projectId}/status`);
   r.check("status reports the process as running", live.body?.process?.running === true, JSON.stringify(live.body));
   r.check("with a pid", Number.isInteger(live.body?.process?.pid), JSON.stringify(live.body?.process));
+
+  if (posix) {
+    // The app reports its own pid on /healthz, so the two can be compared: with
+    // the wrapper `exec`ing, they are the same process. Under the forking
+    // wrapper this was the app's parent, and every per-process thing PM2 did —
+    // memory readings, the stop signal, `max_memory_restart` — landed on it.
+    r.check(
+      "the pid PM2 supervises is the app's own",
+      live.body?.process?.pid === probe.pid,
+      `pm2 ${live.body?.process?.pid} vs app ${probe.pid}`
+    );
+  }
 
   const outLog = join(dataDir, "logs", "pm2", `${slug}-out.log`);
   r.check(
