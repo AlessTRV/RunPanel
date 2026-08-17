@@ -13,7 +13,8 @@ import { buildProject } from "./builder-registry";
 import { processManager } from "./process-manager";
 import { isWindows } from "./env-utils";
 import { runReleaseCommand, waitForHealthy } from "./deploy-steps";
-import { writeEnvFile, writeEnvFileInto } from "./env-file";
+import { writeEnvFileInto } from "./env-file";
+import { buildStartOpts } from "./start-opts";
 import { detectPreset, readRepoContract, RUNPANEL_CONFIG_FILE } from "./deploy-presets";
 import {
   parseContractJson,
@@ -341,19 +342,14 @@ async function runDeploy(
       appendLog(`Build-time variables: ${Object.keys(buildEnv).sort().join(", ")}`);
     }
 
-    // Materialise a .env file when the app reads one itself.
-    if (contract.envFile.enabled) {
-      if (isDockerApp) {
-        const hostPath = writeEnvFile(project.slug, envVars);
-        appendLog(`Wrote env file for mounting at ${contract.envFile.path}`);
-        contract.docker.mounts = [
-          ...contract.docker.mounts,
-          `${hostPath}:${contract.envFile.path}:ro`,
-        ];
-      } else {
-        const written = writeEnvFileInto(projectDir, contract.envFile.path, envVars);
-        appendLog(`Wrote env file to ${path.relative(projectDir, written)}`);
-      }
+    // Materialise a .env file when the app reads one itself. The container case
+    // is handled by `buildStartOpts`, which writes the file and adds the mount
+    // together — appending it to the contract here left it out of every restart,
+    // because a restart re-reads the contract from the row and this never wrote
+    // it back.
+    if (contract.envFile.enabled && !isDockerApp) {
+      const written = writeEnvFileInto(projectDir, contract.envFile.path, envVars);
+      appendLog(`Wrote env file to ${path.relative(projectDir, written)}`);
     }
 
     // Windows cannot replace a file that a running process has mapped, and a
@@ -468,23 +464,21 @@ async function runDeploy(
     // the app really is, not where its callers reach it.
     const listenOn = restricted ? listenPort(project, port) : port;
 
-    await processManager.start(project.slug, buildResult.startCmd, project.runtime_type, {
-      cwd: buildResult.artifactDir,
-      env: envVars,
-      port,
-      loopbackPort: restricted ? listenOn : undefined,
-      deploymentId,
-      onLog: appendLog,
-      restartPolicy: contract.runtime.restartPolicy,
-      network: contract.docker.network,
-      hostname: contract.docker.hostname,
-      capAdd: contract.docker.capAdd,
-      extraHosts: contract.docker.extraHosts,
-      mounts: contract.docker.mounts,
-      memory: contract.runtime.memory,
-      cpus: contract.runtime.cpus,
-      shmSize: contract.runtime.shmSize,
-    });
+    await processManager.start(
+      project.slug,
+      buildResult.startCmd,
+      project.runtime_type,
+      buildStartOpts({
+        project,
+        contract,
+        envVars,
+        cwd: buildResult.artifactDir,
+        port,
+        loopbackPort: restricted ? listenOn : undefined,
+        deploymentId,
+        onLog: appendLog,
+      })
+    );
 
     if (restricted) {
       try {

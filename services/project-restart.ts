@@ -3,6 +3,7 @@ import { decrypt } from "@/lib/crypto";
 import { parseContractJson } from "@/lib/deploy-contract";
 import { listenPort, readAccess } from "@/lib/access-columns";
 import { processManager } from "./process-manager";
+import { buildStartOpts } from "./start-opts";
 import { injectLinkedServiceEnv } from "./service-injection";
 import { projectEvents } from "./events";
 import { checkLoopbackLeak, forgetLeak, syncGate } from "./access";
@@ -79,21 +80,19 @@ export async function restartFromLastDeployment(
   // viewer to do the same rather than leave it showing the previous run.
   projectEvents.emit(projectId, { type: "process:reset" });
 
-  await processManager.start(project.slug, lastDeploy.start_cmd, project.runtime_type, {
-    cwd: lastDeploy.artifact_dir,
-    env: envVars,
-    port,
-    loopbackPort: access.mode === "restricted" ? listenPort(project, port) : undefined,
-    restartPolicy: contract.runtime.restartPolicy,
-    network: contract.docker.network,
-    hostname: contract.docker.hostname,
-    capAdd: contract.docker.capAdd,
-    extraHosts: contract.docker.extraHosts,
-    mounts: contract.docker.mounts,
-    memory: contract.runtime.memory,
-    cpus: contract.runtime.cpus,
-    shmSize: contract.runtime.shmSize,
-  });
+  await processManager.start(
+    project.slug,
+    lastDeploy.start_cmd,
+    project.runtime_type,
+    buildStartOpts({
+      project,
+      contract,
+      envVars,
+      cwd: lastDeploy.artifact_dir,
+      port,
+      loopbackPort: access.mode === "restricted" ? listenPort(project, port) : undefined,
+    })
+  );
 
   await db
     .updateTable("projects")
