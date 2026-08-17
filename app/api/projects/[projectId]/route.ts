@@ -9,6 +9,7 @@ import {
   parseApplyJournal as parseProjectApply,
   projectMounts,
 } from "@/services/project-mounts";
+import { parseRepoMove, repoLocation } from "@/services/project-repo";
 import { readAccess, reportGate, syncGate } from "@/services/access";
 import { allocateLoopbackPort, closeGate } from "@/services/access-gate";
 import { restartFromLastDeployment } from "@/services/project-restart";
@@ -71,6 +72,10 @@ export async function GET(_request: NextRequest, { params }: Params) {
     // browser.
     mounts: projectMounts(parseContractJson(project.builder_config)),
     mountApply: parseProjectApply(project.mount_apply),
+    // Where the checkout really is, asked of the filesystem rather than read off
+    // the column: they differ exactly when something went wrong.
+    repo_location: repoLocation(project.slug),
+    repoMove: parseRepoMove(project.repo_move),
   });
 }
 

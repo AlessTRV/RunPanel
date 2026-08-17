@@ -370,6 +370,41 @@ export const projectMountsSchema = z.object({
 });
 
 /**
+ * A directory for a **native** project's checkout.
+ *
+ * Not `hostPathSchema`, deliberately. That one refuses a Windows path because a
+ * `source:target` mapping cannot carry a drive letter — but a PM2 checkout never
+ * reaches `docker run -v`. It is a directory the panel's own process reads and
+ * writes, on whatever platform it is running, and refusing `D:\dati\progetti`
+ * would make the feature unusable on the one the deploy pipeline goes out of its
+ * way to support.
+ *
+ * Two levels for the same reason as the host rule: a path whose whole purpose is
+ * to be somebody's parent is not a place to put a checkout.
+ */
+export const NATIVE_PATH_RULE =
+  "Un percorso assoluto con almeno due livelli, es. /mnt/dati/progetti o D:\\dati\\progetti";
+
+export const nativePathSchema = z.string().trim().min(2).max(4096).superRefine((raw, ctx) => {
+  const reject = () => ctx.addIssue({ code: "custom", message: NATIVE_PATH_RULE });
+  if (raw.includes("\0")) return reject();
+
+  const windows = /^[A-Za-z]:[\\/]/.test(raw);
+  if (!windows && !raw.startsWith("/")) return reject();
+
+  const segments = raw.split(/[\\/]/).filter(Boolean);
+  // A drive letter is not a level: `C:\dati` is one directory deep.
+  const levels = windows ? segments.length - 1 : segments.length;
+  if (levels < 2) return reject();
+  if (segments.some((segment) => segment === "." || segment === "..")) return reject();
+});
+
+export const repoPathSchema = z.object({
+  /** `null` puts it back under the panel's own data directory. */
+  path: nativePathSchema.nullable(),
+});
+
+/**
  * What a deploy request may ask for.
  *
  * `commitSha` is what pins the project to one commit: the route writes it onto

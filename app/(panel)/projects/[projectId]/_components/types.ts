@@ -27,6 +27,17 @@ export interface Project {
   repo: string | null;
   /** The bind list, as rows — the server splits the `-v` strings, not the browser. */
   mounts: { source: string; target: string; readOnly: boolean; enabled: boolean }[];
+  /** Where the checkout really is, asked of the filesystem rather than the column. */
+  repo_location: { declared: string; real: string | null };
+  repo_path: string | null;
+  repoMove: {
+    phase: string;
+    from: string;
+    to: string | null;
+    error?: string;
+    rolledBack?: boolean;
+    leftBehind?: string;
+  } | null;
   /** Who may reach the published port, and whether the gate enforcing it is up. */
   access: AccessValue;
   gate: GateValue;

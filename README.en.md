@@ -361,29 +361,47 @@ of a grid, and without `--force` the first syntax error would end the session.
 There is a warning before the first session, and it has to be accepted: from
 there you can delete data irreversibly, and the panel keeps no copy.
 
-### Moving the data
+### Folders shared with the host
 
-A service's data lives in a Docker volume whose name the panel derives. From the
-Database tab it can be moved to a directory on the host — a larger disk, a
-network mount — and moved back.
+Any folder inside the container can appear wherever you want it on the host: the
+configuration, the logs, the uploads, the data directory. Several of them, each
+one switchable and optionally read-only. It works for services and for
+Docker-runtime projects, through the same interface.
 
-The move stops the service, copies the data preserving ownership and mode,
-recreates the container on the new location and **checks that the databases are
-still there** before calling itself a success. That check is the point: "the
-container started" says nothing, because a database that finds an empty
-directory initialises from scratch, works perfectly, and has lost everything. If
-the comparison does not hold, the panel puts the container back where it was and
-shows the whole error — the copy is one-directional and its source is mounted
-read-only, so rolling back is safe by construction.
+**The first time, the panel seeds**, and that is the part that matters. A bind
+mount is not a synchronisation, it is a **substitution**: Docker copies nothing
+and merges nothing — it takes the host directory and makes it *be* that path
+inside the container. Whatever was there is not deleted, it is covered. So
+without seeding you would add a bind and see an empty folder, and so would the
+service. The panel copies the current content out before mounting; after that
+there is nothing to keep in step, because it is the same directory — change one
+side and the other changes, sub-folders included, with no restart.
 
-If the destination is not empty it stops and says so: to use data that is
-already there — a previous installation, a disk you are re-adopting — there is a
-checkbox for exactly that, which skips the copy and mounts the directory as it
-is. And the original data **stays where it is**: deleting it is a separate,
-later confirmation that recommends verifying first. When the previous location
-was a host directory the panel does not delete it and hands you the command
-instead — an `rm -rf` on a hand-typed path has no upper bound on what it takes
-with it.
+Seeding runs at two speeds. An ordinary folder is a copy. The engine's **data
+directory** is the one case where getting it wrong is invisible: `cp` without
+`-a` loses ownership and mode, and a Postgres that finds an empty directory
+initialises from scratch, works perfectly, and has lost everything. That case
+stops the service, copies with the permissions intact, recreates, **asks the
+engine whether the databases are still there**, and puts everything back by
+itself if they are not.
+
+If the host folder is not empty it stops and says so, with a checkbox to adopt
+what is already there rather than copy over it. And taking a bind *off* the data
+directory is refused until you confirm: the engine would go back to the volume
+it had before, frozen at the moment you added the bind, and come up on older
+data without saying a word.
+
+### Where a native project's files live
+
+A project under PM2 has no container, so it has no binds: it has a directory.
+From its settings it moves to another disk with everything in it —
+`node_modules` and build output included, so it restarts without rebuilding.
+
+A **symlink** stays at the old location, and that is not a detail: twelve places
+in the panel build `data/repos/<slug>` from a slug alone, and the absolute paths
+already stored in `deployments.artifact_dir` and in the start command point
+inside it. The link keeps every one of them resolving without touching any of
+them. The original copy is not deleted: it stays until you say so.
 
 ### Linking one to a project
 

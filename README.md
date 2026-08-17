@@ -369,29 +369,46 @@ il primo errore di sintassi chiuderebbe la sessione.
 Prima della prima sessione c'è un avviso, e va accettato: da lì si cancellano
 dati in modo irreversibile, e il pannello non tiene una copia.
 
-### Spostare i dati
+### Cartelle condivise con l'host
 
-I dati di un servizio stanno in un volume Docker con nome generato. Dalla scheda
-Database si possono spostare in una cartella dell'host — un disco più capiente,
-un mount di rete — e riportarli indietro.
+Una cartella qualsiasi del container può comparire dove vuoi tu sull'host: la
+configurazione, i log, gli upload, la directory dati. Più di una, ognuna
+accendibile, spegnibile e in sola lettura. Vale per i servizi e per i progetti
+con runtime Docker, con la stessa interfaccia.
 
-Lo spostamento ferma il servizio, copia i dati preservando proprietario e
-permessi, ricrea il container sulla posizione nuova e **controlla che i database
-ci siano ancora** prima di dichiararsi riuscito. Quel controllo è il punto:
-«il container è partito» non vuol dire niente, perché un database che si trova
-davanti una cartella vuota si inizializza da capo, funziona benissimo, e ha
-perso tutto. Se il confronto non torna, il pannello rimette il container dov'era
-e mostra l'errore per intero — la copia è a senso unico e la sorgente è montata
-in sola lettura, quindi tornare indietro è sicuro per costruzione.
+**La prima volta il pannello semina**, ed è la parte che conta. Un bind non è una
+sincronizzazione, è una **sostituzione**: Docker non copia niente e non fonde
+niente, prende la cartella dell'host e la fa diventare quel percorso dentro il
+container. Quello che c'era prima non viene cancellato, viene coperto. Quindi
+senza semina aggiungeresti un bind e vedresti una cartella vuota — e il servizio
+pure. Il pannello copia fuori il contenuto attuale prima di montare; da lì in poi
+non c'è niente da tenere allineato, perché è la stessa cartella: modifichi da una
+parte e cambia dall'altra, sottocartelle comprese, senza riavviare.
 
-Se la cartella di destinazione non è vuota, si ferma e lo dice: per usare dei
-dati che ci sono già — un'installazione precedente, un disco che stai
-riadottando — c'è una casella apposta, che salta la copia e monta la cartella
-com'è. E i dati di partenza **restano dove sono**: eliminarli è una conferma
-separata e successiva, che ti consiglia di verificare prima. Se la posizione
-precedente era una cartella dell'host, il pannello non la cancella e ti dà il
-comando: un `rm -rf` su un percorso scritto a mano non ha un limite superiore a
-quello che porta via.
+La semina va a due velocità. Una cartella qualunque è una copia. La **directory
+dati del motore** è l'unico caso in cui sbagliare non si vede: `cp` senza `-a`
+perde proprietario e permessi, e un Postgres che si trova davanti una cartella
+vuota si inizializza da capo, funziona benissimo e ha perso tutto. Quel caso
+ferma il servizio, copia conservando i permessi, ricrea, **chiede al motore se i
+database ci sono ancora** e se non ci sono rimette tutto com'era da solo.
+
+Se la cartella dell'host non è vuota si ferma e lo dice, con una casella per
+adottare quello che c'è già senza copiarci sopra. E togliere un bind dalla
+directory dati viene rifiutato finché non lo confermi: il motore tornerebbe sul
+volume di prima, fermo a com'era quando l'avevi aggiunto, e ripartirebbe su dati
+più vecchi senza dire niente.
+
+### Dove stanno i file di un progetto nativo
+
+Un progetto sotto PM2 non ha un container, quindi non ha bind: ha una cartella.
+Dalle impostazioni la si sposta su un altro disco, con tutto dentro —
+`node_modules` e build compresi, così riparte senza ricostruire.
+
+Al vecchio posto resta un **collegamento**, e non è un dettaglio: dodici punti
+del pannello costruiscono `data/repos/<slug>` a partire dal solo slug, e i
+percorsi assoluti già salvati in `deployments.artifact_dir` e nel comando di
+avvio puntano lì dentro. Il collegamento li fa risolvere tutti senza toccarne
+nessuno. La copia di partenza non viene cancellata: resta finché non lo dici tu.
 
 ### Il collegamento a un progetto
 

@@ -17,6 +17,7 @@ import { Code, FieldHint } from "@/components/ui/Hint";
 import { EnvFilePathHint, HealthcheckHint, PortHint } from "@/components/DeployHints";
 import { AccessSection } from "@/components/AccessSection";
 import { MountsSection } from "./MountsSection";
+import { RepoPathSection } from "./RepoPathSection";
 import { WebhookSection } from "./WebhookSection";
 import { parseContractJson, type DeployContract } from "@/lib/deploy-contract";
 import type { RuntimeType } from "@/lib/validation";
@@ -665,6 +666,21 @@ export function SettingsTab({
             onApplied={() => onProjectChange({ ...project })}
           />
         </Section>
+      )}
+
+      {/*
+        Native only, and the counterpart of the Container section above: a
+        project in a container keeps its files in an image and has binds
+        instead, so the two never both appear.
+      */}
+      {!isDocker && runtimeType !== "compose" && project.repo_location && (
+        <RepoPathSection
+          projectId={project.id}
+          location={project.repo_location}
+          repoPath={project.repo_path}
+          move={project.repoMove}
+          onChanged={() => onProjectChange({ ...project })}
+        />
       )}
 
       <WebhookSection project={project} onProjectChange={onProjectChange} />

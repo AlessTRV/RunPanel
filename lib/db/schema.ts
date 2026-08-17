@@ -94,6 +94,14 @@ export interface ProjectsTable {
    */
   mount_apply: string | null;
   /**
+   * Where a native project's checkout was moved to, or NULL for the default.
+   * For showing and undoing only — the move leaves a symlink behind, so
+   * everything that resolves a path keeps resolving it. See migration 015.
+   */
+  repo_path: string | null;
+  /** JSON — see `RepoMoveJournal`. NULL when no move has ever been asked for. */
+  repo_move: string | null;
+  /**
    * 0 | 1 — whether this should be running after a reboot.
    *
    * It is the *declared* state, not a mirror of the current one: pressing Stop
