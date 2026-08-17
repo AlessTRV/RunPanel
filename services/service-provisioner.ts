@@ -7,7 +7,13 @@ import { redisTemplate } from "./service-templates/redis";
 import { mongodbTemplate } from "./service-templates/mongodb";
 import { docker, dockerTry } from "./docker/cli";
 import { labelArgs, serviceContainerName } from "./docker/labels";
-import { ensureVolume, listOwnedVolumes, removeVolumes } from "./docker/volumes";
+import {
+  ensureVolume,
+  isHostPath,
+  listOwnedVolumes,
+  mountSource,
+  removeVolumes,
+} from "./docker/volumes";
 import { AccessRow, publishArg } from "./access";
 
 export { serviceContainerName };
@@ -102,9 +108,12 @@ export async function provisionService(
   // the garbage collector — which is why deleted services used to leak their
   // data directory forever.
   for (const mapping of dockerConfig.volumes) {
-    const volumeName = mapping.split(":")[0];
-    if (volumeName && !volumeName.startsWith("/") && !volumeName.includes("\\")) {
-      await ensureVolume(volumeName, ownership);
+    const source = mountSource(mapping);
+    // A host directory is the operator's, not the panel's: Docker binds it as
+    // it finds it, and creating a "volume" of that name would be creating
+    // something else entirely.
+    if (source && !isHostPath(source)) {
+      await ensureVolume(source, ownership);
     }
   }
 
@@ -192,8 +201,8 @@ export function serviceVolumeNames(service: ServiceIdentity): string[] {
   });
 
   return dockerConfig.volumes
-    .map((mapping) => mapping.split(":")[0])
-    .filter((name) => Boolean(name) && !name.startsWith("/") && !name.includes("\\"));
+    .map(mountSource)
+    .filter((name) => Boolean(name) && !isHostPath(name));
 }
 
 /**

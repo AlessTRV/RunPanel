@@ -11,7 +11,7 @@ import { docker, dockerFromFile, dockerTry } from "../docker/cli";
 import { opsEvents } from "../events";
 import { processManager } from "../process-manager";
 import { databaseAdmin, execArgs, serviceTarget } from "../service-databases";
-import { serviceVolumeNames } from "../service-provisioner";
+import { containerMounts } from "../docker/volumes";
 import { extractArchiveEntry, isSafeEntryPath, listArchiveEntries } from "./archive-read";
 import { buildDestination } from "./destinations";
 import { assertBackupId, restoreLog } from "./paths";
@@ -478,14 +478,20 @@ async function restoreRedis(
   file: string,
   emit: (line: string) => void
 ): Promise<void> {
-  const volumes = serviceVolumeNames({
-    type: service.type,
-    name: service.name,
-    projectSlug: null,
-  });
-  const volume = volumes[0];
-  if (!volume) throw new Error("Non riesco a determinare il volume di questo Redis");
+  // Asked, not re-derived. This used to rebuild the volume name from the
+  // service name with `projectSlug: null`, so for a Redis inside a project it
+  // named `runpanel-redis-<nome>` while the data was in
+  // `runpanel-redis-<slug>-<nome>`. `docker run -v` then *created* that empty
+  // volume, wrote the dump into it, and the container restarted on the real
+  // one: a restore that restored nothing, reported success, and left no trace.
+  // Docker knows where the data is mounted — and it keeps knowing once a
+  // service can be moved to a host directory.
+  const mounts = await containerMounts(service.container_name);
+  const data = mounts.find((mount) => mount.destination === "/data");
+  const source = data?.name || data?.source;
+  if (!source) throw new Error("Non riesco a determinare dove questo Redis tiene i dati");
 
+  emit(`  dati in ${source}`);
   emit("  fermo il servizio…");
   await docker(["stop", service.container_name], { timeout: 60_000 });
 
@@ -493,7 +499,7 @@ async function restoreRedis(
     await dockerFromFile(
       [
         "run", "--rm", "-i",
-        "-v", `${volume}:/data`,
+        "-v", `${source}:/data`,
         "redis:" + service.version,
         "sh", "-c",
         "rm -f /data/appendonly.aof; rm -rf /data/appendonlydir; cat > /data/dump.rdb",

@@ -1,6 +1,11 @@
 import { dockerTry, lines } from "./cli";
 import { labelArgs, ownedFilters, type OwnershipLabels } from "./labels";
 
+// Re-exported so a caller reaching for "how do I read a -v mapping" finds it
+// here, next to the volumes it decides the fate of. The rules themselves live
+// in `lib/mount.ts`, which imports nothing and so can be unit-checked.
+export { isHostPath, mountSource } from "@/lib/mount";
+
 /**
  * Volume lifecycle.
  *
@@ -17,6 +22,34 @@ export interface VolumeInfo {
   name: string;
   driver: string;
   mountpoint: string;
+}
+
+export interface ContainerMount {
+  /** Empty for a bind mount — only a managed volume has a name. */
+  name: string;
+  source: string;
+  destination: string;
+}
+
+const MOUNT_FORMAT = '{{range .Mounts}}{{.Name}}\t{{.Source}}\t{{.Destination}}{{"\\n"}}{{end}}';
+
+/**
+ * Where a container's data actually is, as Docker sees it.
+ *
+ * Asked rather than re-derived from the service name. Re-deriving is how the
+ * Redis restore came to write into a volume that did not exist: it rebuilt the
+ * name with no project slug, `docker run -v` created that empty volume, the
+ * dump went in, and the container restarted on the real one — a restore that
+ * restored nothing and said so nowhere. Docker knows; ask Docker.
+ */
+export async function containerMounts(container: string): Promise<ContainerMount[]> {
+  const result = await dockerTry(["inspect", "-f", MOUNT_FORMAT, container], { timeout: 15_000 });
+  if (!result) return [];
+
+  return lines(result.stdout).map((line) => {
+    const [name, source, destination] = line.split("\t");
+    return { name: name ?? "", source: source ?? "", destination: destination ?? "" };
+  });
 }
 
 const VOLUME_FORMAT = "{{.Name}}\t{{.Driver}}\t{{.Mountpoint}}";

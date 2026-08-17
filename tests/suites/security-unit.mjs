@@ -130,6 +130,38 @@ export async function run({ repoRoot }) {
   r.check("an empty branch is refused", !isBranchName(""));
   r.check("an ordinary branch passes", isBranchName("feature/login"));
 
+  // --- what a `-v` mapping means -------------------------------------------
+  //
+  // This one decides whether the panel *creates* a source and whether it may
+  // *delete* it. Two call sites used to answer it with `split(":")[0]`, which
+  // on Windows takes the drive letter for a volume name: `C:\dati:/var/lib/…`
+  // came back as `"C"`, so RunPanel created a labelled volume called `C` and
+  // would have offered it for deletion with the service.
+  const { mountSource, isHostPath } = await load("lib", "mount.ts");
+
+  r.check("a named volume splits at the first colon", mountSource("runpanel-pg-db:/var/lib/postgresql") === "runpanel-pg-db");
+  r.check("a posix source keeps its whole path", mountSource("/srv/dati:/var/lib/postgresql") === "/srv/dati");
+  r.check(
+    "a windows source keeps its drive letter",
+    mountSource("C:\\dati:/var/lib/postgresql") === "C:\\dati",
+    mountSource("C:\\dati:/var/lib/postgresql")
+  );
+  r.check(
+    "a windows source with forward slashes too",
+    mountSource("C:/dati:/var/lib/postgresql") === "C:/dati",
+    mountSource("C:/dati:/var/lib/postgresql")
+  );
+  r.check("a read-only suffix does not confuse it", mountSource("/srv/dati:/data:ro") === "/srv/dati");
+  r.check("a mapping with no colon is all source", mountSource("solonome") === "solonome");
+
+  r.check("a volume name is not a host path", !isHostPath("runpanel-pg-db"));
+  r.check("a posix path is", isHostPath("/srv/dati"));
+  r.check("a windows path is", isHostPath("C:\\dati"));
+  r.check("and so is a UNC-style one", isHostPath("\\\\server\\share"));
+  // The whole point: the old code reduced this mapping to "C", and "C" is not
+  // a host path — which is how a drive letter became a volume.
+  r.check("the drive letter alone would not have been", !isHostPath("C"));
+
   // --- archive entries -----------------------------------------------------
   const { isSafeEntryPath } = await load("services", "backup", "archive-read.ts");
   r.check("zip-slip entry refused", !isSafeEntryPath("../../etc/cron.d/x"));
