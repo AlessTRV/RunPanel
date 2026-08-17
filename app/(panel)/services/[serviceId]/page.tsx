@@ -9,7 +9,7 @@ import { toast } from "sonner";
 import { useResource } from "@/lib/hooks/useResource";
 import { usePollInterval } from "@/lib/hooks/usePollingInterval";
 import { useLineBuffer } from "@/lib/hooks/useLineBuffer";
-import { useServiceStream, type ConsoleMode, type DataMove } from "@/lib/hooks/useServiceStream";
+import { useServiceStream, type ConsoleMode, type MountApply } from "@/lib/hooks/useServiceStream";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Panel } from "@/components/ui/Panel";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -111,9 +111,9 @@ export default function ServiceDetailPage() {
     carry.current = "";
   }, [consoleLines]);
 
-  const moveLines = useLineBuffer<LogLine>(MAX_CONSOLE_LINES);
-  const [move, setMove] = useState<DataMove | null>(null);
-  const [moveProgress, setMoveProgress] = useState<{
+  const applyLines = useLineBuffer<LogLine>(MAX_CONSOLE_LINES);
+  const [apply, setApply] = useState<MountApply | null>(null);
+  const [applyProgress, setApplyProgress] = useState<{
     copiedKb: number;
     totalKb: number | null;
   } | null>(null);
@@ -123,7 +123,7 @@ export default function ServiceDetailPage() {
       case "ready":
         setConsoleActive(Boolean(event.console?.active));
         if (event.console) setConsoleMode(event.console.mode);
-        setMove(event.move);
+        setApply(event.apply);
         break;
       case "console:output":
         pushOutput(event.text);
@@ -132,21 +132,20 @@ export default function ServiceDetailPage() {
         flushCarry();
         setConsoleActive(false);
         break;
-      case "data:log":
-        moveLines.push(toLine(event.line));
+      case "mount:log":
+        applyLines.push(toLine(event.line));
         break;
-      case "data:phase":
-        setMove((prev) => (prev ? { ...prev, phase: event.phase, error: event.error } : prev));
-        // The row carries the journal, and a finished move changes what the
-        // card offers: the location, and whether there is anything left to
-        // delete. Re-read rather than reconstruct it here.
+      case "mount:phase":
+        setApply((prev) => (prev ? { ...prev, phase: event.phase, error: event.error } : prev));
+        // The row carries the journal and the list that was actually applied, and
+        // a finished application changes both. Re-read rather than reconstruct.
         if (event.phase === "done" || event.phase === "failed") {
-          setMoveProgress(null);
+          setApplyProgress(null);
           refresh();
         }
         break;
-      case "data:progress":
-        setMoveProgress({ copiedKb: event.copiedKb, totalKb: event.totalKb });
+      case "mount:progress":
+        setApplyProgress({ copiedKb: event.copiedKb, totalKb: event.totalKb });
         break;
     }
   });
@@ -315,9 +314,9 @@ export default function ServiceDetailPage() {
               service={service}
               from={from}
               creds={creds}
-              move={move ?? service.dataMove}
-              moveLines={moveLines.lines}
-              moveProgress={moveProgress}
+              apply={apply ?? service.mountApply}
+              applyLines={applyLines.lines}
+              applyProgress={applyProgress}
               onDeleted={() => router.push("/services")}
               onChanged={refresh}
             />

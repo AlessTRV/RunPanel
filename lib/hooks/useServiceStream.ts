@@ -4,27 +4,24 @@ import { useEventStream } from "./useEventStream";
 
 export type ConsoleMode = "engine" | "shell" | "logs";
 
-export type MovePhase =
+export type MountPhase =
   | "checking"
   | "stopping"
-  | "copying"
+  | "seeding"
   | "recreating"
-  | "starting"
+  | "verifying"
   | "rolling-back"
   | "done"
   | "failed";
 
-export interface DataMove {
+export interface MountApply {
   id: string;
-  phase: MovePhase;
-  from: string | null;
-  to: string | null;
-  adopted: boolean;
+  phase: MountPhase;
   startedAt: string;
   finishedAt?: string;
   error?: string;
   rolledBack?: boolean;
-  leftBehind?: { kind: "volume" | "path"; ref: string };
+  seeding?: { id: string; source: string; target: string; careful: boolean };
 }
 
 /**
@@ -39,13 +36,13 @@ export type ServiceStreamEvent =
       serviceId: string;
       status: string;
       console: { active: boolean; mode: ConsoleMode } | null;
-      move: DataMove | null;
+      apply: MountApply | null;
     }
   | { type: "console:output"; mode: ConsoleMode; text: string }
   | { type: "console:closed"; mode: ConsoleMode; code: number | null }
-  | { type: "data:log"; line: string }
-  | { type: "data:phase"; phase: MovePhase; error?: string }
-  | { type: "data:progress"; copiedKb: number; totalKb: number | null };
+  | { type: "mount:log"; line: string }
+  | { type: "mount:phase"; phase: MountPhase; error?: string }
+  | { type: "mount:progress"; copiedKb: number; totalKb: number | null };
 
 /**
  * Subscribes to one service's event stream.

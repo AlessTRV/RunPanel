@@ -1,5 +1,6 @@
 import type { AccessValue, GateValue } from "@/components/AccessSection";
-import type { DataMove } from "@/lib/hooks/useServiceStream";
+import type { MountApply } from "@/lib/hooks/useServiceStream";
+import type { ServiceMount } from "@/lib/mount";
 
 /**
  * What the page and its panels agree a service looks like.
@@ -29,11 +30,12 @@ export interface Service {
   reachedByContainerName: boolean;
   access: AccessValue;
   gate: GateValue;
-  /** The host directory the data was moved to, or null for the managed volume. */
-  dataPath: string | null;
-  /** What the template would use — resolved server-side, where the templates live. */
-  dataDefault: { source: string; target: string };
-  dataMove: DataMove | null;
+  /** The bind list this service is declared to run with. */
+  mounts: ServiceMount[];
+  /** The application in flight, or the last one that finished. */
+  mountApply: MountApply | null;
+  /** What Docker says is really mounted — the declaration's counterpart. */
+  containerMounts: { source: string; target: string }[];
 }
 
 export interface Credentials {

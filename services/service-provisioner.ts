@@ -9,6 +9,7 @@ import { redisTemplate } from "./service-templates/redis";
 import { mongodbTemplate } from "./service-templates/mongodb";
 import { docker, dockerTry } from "./docker/cli";
 import { labelArgs, serviceContainerName } from "./docker/labels";
+import type { ServiceMount } from "@/lib/mount";
 import {
   ensureVolume,
   isHostPath,
@@ -105,7 +106,7 @@ export async function provisionService(
 
   await dockerTry(["rm", "-f", containerName], { timeout: 15_000 });
 
-  const mounts = resolveMounts(dockerConfig.volumes, config.dataPath);
+  const mounts = resolveMounts(dockerConfig.volumes, config.mounts);
 
   // Create the volumes explicitly so they carry ownership labels. Left to
   // `docker run -v`, they would be created unlabelled and become invisible to
@@ -170,23 +171,34 @@ export interface VolumeMount {
  *
  * The templates always declare the named volume they would create — that is the
  * question `serviceVolumeNames` asks them, and the answer has to stay the same
- * wherever the data has since been moved. So the substitution happens exactly
- * here, once, on the first mapping: the data directory is the first volume in
- * every template and none of them declares a second.
+ * whatever the operator has since bound over it. So the merge happens exactly
+ * here, once.
+ *
+ * A bind whose target is one the template already declares **replaces** it
+ * rather than being added beside it: two `-v` arguments for the same path in the
+ * container is not a configuration, it is a coin toss. That is also what makes
+ * relocating a database expressible as an ordinary bind.
  */
-export function resolveMounts(volumes: string[], dataPath?: string | null): VolumeMount[] {
-  return volumes.map((mapping, index) => {
-    const source = mountSource(mapping);
-    const target = mapping.slice(source.length + 1);
-    return index === 0 && dataPath ? { source: dataPath, target } : { source, target };
-  });
-}
+export function resolveMounts(volumes: string[], mounts: ServiceMount[] = []): VolumeMount[] {
+  const normalise = (value: string) => value.replace(/\/+$/, "");
 
-/** Where this service's data goes, as a structured pair. */
-export function dataMountFor(config: ServiceConfig): VolumeMount {
-  const template = getTemplate(config.type);
-  const volumes = template?.getDockerConfig(config).volumes ?? [];
-  return resolveMounts(volumes, config.dataPath)[0] ?? { source: "", target: "" };
+  const out: VolumeMount[] = volumes.map((mapping) => {
+    const source = mountSource(mapping);
+    return { source, target: mapping.slice(source.length + 1) };
+  });
+
+  for (const mount of mounts) {
+    if (!mount.enabled) continue;
+    const entry: VolumeMount = {
+      source: mount.source,
+      target: mount.readOnly ? `${mount.target}:ro` : mount.target,
+    };
+    const existing = out.findIndex((m) => normalise(m.target) === normalise(mount.target));
+    if (existing >= 0) out[existing] = entry;
+    else out.push(entry);
+  }
+
+  return out;
 }
 
 /**
@@ -194,15 +206,15 @@ export function dataMountFor(config: ServiceConfig): VolumeMount {
  *
  * One function, because the mapping is easy to get *almost* right by hand and
  * the omission is invisible: the access PATCH used to rebuild this inline, and
- * the day a service could name its own data directory that rebuild would have
- * silently remounted it on the default volume. On PostgreSQL 18 that is the
+ * the day a service could bind its own folders that rebuild would have silently
+ * dropped every one of them. For a bind over the data directory that is the
  * trap `postgresVolumePath` documents — it initialises elsewhere, works
  * perfectly, and comes back empty.
  */
 export function serviceRunConfig(
   service: ServicesTable,
   projectSlug?: string,
-  overrides: { dataPath?: string | null } = {}
+  overrides: { mounts?: ServiceMount[] } = {}
 ): ServiceConfig {
   let credentials = { user: "", password: "", database: "" };
   try {
@@ -220,13 +232,24 @@ export function serviceRunConfig(
     port: service.port,
     credentials,
     projectSlug,
-    dataPath: "dataPath" in overrides ? overrides.dataPath : service.data_path,
+    mounts: overrides.mounts ?? parseMountList(service.mounts),
   };
 }
 
+/** The stored list, or none. A malformed column must not stop a service starting. */
+function parseMountList(raw: string | null): ServiceMount[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as ServiceMount[]) : [];
+  } catch {
+    return [];
+  }
+}
+
 /**
- * Put the container back with a different publish spec or a different data
- * directory.
+ * Put the container back with a different publish spec or a different set of
+ * mounts.
  *
  * Recreated rather than restarted: `-p` and `-v` are both fixed at
  * `docker run`, and `docker start` replays whatever the container was created
@@ -238,7 +261,7 @@ export async function recreateService(
   service: ServicesTable,
   projectSlug: string | undefined,
   access: AccessRow,
-  overrides: { dataPath?: string | null } = {}
+  overrides: { mounts?: ServiceMount[] } = {}
 ): Promise<{ containerId: string; status: ServicesTable["status"] }> {
   const config = serviceRunConfig(service, projectSlug, overrides);
   const containerId = await provisionService(config, projectSlug, access);

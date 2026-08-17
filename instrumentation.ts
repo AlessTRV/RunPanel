@@ -27,15 +27,6 @@ export async function register() {
   const { getDb } = await import("./lib/db");
   await getDb();
 
-  // A move of a service's data that was in flight when this process stopped.
-  // Before the schedulers and not behind their flag: it is correctness, not a
-  // chore, and the panel must not report a service as being somewhere Docker
-  // says it is not. It never resumes a move — see the function for why.
-  const { reconcileDataMoves } = await import("./services/service-data-move");
-  await reconcileDataMoves().catch((err) => {
-    console.error("[data-move] Recovery failed:", err instanceof Error ? err.message : err);
-  });
-
   // An unclaimed panel is a panel anyone can claim, and the first person to do
   // so gets a shell on this host. Print the token the setup form has to quote,
   // so claiming it requires reading this log rather than merely arriving first.

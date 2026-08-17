@@ -186,17 +186,16 @@ export interface ServicesTable {
   /** Where the real listener moved to while restricted. NULL when open. */
   access_port: number | null;
   /**
-   * The host directory this service's data is bound to, or NULL for the named
-   * volume the template derives.
+   * JSON array of `ServiceMount` — the bind mounts this service runs with, on
+   * top of the volume its template declares. NULL and `[]` mean the same thing.
    *
-   * A **declaration**, not an observation: Docker is the authority on where a
-   * container is really mounted, and anything that has to be sure — the restart
-   * recovery in `services/service-data-move.ts` above all — asks Docker and
-   * treats this column as what the panel intended.
+   * A **declaration**, not an observation: Docker is the authority on what a
+   * container is really mounted with, and anything that has to be sure asks it
+   * (`containerMounts()`), treating this column as what the panel intended.
    */
-  data_path: string | null;
-  /** JSON — see `DataMoveJournal`. NULL when no move has ever been asked for. */
-  data_move: string | null;
+  mounts: string | null;
+  /** JSON — see `MountJournal`. NULL when no list has ever been applied. */
+  mount_apply: string | null;
   created_at: string;
   updated_at: string;
 }

@@ -214,7 +214,7 @@ export const serviceConsoleSchema = z.discriminatedUnion("action", [
 ]);
 
 /**
- * A host directory RunPanel is willing to bind-mount as a service's storage.
+ * A directory **on the host** that RunPanel is willing to bind into a container.
  *
  * POSIX absolute, and deliberately nothing else. A Windows path cannot survive
  * the `source:target` mapping this codebase builds — see `lib/mount.ts` for the
@@ -225,48 +225,96 @@ export const serviceConsoleSchema = z.discriminatedUnion("action", [
  * Two non-empty segments is one rule that refuses `/`, `/etc`, `/var`, `/home`
  * and `/mnt` at once: every path whose whole purpose is to be somebody's
  * parent. The explicit list below is for the ones that are two levels deep and
- * still must never be handed to a database container.
+ * still must never be handed to a container.
  *
  * The panel's own data directory cannot be checked here — `config.dataDir` is
  * server-only and this module is bundled for the browser — so
- * `services/service-data-move.ts` re-runs this schema and adds that one. It is
- * the entry that matters most: `<dataDir>/.secret` decrypts every credential
- * the panel holds.
+ * `services/service-mounts.ts` re-runs this schema and adds that one. It is the
+ * entry that matters most: `<dataDir>/.secret` decrypts every credential the
+ * panel holds.
  */
-export const DATA_PATH_RULE =
+export const HOST_PATH_RULE =
   "Un percorso assoluto con almeno due livelli, es. /mnt/dati/postgres — niente \"..\"";
 
-const FORBIDDEN_DATA_PATHS = [
+const FORBIDDEN_HOST_PATHS = [
   "/proc", "/sys", "/dev", "/boot", "/etc", "/bin", "/sbin", "/lib", "/lib64",
   "/usr", "/var/lib/docker", "/var/run", "/run",
 ] as const;
 
-export const dataPathSchema = z.string().trim().min(2).max(4096).superRefine((raw, ctx) => {
+export const hostPathSchema = z.string().trim().min(2).max(4096).superRefine((raw, ctx) => {
   const reject = (message: string) => ctx.addIssue({ code: "custom", message });
 
-  if (raw.includes("\0") || raw.includes("\\")) return reject(DATA_PATH_RULE);
-  if (!raw.startsWith("/")) return reject(DATA_PATH_RULE);
+  if (raw.includes("\0") || raw.includes("\\")) return reject(HOST_PATH_RULE);
+  if (!raw.startsWith("/")) return reject(HOST_PATH_RULE);
 
   const segments = raw.split("/").filter(Boolean);
-  if (segments.length < 2) return reject(DATA_PATH_RULE);
-  if (segments.some((segment) => segment === "." || segment === "..")) return reject(DATA_PATH_RULE);
+  if (segments.length < 2) return reject(HOST_PATH_RULE);
+  if (segments.some((segment) => segment === "." || segment === "..")) return reject(HOST_PATH_RULE);
 
   const normalised = `/${segments.join("/")}`;
-  if (FORBIDDEN_DATA_PATHS.some((bad) => normalised === bad || normalised.startsWith(`${bad}/`))) {
-    reject(`${normalised} è una directory di sistema: non può ospitare i dati di un servizio`);
+  if (FORBIDDEN_HOST_PATHS.some((bad) => normalised === bad || normalised.startsWith(`${bad}/`))) {
+    reject(`${normalised} è una directory di sistema: non può essere montata in un container`);
   }
 });
 
-export const serviceDataPathSchema = z.object({
-  /** `null` means "back to the named volume the template derives". */
-  path: dataPathSchema.nullable(),
+/**
+ * A path **inside the container**, which is a different question and a laxer
+ * one: it is the container's own filesystem, and mounting over `/etc` or
+ * `/usr/share` there is a legitimate thing to want.
+ *
+ * One level is allowed, unlike the host side — `/data` is where half the
+ * official images keep everything. What is refused is the handful that do not
+ * produce a differently-configured service but a container that cannot boot:
+ * the root itself, and the three kernel filesystems.
+ *
+ * A colon would split the `source:target` mapping in the wrong place, so it is
+ * refused here rather than discovered as a mangled `docker run`.
+ */
+export const CONTAINER_PATH_RULE =
+  "Un percorso assoluto dentro il container, es. /etc/postgresql — niente \"..\"";
+
+const FORBIDDEN_CONTAINER_PATHS = ["/proc", "/sys", "/dev"] as const;
+
+export const containerPathSchema = z.string().trim().min(2).max(4096).superRefine((raw, ctx) => {
+  const reject = (message: string) => ctx.addIssue({ code: "custom", message });
+
+  if (raw.includes("\0") || raw.includes("\\") || raw.includes(":")) {
+    return reject(CONTAINER_PATH_RULE);
+  }
+  if (!raw.startsWith("/")) return reject(CONTAINER_PATH_RULE);
+
+  const segments = raw.split("/").filter(Boolean);
+  if (segments.length < 1) return reject(CONTAINER_PATH_RULE);
+  if (segments.some((segment) => segment === "." || segment === "..")) {
+    return reject(CONTAINER_PATH_RULE);
+  }
+
+  const normalised = `/${segments.join("/")}`;
+  if (FORBIDDEN_CONTAINER_PATHS.some((bad) => normalised === bad || normalised.startsWith(`${bad}/`))) {
+    reject(`${normalised} è un filesystem del kernel: montarci sopra impedisce al container di partire`);
+  }
+});
+
+/** One bind: a folder on the host appearing at a path inside the container. */
+export const serviceMountSchema = z.object({
+  /** Stable across edits so a re-ordered list does not look like a new one. */
+  id: z.string().min(1).max(32),
+  source: hostPathSchema,
+  target: containerPathSchema,
+  enabled: z.boolean(),
+  readOnly: z.boolean(),
+});
+
+export const serviceMountsSchema = z.object({
+  /** Replace semantics: this is the whole list, not a patch. */
+  mounts: z.array(serviceMountSchema).max(32),
   /**
-   * The answer to a refusal for a destination that is not empty: mount it as it
-   * is and copy nothing. It is the operator saying "those bytes are the data" —
-   * which is the only way a directory that already holds a database is ever
-   * used, and why it cannot be the default.
+   * The ids whose destination is already non-empty and which the operator has
+   * chosen to adopt: mount them as they are and copy nothing. It is them saying
+   * "those bytes are the data" — the only way a directory that already holds
+   * something is ever used, and why it cannot be the default.
    */
-  adoptExisting: z.boolean().optional(),
+  adopt: z.array(z.string().min(1).max(32)).max(32).optional(),
 });
 
 /**

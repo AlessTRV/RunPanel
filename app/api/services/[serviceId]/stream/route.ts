@@ -3,7 +3,7 @@ import { requireAuth } from "@/lib/auth-guard";
 import { getDb } from "@/lib/db";
 import { serviceEvents, type ServiceEvent } from "@/services/events";
 import { consoleBacklog, consoleState, touchConsole } from "@/services/service-console";
-import { isMoveInFlight, moveLog, parseMoveJournal } from "@/services/service-data-move";
+import { applyLog, isApplyInFlight, parseApplyJournal } from "@/services/service-mounts";
 
 type Params = { params: Promise<{ serviceId: string }> };
 
@@ -25,7 +25,7 @@ export async function GET(request: NextRequest, { params }: Params) {
   const db = await getDb();
   const service = await db
     .selectFrom("services")
-    .select(["id", "status", "data_move"])
+    .select(["id", "status", "mount_apply"])
     .where("id", "=", serviceId)
     .executeTakeFirst();
 
@@ -61,8 +61,8 @@ export async function GET(request: NextRequest, { params }: Params) {
       };
 
       const open = consoleState(serviceId);
-      const move = parseMoveJournal(service.data_move);
-      send({ type: "ready", serviceId, status: service.status, console: open, move });
+      const apply = parseApplyJournal(service.mount_apply);
+      send({ type: "ready", serviceId, status: service.status, console: open, apply });
 
       // Whatever the session has already printed, so a reload or a second tab
       // does not start from a blank pane above a live shell.
@@ -72,11 +72,12 @@ export async function GET(request: NextRequest, { params }: Params) {
         }
       }
 
-      // The same for a move: it can run for minutes, and a page opened halfway
-      // through that showed nothing until the next line would look stuck.
-      if (isMoveInFlight(move)) {
-        for (const line of moveLog(serviceId).split("\n")) {
-          if (line) send({ type: "data:log", line });
+      // The same for an apply: seeding a large folder runs for minutes, and a
+      // page opened halfway through that showed nothing until the next line
+      // would look stuck.
+      if (isApplyInFlight(apply)) {
+        for (const line of applyLog(serviceId).split("\n")) {
+          if (line) send({ type: "mount:log", line });
         }
       }
 

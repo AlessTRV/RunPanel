@@ -11,6 +11,7 @@ import * as webhookHookId from "./009-webhook-hook-id";
 import * as deployPolling from "./010-deploy-polling";
 import * as pinnedCommit from "./011-pinned-commit";
 import * as serviceDataPath from "./012-service-data-path";
+import * as serviceMounts from "./013-service-mounts";
 
 /**
  * Migrations are registered statically rather than read from disk with
@@ -32,6 +33,7 @@ export const migrations: Record<string, Migration> = {
   "010-deploy-polling": deployPolling,
   "011-pinned-commit": pinnedCommit,
   "012-service-data-path": serviceDataPath,
+  "013-service-mounts": serviceMounts,
 };
 
 export class StaticMigrationProvider implements MigrationProvider {

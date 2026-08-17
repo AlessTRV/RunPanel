@@ -13,6 +13,24 @@
  * RunPanel-owned volume name to create, and, on a delete-with-data, to remove.
  */
 
+/**
+ * One bind: a folder on the host appearing at a path inside a container.
+ *
+ * Declared here, in the module with no imports, because the schema that
+ * validates it, the templates that are handed it and the service that applies
+ * it would otherwise import each other in a circle.
+ */
+export interface ServiceMount {
+  /** Stable across edits, so a re-ordered list does not read as a new one. */
+  id: string;
+  /** The directory on the host. */
+  source: string;
+  /** Where it appears inside the container. */
+  target: string;
+  enabled: boolean;
+  readOnly: boolean;
+}
+
 /** True for `C:\…`, `C:/…` and `c:…`; a volume name can never look like this. */
 const DRIVE_LETTER = /^[A-Za-z]:/;
 const DRIVE_PREFIX = /^[A-Za-z]:[\\/]/;

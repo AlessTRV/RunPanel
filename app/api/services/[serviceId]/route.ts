@@ -4,13 +4,11 @@ import { getDb, nowIso } from "@/lib/db";
 import { decrypt } from "@/lib/crypto";
 import { updateServiceSchema } from "@/lib/validation";
 import {
-  dataMountFor,
   internalPort,
   recreateService,
   removeService,
-  serviceRunConfig,
 } from "@/services/service-provisioner";
-import { parseMoveJournal } from "@/services/service-data-move";
+import { currentMounts, parseApplyJournal, parseMounts } from "@/services/service-mounts";
 import { networkName } from "@/services/docker/labels";
 import {
   connectToNetwork,
@@ -97,9 +95,15 @@ export async function GET(request: NextRequest, { params }: Params) {
     // because the card that renders all three must not need a fetch of its own:
     // `useResource` throws away the body of any non-2xx, so an explanation sent
     // as an error is an explanation nobody reads.
-    dataPath: service.data_path,
-    dataDefault: dataMountFor(serviceRunConfig(service, project?.slug, { dataPath: null })),
-    dataMove: parseMoveJournal(service.data_move),
+    // The bind list, and where every mount really is on the host — the one
+    // thing a volume name and an in-container path cannot tell you between
+    // them. Resolved here because it comes from Docker, and because the card
+    // that renders it must not need a fetch of its own: `useResource` throws
+    // away the body of any non-2xx, so an explanation sent as an error is an
+    // explanation nobody reads.
+    mounts: parseMounts(service.mounts),
+    mountApply: parseApplyJournal(service.mount_apply),
+    containerMounts: await currentMounts(service.container_name),
     credentials: reveal && service.credentials ? decrypt(service.credentials) : "hidden",
   }, {
     // `?reveal=true` returns the database password in clear. Not cacheable

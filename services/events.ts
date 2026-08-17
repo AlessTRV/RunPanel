@@ -61,12 +61,12 @@ export type OpsEvent =
  */
 export type ConsoleMode = "engine" | "shell" | "logs";
 
-export type MovePhase =
+export type MountPhase =
   | "checking"
   | "stopping"
-  | "copying"
+  | "seeding"
   | "recreating"
-  | "starting"
+  | "verifying"
   | "rolling-back"
   | "done"
   | "failed";
@@ -74,10 +74,10 @@ export type MovePhase =
 export type ServiceEvent =
   | { type: "console:output"; mode: ConsoleMode; text: string }
   | { type: "console:closed"; mode: ConsoleMode; code: number | null }
-  /** Moving the data somewhere else — see `services/service-data-move.ts`. */
-  | { type: "data:log"; line: string }
-  | { type: "data:phase"; phase: MovePhase; error?: string }
-  | { type: "data:progress"; copiedKb: number; totalKb: number | null };
+  /** Applying the bind list — see `services/service-mounts.ts`. */
+  | { type: "mount:log"; line: string }
+  | { type: "mount:phase"; phase: MountPhase; error?: string }
+  | { type: "mount:progress"; copiedKb: number; totalKb: number | null };
 
 /**
  * One emitter, keyed by a channel string. Three instances rather than three

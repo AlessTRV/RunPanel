@@ -1,3 +1,5 @@
+import type { ServiceMount } from "@/lib/mount";
+
 export interface ServiceConfig {
   name: string;
   type: "postgresql" | "mysql" | "redis" | "mongodb";
@@ -6,15 +8,15 @@ export interface ServiceConfig {
   credentials: { user: string; password: string; database: string };
   projectSlug?: string;
   /**
-   * A host directory to bind as this service's data, instead of the named
-   * volume the template declares.
+   * The bind mounts this service runs with, on top of the volume the template
+   * declares.
    *
-   * The templates do not read it, on purpose. They keep declaring the volume
+   * The templates do not read them, on purpose. They keep declaring the volume
    * they would create, because that is the question `serviceVolumeNames` asks
-   * them and the answer has to stay the same wherever the data currently is —
-   * the substitution happens once, in `provisionService`.
+   * them and the answer has to stay the same whatever is bound over it — the
+   * merge happens once, in `provisionService`.
    */
-  dataPath?: string | null;
+  mounts?: ServiceMount[];
 }
 
 export interface DockerRunConfig {
