@@ -89,6 +89,11 @@ export interface ProjectsTable {
   pinned_sha: string | null;
   pinned_at: string | null;
   /**
+   * JSON — see `MountJournal`. The bind list itself lives in the deploy
+   * contract (`docker.mounts`); this is only the record of one being applied.
+   */
+  mount_apply: string | null;
+  /**
    * 0 | 1 — whether this should be running after a reboot.
    *
    * It is the *declared* state, not a mirror of the current one: pressing Stop

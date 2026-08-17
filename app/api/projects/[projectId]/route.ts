@@ -5,6 +5,10 @@ import type { ProjectsTable } from "@/lib/db/schema";
 import { updateProjectSchema } from "@/lib/validation";
 import { parseRepoSlug } from "@/lib/github";
 import { deployContractSchema, normalizeContractInput, parseContractJson } from "@/lib/deploy-contract";
+import {
+  parseApplyJournal as parseProjectApply,
+  projectMounts,
+} from "@/services/project-mounts";
 import { readAccess, reportGate, syncGate } from "@/services/access";
 import { allocateLoopbackPort, closeGate } from "@/services/access-gate";
 import { restartFromLastDeployment } from "@/services/project-restart";
@@ -62,6 +66,11 @@ export async function GET(_request: NextRequest, { params }: Params) {
     // uploaded ZIP or a URL on some other host, which is what the version
     // picker keys off to know there is no commit history to browse.
     repo: parseRepoSlug(project.source_url)?.full ?? null,
+    // The bind list as rows, so the editor never has to split a `-v` string —
+    // there is one place that knows how a mapping splits, and it is not the
+    // browser.
+    mounts: projectMounts(parseContractJson(project.builder_config)),
+    mountApply: parseProjectApply(project.mount_apply),
   });
 }
 
@@ -173,6 +182,21 @@ export async function PATCH(request: NextRequest, { params }: Params) {
         { status: 400 }
       );
     }
+    /*
+      `docker.mounts` is deliberately still writable from here.
+
+      `PUT /api/projects/:id/mounts` is the way that seeds — it copies what the
+      container has at that path into the host directory before the bind covers
+      it — and it is what the settings tab uses. But this handler has always
+      been the low-level way to set the whole contract, and a mount set through
+      it is a legitimate thing to want: an empty directory the app is meant to
+      write into needs no seeding, and `deploy-contract` relies on exactly that.
+
+      Stripping the field here was tried and was wrong twice over: it silently
+      dropped a value the caller had sent, and it broke a capability that works.
+      What the settings form actually needed was to re-read the contract when
+      the row changes, which is where the staleness lived — see `SettingsTab`.
+    */
     updates.builder_config = JSON.stringify({ version: 1, ...normalized });
   }
 

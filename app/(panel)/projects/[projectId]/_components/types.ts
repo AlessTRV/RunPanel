@@ -25,6 +25,8 @@ export interface Project {
   pinned_at: string | null;
   /** `owner/name` when the source is a GitHub URL, null for a ZIP or another host. */
   repo: string | null;
+  /** The bind list, as rows — the server splits the `-v` strings, not the browser. */
+  mounts: { source: string; target: string; readOnly: boolean; enabled: boolean }[];
   /** Who may reach the published port, and whether the gate enforcing it is up. */
   access: AccessValue;
   gate: GateValue;

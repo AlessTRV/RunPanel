@@ -53,3 +53,37 @@ export function mountSource(mapping: string): string {
 export function isHostPath(source: string): boolean {
   return source.startsWith("/") || source.startsWith("\\") || DRIVE_LETTER.test(source);
 }
+
+/**
+ * Read a `source:target[:ro]` mapping into its parts, or null if it is not one.
+ *
+ * The string form is what a repository's `runpanel.json` has always written, and
+ * what `docker run -v` takes. The object form is what an editor needs, because
+ * an on/off switch has nowhere to live in a string. Both spellings exist on
+ * purpose; this is the one place that converts between them, so they cannot come
+ * to disagree about where a mapping splits.
+ */
+export function parseMountString(raw: string): { source: string; target: string; readOnly: boolean } | null {
+  const source = mountSource(raw);
+  if (!source || source === raw) return null;
+
+  let rest = raw.slice(source.length + 1);
+  if (!rest) return null;
+
+  let readOnly = false;
+  const lastColon = rest.lastIndexOf(":");
+  if (lastColon > 0) {
+    const mode = rest.slice(lastColon + 1);
+    if (mode === "ro" || mode === "rw") {
+      readOnly = mode === "ro";
+      rest = rest.slice(0, lastColon);
+    }
+  }
+
+  return rest ? { source, target: rest, readOnly } : null;
+}
+
+/** The inverse. The only place a `-v` argument is spelled. */
+export function formatMountString(spec: { source: string; target: string; readOnly?: boolean }): string {
+  return spec.readOnly ? `${spec.source}:${spec.target}:ro` : `${spec.source}:${spec.target}`;
+}

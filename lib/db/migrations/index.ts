@@ -12,6 +12,7 @@ import * as deployPolling from "./010-deploy-polling";
 import * as pinnedCommit from "./011-pinned-commit";
 import * as serviceDataPath from "./012-service-data-path";
 import * as serviceMounts from "./013-service-mounts";
+import * as projectMountApply from "./014-project-mount-apply";
 
 /**
  * Migrations are registered statically rather than read from disk with
@@ -34,6 +35,7 @@ export const migrations: Record<string, Migration> = {
   "011-pinned-commit": pinnedCommit,
   "012-service-data-path": serviceDataPath,
   "013-service-mounts": serviceMounts,
+  "014-project-mount-apply": projectMountApply,
 };
 
 export class StaticMigrationProvider implements MigrationProvider {

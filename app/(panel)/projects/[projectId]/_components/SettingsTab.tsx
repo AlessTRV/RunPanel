@@ -16,6 +16,7 @@ import { InfoTip } from "@/components/ui/Tooltip";
 import { Code, FieldHint } from "@/components/ui/Hint";
 import { EnvFilePathHint, HealthcheckHint, PortHint } from "@/components/DeployHints";
 import { AccessSection } from "@/components/AccessSection";
+import { MountsSection } from "./MountsSection";
 import { WebhookSection } from "./WebhookSection";
 import { parseContractJson, type DeployContract } from "@/lib/deploy-contract";
 import type { RuntimeType } from "@/lib/validation";
@@ -87,6 +88,25 @@ export function SettingsTab({
   const [port, setPort] = useState(project.port?.toString() ?? "");
   const [runtimeType, setRuntimeType] = useState<string>(project.runtime_type);
   const [saving, setSaving] = useState(false);
+
+  /*
+    Re-read the contract when the row genuinely changes.
+
+    The form holds a copy from the moment it mounted, and until now nothing else
+    wrote that column while it was open. The mount editor below does: it saves
+    through its own route, because applying a bind copies bytes and restarts the
+    app. Without this, the next Salva would send the contract from before that
+    save and quietly put the old mount list back.
+
+    Compared against a baseline so an unchanged poll is a no-op, and adjusted
+    during render rather than in an effect — which is what React recommends for
+    state derived from props, and what `AccessSection` already does.
+  */
+  const [storedContract, setStoredContract] = useState(project.builder_config);
+  if (project.builder_config !== storedContract) {
+    setStoredContract(project.builder_config);
+    setContract(parseContractJson(project.builder_config));
+  }
 
   /*
     Which preset the operator is looking at. Local only — nothing about it is
@@ -638,6 +658,12 @@ export function SettingsTab({
               container, che non cambia.
             </FieldHint>
           </div>
+
+          <MountsSection
+            projectId={project.id}
+            mounts={project.mounts ?? []}
+            onApplied={() => onProjectChange({ ...project })}
+          />
         </Section>
       )}
 

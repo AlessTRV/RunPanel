@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { isValidTimeZone, parseCron } from "./cron";
 import { BRANCH_NAME_RULE, COMMIT_SHA_RULE, isBranchName, isCommitSha } from "./git-ref";
+import { parseMountString } from "./mount";
 import { ruleProblem } from "./ip-access";
 
 
@@ -322,6 +323,50 @@ export const serviceMountsSchema = z.object({
    * database while everything written since stays in the host directory.
    */
   releaseData: z.array(z.string().min(1).max(32)).max(32).optional(),
+});
+
+/**
+ * A mount in the spelling a deploy contract stores: `source:target[:ro]`.
+ *
+ * Checked here, at the route, and **not** inside `deployContractSchema`.
+ * `parseContract` falls back to the whole default contract when parsing fails,
+ * so one stale mount string tightened into an error would cost a project its
+ * commands, its network and its restart policy at the same time. The contract
+ * stays permissive; this is where an operator's input is refused.
+ */
+export const mountStringSchema = z.string().trim().min(3).max(8192).superRefine((raw, ctx) => {
+  const parsed = parseMountString(raw);
+  if (!parsed) {
+    return ctx.addIssue({ code: "custom", message: "Serve la forma percorso-host:percorso-container" });
+  }
+  for (const [value, schema] of [
+    [parsed.source, hostPathSchema],
+    [parsed.target, containerPathSchema],
+  ] as const) {
+    const result = schema.safeParse(value);
+    if (!result.success) {
+      ctx.addIssue({ code: "custom", message: result.error.issues[0]?.message ?? HOST_PATH_RULE });
+    }
+  }
+});
+
+/** One row of a project's mount editor, before it is written back as a string. */
+export const mountEntrySchema = z.object({
+  source: hostPathSchema,
+  target: containerPathSchema,
+  readOnly: z.boolean(),
+  enabled: z.boolean(),
+});
+
+export const projectMountsSchema = z.object({
+  /** Replace semantics: this is the whole list. */
+  mounts: z.array(mountEntrySchema).max(32),
+  /**
+   * Targets whose host directory is already populated and is adopted as it is.
+   * Keyed by container path rather than by an id, because a contract's mounts
+   * have never had one.
+   */
+  adopt: z.array(containerPathSchema).max(32).optional(),
 });
 
 /**

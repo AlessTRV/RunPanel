@@ -6,8 +6,15 @@ import { generateId } from "@/lib/utils";
 import { hostPathSchema } from "@/lib/validation";
 import { postgresVolumePath } from "@/lib/service-versions";
 import type { AccessRow } from "@/lib/access-columns";
-import { docker, dockerFromFile, dockerToFile, dockerTry } from "./docker/cli";
+import { docker, dockerTry } from "./docker/cli";
 import { containerMounts } from "./docker/volumes";
+import {
+  copyBetweenMounts,
+  copyOutOfContainer,
+  destinationEntries,
+  freeKb,
+  sizeKb,
+} from "./mount-seed";
 import { serviceEvents, type MountPhase } from "./events";
 import { AppendLogFile, logPathFor, readLogFile } from "./log-file";
 import { databaseAdmin, execArgs, serviceTarget } from "./service-databases";
@@ -71,7 +78,10 @@ export class MountRefused extends Error {
       | "destination-not-empty"
       | "apply-in-progress"
       | "insufficient-space"
-      | "data-mount-removed",
+      | "data-mount-removed"
+      /** Project-side, where a bind is a container concept and a build is needed. */
+      | "runtime-not-docker"
+      | "no-image",
     message: string,
     readonly mountId?: string,
     readonly entries?: string[]
@@ -82,7 +92,6 @@ export class MountRefused extends Error {
 }
 
 const SEED_CONTAINER = (serviceId: string) => `runpanel-mountseed-${serviceId}`;
-const PROGRESS_INTERVAL_MS = 3_000;
 const READY_TIMEOUT_MS = 90_000;
 /** A destination this full is one the copy will not fit into. */
 const FREE_SPACE_MARGIN = 1.05;
@@ -207,45 +216,6 @@ function imageFor(service: ServicesTable, projectSlug?: string): string {
   return image;
 }
 
-/** `docker run --rm` with a shell, one fixed command, and no interpolation. */
-async function probe(image: string, mounts: string[], script: string): Promise<string | null> {
-  const result = await dockerTry(
-    ["run", "--rm", "--entrypoint", "sh", ...mounts, image, "-c", script],
-    { timeout: 120_000 }
-  );
-  return result ? result.stdout.trim() : null;
-}
-
-/**
- * What is already at the destination.
- *
- * `-v` creates the directory when it is missing, so this doubles as "does it
- * exist". `lost+found` does not count: a freshly formatted ext4 mount point has
- * one and would otherwise be permanently refused.
- */
-async function destinationEntries(image: string, destination: string): Promise<string[]> {
-  const out = await probe(image, ["-v", `${destination}:/dst`], "ls -A /dst 2>/dev/null | head -n 20");
-  if (out === null) throw new Error(`Non riesco a leggere ${destination}`);
-  return out
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line && line !== "lost+found");
-}
-
-/** Size in KiB. `du -sk` rather than `du -sb`, which is GNU-only. */
-async function sizeKb(image: string, mount: string): Promise<number | null> {
-  const out = await probe(image, ["-v", `${mount}:/from:ro`], "du -sk /from | cut -f1");
-  const value = Number.parseInt((out ?? "").split(/\s+/)[0] ?? "", 10);
-  return Number.isFinite(value) ? value : null;
-}
-
-/** Free KiB at the destination, from `df -Pk`. */
-async function freeKb(image: string, destination: string): Promise<number | null> {
-  const out = await probe(image, ["-v", `${destination}:/dst`], "df -Pk /dst | tail -n1");
-  const value = Number.parseInt((out ?? "").split(/\s+/)[3] ?? "", 10);
-  return Number.isFinite(value) ? value : null;
-}
-
 // --- what was there before, and whether it still is --------------------------
 
 interface Inventory {
@@ -322,121 +292,6 @@ async function waitForInventory(service: ServicesTable): Promise<Inventory> {
     }
   }
   throw last instanceof Error ? last : new Error("Il motore non ha risposto");
-}
-
-// --- seeding -----------------------------------------------------------------
-
-/**
- * Copy one mounted location into another, in a container that has both.
- *
- * `/from/.` and not `/from/*`: the glob misses dotfiles. `-a` is what preserves
- * ownership and mode, and that is not cosmetic — Postgres refuses to start
- * unless its data directory belongs to its own uid and is 0700, so a copy that
- * lost them produces a service that comes up, fails, and rolls back for a
- * reason nobody would guess from the message.
- *
- * Progress is polled rather than printed: `cp -av` over a data directory is tens
- * of thousands of lines through an SSE stream, where a size every three seconds
- * says the same thing once.
- */
-async function copyBetweenMounts(
-  service: ServicesTable,
-  image: string,
-  from: string,
-  to: string,
-  emit: (line: string) => void
-): Promise<void> {
-  const name = SEED_CONTAINER(service.id);
-  const totalKb = await sizeKb(image, from);
-  emit(totalKb ? `Da copiare: ${Math.round(totalKb / 1024)} MB` : "Copia in corso…");
-
-  await dockerTry(["rm", "-f", name], { timeout: 30_000 });
-  await docker(
-    [
-      "run", "-d", "--name", name, "--entrypoint", "sh",
-      "-v", `${from}:/from:ro`,
-      "-v", `${to}:/to`,
-      image,
-      "-c", "set -e; cp -a /from/. /to/; sync",
-    ],
-    { timeout: 60_000 }
-  );
-
-  const progress = setInterval(() => {
-    void (async () => {
-      const result = await dockerTry(["exec", name, "du", "-sk", "/to"], { timeout: 20_000 });
-      const copiedKb = Number.parseInt((result?.stdout ?? "").split(/\s+/)[0] ?? "", 10);
-      if (!Number.isFinite(copiedKb)) return;
-      serviceEvents.emit(service.id, { type: "mount:progress", copiedKb, totalKb });
-      emit(
-        totalKb
-          ? `  ${Math.round(copiedKb / 1024)} MB di ${Math.round(totalKb / 1024)} MB`
-          : `  ${Math.round(copiedKb / 1024)} MB`
-      );
-    })();
-  }, PROGRESS_INTERVAL_MS);
-  progress.unref?.();
-
-  try {
-    const waited = await docker(["wait", name], { timeout: 24 * 60 * 60_000 });
-    const code = Number.parseInt(waited.stdout.trim(), 10);
-    if (code !== 0) {
-      const logs = await dockerTry(["logs", "--tail", "20", name], { timeout: 20_000 });
-      throw new Error(`La copia è fallita (codice ${code}): ${logs?.stderr || logs?.stdout || ""}`.trim());
-    }
-  } finally {
-    clearInterval(progress);
-    await dockerTry(["rm", "-f", name], { timeout: 30_000 });
-  }
-
-  emit("Copia completata.");
-}
-
-/**
- * Copy a path that lives in the container's own filesystem, not in a mount.
- *
- * A folder like `/etc/postgresql` is part of the image: there is no volume to
- * mount read-only and copy from. `docker cp` reads it through the daemon — which
- * is the only party that can see it — as a tar, and a second throwaway container
- * unpacks that tar into the host directory. It goes through a file in the
- * panel's own tmp rather than a pipe because the two halves are separate
- * processes and the existing helpers stream to and from files.
- *
- * Both steps go through the daemon on purpose: the panel may itself be a
- * container, and `fs` would answer for its namespace rather than the one the
- * service runs in.
- */
-async function copyOutOfContainer(
-  service: ServicesTable,
-  image: string,
-  target: string,
-  to: string,
-  emit: (line: string) => void
-): Promise<void> {
-  const archive = path.join(config.tmpDir, `mountseed-${service.id}-${Date.now()}.tar`);
-  emit(`Copio ${target} dal container…`);
-
-  try {
-    await dockerToFile(["cp", `${service.container_name}:${target}/.`, "-"], archive);
-    await dockerFromFile(
-      [
-        "run", "--rm", "-i", "--entrypoint", "sh",
-        "-v", `${to}:/to`,
-        image,
-        "-c", "tar -C /to -xf -",
-      ],
-      archive,
-      { decompress: false, onStderr: (line) => emit(`  ${line}`) }
-    );
-    emit("Copia completata.");
-  } finally {
-    const { rmSync } = await import("fs");
-    try {
-      rmSync(archive, { force: true });
-    } catch {
-      /* a leftover tar in tmp is swept by the housekeeping timer */
-    }
-  }
 }
 
 // --- the journal -------------------------------------------------------------
@@ -638,6 +493,12 @@ async function runApply(
     serviceEvents.emit(service.id, { type: "mount:log", line });
   };
 
+  const report = {
+    emit,
+    progress: (copiedKb: number, totalKb: number | null) =>
+      serviceEvents.emit(service.id, { type: "mount:progress", copiedKb, totalKb }),
+  };
+
   const phase = async (value: MountPhase, error?: string) => {
     journal.phase = value;
     if (error) journal.error = error;
@@ -680,9 +541,21 @@ async function runApply(
 
         emit(`Semino ${entry.mount.source} da ${entry.mount.target}…`);
         if (entry.from) {
-          await copyBetweenMounts(service, image, entry.from, entry.mount.source, emit);
+          await copyBetweenMounts({
+            container: SEED_CONTAINER(service.id),
+            image,
+            from: entry.from,
+            to: entry.mount.source,
+            report,
+          });
         } else {
-          await copyOutOfContainer(service, image, entry.mount.target, entry.mount.source, emit);
+          await copyOutOfContainer({
+            sourceContainer: service.container_name,
+            image,
+            target: entry.mount.target,
+            to: entry.mount.source,
+            report,
+          });
         }
       }
       journal.seeding = undefined;

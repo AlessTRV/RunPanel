@@ -26,7 +26,11 @@ export type ProjectEvent =
   | { type: "process:reset" }
   | { type: "process:status"; status: string; running: boolean; pid?: number; uptime?: number }
   | { type: "terminal:output"; text: string }
-  | { type: "terminal:closed"; code: number | null };
+  | { type: "terminal:closed"; code: number | null }
+  /** Applying the bind list — see `services/project-mounts.ts`. */
+  | { type: "mount:log"; line: string }
+  | { type: "mount:phase"; phase: MountPhase; error?: string }
+  | { type: "mount:progress"; copiedKb: number; totalKb: number | null };
 
 /**
  * Everything a long operation that is not a project emits: a backup run, a
