@@ -283,24 +283,52 @@ export default function ServiceDetailPage() {
       />
 
       {/*
-        Row-flow places these three at (1,1), (1,2) and (2,1) without any
-        explicit placement: the reading column on the left, the console beside
-        it, the databases underneath. The console takes the wider half because
-        it is the one whose content is unreadable when it wraps.
+        Two columns, and two grid *items* — not three.
+
+        Three items in a two-column grid put the databases on the second row,
+        and a row is as tall as its tallest item: with the console on the right
+        of row one, the left column ended at the connection panel and picked up
+        again below the console, with the rest of row one as a hole in the
+        middle. Wrapping the left-hand sections in their own column makes the
+        column a single flow again, which is what it always read as.
+
+        `gap` rather than `space-y`: a section hidden by the tab switch below
+        `lg` is `display: none`, which a flex gap skips and a sibling margin
+        does not.
       */}
-      <div className="max-w-2xl space-y-4 lg:grid lg:max-w-none lg:grid-cols-[minmax(0,32rem)_minmax(0,1fr)] lg:items-start lg:gap-4 lg:space-y-0">
-        <div className={section("connection")}>
-          <ConnectionPanel
-            service={service}
-            project={project ?? null}
-            creds={creds}
-            from={from}
-            onFromChange={setFromChoice}
-            onReveal={revealCredentials}
-            onSaved={refresh}
-          />
+      <div className="flex max-w-2xl flex-col gap-4 lg:grid lg:max-w-none lg:grid-cols-[minmax(0,32rem)_minmax(0,1fr)] lg:items-start">
+        <div className="flex flex-col gap-4">
+          <div className={section("connection")}>
+            <ConnectionPanel
+              service={service}
+              project={project ?? null}
+              creds={creds}
+              from={from}
+              onFromChange={setFromChoice}
+              onReveal={revealCredentials}
+              onSaved={refresh}
+            />
+          </div>
+
+          <div className={section("data")}>
+            <DataSection
+              service={service}
+              from={from}
+              creds={creds}
+              move={move ?? service.dataMove}
+              moveLines={moveLines.lines}
+              moveProgress={moveProgress}
+              onDeleted={() => router.push("/services")}
+              onChanged={refresh}
+            />
+          </div>
         </div>
 
+        {/*
+          Sticky within its grid area, which `items-start` leaves as tall as the
+          left column — so the transcript stays in front of you while the
+          databases and the danger zone scroll past it.
+        */}
         <div className={cn(section("console"), "lg:sticky lg:top-[4.5rem]")}>
           <ConsolePanel
             serviceId={serviceId}
@@ -311,19 +339,6 @@ export default function ServiceDetailPage() {
             onActiveChange={setConsoleActive}
             lines={consoleLines.lines}
             onLocalEcho={echo}
-          />
-        </div>
-
-        <div className={cn(section("data"), "lg:mt-4")}>
-          <DataSection
-            service={service}
-            from={from}
-            creds={creds}
-            move={move ?? service.dataMove}
-            moveLines={moveLines.lines}
-            moveProgress={moveProgress}
-            onDeleted={() => router.push("/services")}
-            onChanged={refresh}
           />
         </div>
       </div>
