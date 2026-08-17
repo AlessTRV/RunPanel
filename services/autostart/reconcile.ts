@@ -7,6 +7,7 @@ import { HOST_CHANNEL, opsEvents } from "../events";
 import { AppendLogFile } from "../log-file";
 import { processManager } from "../process-manager";
 import { execArgs, serviceTarget } from "../service-databases";
+import { reconcileStatuses } from "../status-reconcile";
 import path from "path";
 import { config } from "@/lib/config";
 
@@ -163,6 +164,25 @@ export async function reconcileAutostart(
         await sleep(candidate.delaySeconds * 1000);
       }
       await sleep(GAP_MS);
+    }
+  }
+
+  // What this pass just started is running, and what it found still down is
+  // not — but none of that reached the status column, which is written by
+  // deploys and by the control buttons and by nothing here. Left alone, a boot
+  // that worked perfectly still ended with a panel describing the state of the
+  // machine before the reboot. Skipped on a dry run, which changes nothing and
+  // must not write anything either.
+  if (!dryRun) {
+    try {
+      const corrected = await reconcileStatuses();
+      if (corrected.projects > 0 || corrected.services > 0) {
+        emit(
+          `Stato allineato: ${corrected.projects} progetto/i e ${corrected.services} servizio/i corretti`
+        );
+      }
+    } catch (err) {
+      emit(`Stato non allineato: ${err instanceof Error ? err.message : err}`);
     }
   }
 

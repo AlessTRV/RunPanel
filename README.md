@@ -499,6 +499,18 @@ riconciliatore che applica tutto questo all'avvio è una passata di **riparazion
 aspetta che i riavvii automatici di Docker si assestino e avvia solo ciò che è
 ancora giù, e non innesca mai un build.
 
+Lo stato mostrato negli elenchi viene riverificato da solo, ogni mezzo minuto e
+al termine della riconciliazione d'avvio. Prima era la memoria dell'ultimo
+comando dato dal pannello, non dello stato della macchina: tutto ciò che si
+ferma senza passare da qui — un riavvio, un processo ucciso per memoria, un
+`docker stop` da una shell, il pannello stesso che scende portandosi dietro i
+suoi figli — lasciava il pallino verde acceso per sempre. Ora il pannello
+controlla, e un progetto può passare a **Fermo** da sé senza che nessuno l'abbia
+spento in quel momento: significa che non era più su da prima. Il controllo non
+avvia e non ferma niente, e per dichiarare fermo qualcosa che risultava avviato
+aspetta due letture d'accordo, così un `pm2` che non risponde per un istante non
+tinge di rosso l'intero pannello.
+
 ## Registri privati
 
 Le credenziali dei registri Docker si inseriscono dal pannello, sono cifrate a

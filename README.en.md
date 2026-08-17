@@ -488,6 +488,18 @@ that applies this at boot is a **repair** pass: it waits for Docker's own
 restarts to settle and starts only what is still down, and it never triggers a
 build.
 
+The status shown in the lists re-checks itself, every half minute and at the end
+of the boot reconciliation. It used to be the panel's memory of the last command
+it issued rather than the state of the machine: anything that stopped without
+going through here — a reboot, a process killed for memory, a `docker stop` from
+a shell, the panel itself going down and taking its children with it — left the
+green dot on for good. Now the panel looks, and a project can go to **Stopped**
+by itself with nobody having stopped it just then: it means it had not been up
+for a while. The check starts nothing and stops nothing, and before calling
+something stopped that claimed to be running it waits for two readings that
+agree, so a `pm2` that fails to answer for an instant does not paint the whole
+panel red.
+
 ## Private registries
 
 Docker registry credentials are entered from the panel, encrypted at rest and

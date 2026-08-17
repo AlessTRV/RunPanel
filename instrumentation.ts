@@ -90,4 +90,11 @@ export async function register() {
   // and blocking here would delay the first request by a minute or more.
   const { startAutostartReconciler } = await import("./services/autostart/reconcile");
   startAutostartReconciler();
+
+  // The status column records the last command the panel issued, so anything
+  // that stops without going through the panel — a reboot, a crash, the panel
+  // itself going down and taking its children with it — leaves a row claiming
+  // to be running. This is what comes back to check.
+  const { startStatusReconciler } = await import("./services/status-reconcile");
+  startStatusReconciler();
 }
