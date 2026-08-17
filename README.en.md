@@ -488,6 +488,13 @@ that applies this at boot is a **repair** pass: it waits for Docker's own
 restarts to settle and starts only what is still down, and it never triggers a
 build.
 
+The generated unit carries `KillMode=process`, which is not a detail: PM2 is
+spawned by the panel, so it lands in that unit's cgroup, and with systemd's
+default a `systemctl stop runpanel` kills it too, along with every native-runtime
+project it supervises. Docker containers are never involved — they belong to
+Docker's cgroup. If the unit was installed before this, the Autostart page says
+so and reinstalling it is enough.
+
 The status shown in the lists re-checks itself, every half minute and at the end
 of the boot reconciliation. It used to be the panel's memory of the last command
 it issued rather than the state of the machine: anything that stopped without

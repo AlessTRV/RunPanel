@@ -499,6 +499,13 @@ riconciliatore che applica tutto questo all'avvio è una passata di **riparazion
 aspetta che i riavvii automatici di Docker si assestino e avvia solo ciò che è
 ancora giù, e non innesca mai un build.
 
+La unit generata contiene `KillMode=process`, e non è un dettaglio: PM2 viene
+avviato dal pannello, quindi finisce nel cgroup della sua unit, e col
+comportamento predefinito di systemd un `systemctl stop runpanel` uccide anche
+lui e tutti i progetti con runtime nativo che supervisiona. I container Docker
+non sono mai coinvolti, appartengono al cgroup di Docker. Se la unit è stata
+installata prima, la pagina Autostart lo dice e basta reinstallarla.
+
 Lo stato mostrato negli elenchi viene riverificato da solo, ogni mezzo minuto e
 al termine della riconciliazione d'avvio. Prima era la memoria dell'ultimo
 comando dato dal pannello, non dello stato della macchina: tutto ciò che si

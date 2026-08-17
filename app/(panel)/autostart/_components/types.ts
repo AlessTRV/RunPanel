@@ -38,7 +38,14 @@ export interface AutostartData {
     };
     recommended: "systemd" | "cron" | "container" | "manual";
     recommendedReason: string;
-    systemd: { available: boolean; installed: boolean; enabled: boolean; active: boolean };
+    systemd: {
+      available: boolean;
+      installed: boolean;
+      enabled: boolean;
+      active: boolean;
+      /** Null when no unit is installed — see `UnitState` in the probe. */
+      killMode: string | null;
+    };
     cron: { available: boolean; installed: boolean; line: string | null };
     docker: { available: boolean; enabledAtBoot: boolean | null };
     pm2: { available: boolean; startupInstalled: boolean; dumpSaved: boolean };

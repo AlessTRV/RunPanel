@@ -281,6 +281,23 @@ export default function AutostartPage() {
               tone={probe?.systemd.enabled ? "ok" : "warn"}
             />
             <Row
+              label="Fermando il pannello"
+              value={
+                !probe?.systemd.killMode
+                  ? "nessuna unit installata"
+                  : probe.systemd.killMode === "process"
+                    ? "si ferma solo il pannello"
+                    : "si ferma tutto ciò che supervisiona"
+              }
+              tone={
+                !probe?.systemd.killMode
+                  ? "neutral"
+                  : probe.systemd.killMode === "process"
+                    ? "ok"
+                    : "warn"
+              }
+            />
+            <Row
               label="Riga @reboot nel crontab"
               value={
                 !probe?.cron.available
@@ -351,6 +368,18 @@ export default function AutostartPage() {
               {probe.selfContainer.restartPolicy
                 ? ` — adesso ha "${probe.selfContainer.restartPolicy}".`
                 : "."}
+            </Hint>
+          )}
+
+          {probe?.systemd.killMode && probe.systemd.killMode !== "process" && (
+            <Hint tone="warn" title="Riavviare il pannello ferma anche le app">
+              La unit installata usa <Code>KillMode={probe.systemd.killMode}</Code>: quando il
+              pannello si ferma, systemd uccide tutto ciò che è rimasto nel suo cgroup — e il demone
+              PM2 ci sta dentro, perché è il pannello ad averlo avviato. Ogni{" "}
+              <Code>systemctl restart runpanel</Code> porta giù con sé i progetti con runtime nativo.
+              Reinstalla la unit da qui: quella generata adesso scrive{" "}
+              <Code>KillMode=process</Code>. I servizi Docker non sono mai stati coinvolti, i loro
+              container appartengono al cgroup di Docker.
             </Hint>
           )}
 

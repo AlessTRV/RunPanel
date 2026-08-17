@@ -79,6 +79,22 @@ export interface UnitState {
   active: boolean;
   fragmentPath: string | null;
   detail: string | null;
+  /**
+   * What systemd does to the rest of the cgroup when the panel stops.
+   *
+   * `control-group`, systemd's default, SIGKILLs everything still in the unit's
+   * cgroup once the main process is gone — and the PM2 daemon is spawned by the
+   * panel, so it is in there together with every native project. Reported
+   * because a unit installed before the panel started writing `KillMode=process`
+   * keeps the old behaviour until someone reinstalls it, and nothing else on
+   * this page would ever say so.
+   *
+   * Read from systemd rather than from the file: an override in
+   * `runpanel.service.d/` is invisible in the fragment and authoritative here.
+   * Null when the unit is not installed, where systemd answers with its default
+   * for a unit that does not exist.
+   */
+  killMode: string | null;
 }
 
 export interface AutostartProbe {
@@ -264,6 +280,7 @@ async function probeSystemd(environment: HostEnvironment): Promise<UnitState> {
       enabled: false,
       active: false,
       fragmentPath: null,
+      killMode: null,
       detail: "Disponibile solo su Linux",
     };
   }
@@ -276,6 +293,7 @@ async function probeSystemd(environment: HostEnvironment): Promise<UnitState> {
       enabled: false,
       active: false,
       fragmentPath: null,
+      killMode: null,
       detail: "systemctl non è utilizzabile su questa macchina",
     };
   }
@@ -283,10 +301,18 @@ async function probeSystemd(environment: HostEnvironment): Promise<UnitState> {
   const [enabled, active, show] = await Promise.all([
     run("systemctl", ["is-enabled", UNIT_NAME]),
     run("systemctl", ["is-active", UNIT_NAME]),
-    run("systemctl", ["show", "-p", "FragmentPath", UNIT_NAME]),
+    // One `show` for both properties. systemd prints them one per line in its
+    // own order, so they are read by name and not by position.
+    run("systemctl", ["show", "-p", "FragmentPath", "-p", "KillMode", UNIT_NAME]),
   ]);
 
-  const fragment = show.stdout.split("=")[1]?.trim() || null;
+  const properties = new Map<string, string>();
+  for (const line of show.stdout.split("\n")) {
+    const eq = line.indexOf("=");
+    if (eq > 0) properties.set(line.slice(0, eq).trim(), line.slice(eq + 1).trim());
+  }
+
+  const fragment = properties.get("FragmentPath") || null;
 
   return {
     available: true,
@@ -296,6 +322,9 @@ async function probeSystemd(environment: HostEnvironment): Promise<UnitState> {
     active: active.stdout === "active",
     fragmentPath: fragment,
     detail: enabled.stdout || enabled.stderr || null,
+    // Meaningless without a unit: systemd answers with its default for a name
+    // it has never heard of, which would read as a warning about nothing.
+    killMode: fragment ? properties.get("KillMode") || null : null,
   };
 }
 
