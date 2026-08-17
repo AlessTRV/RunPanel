@@ -62,6 +62,10 @@ export async function run({ repoRoot }) {
 
   r.check("it restarts on failure", unit.includes("Restart=always"));
   r.check("it shuts down with SIGINT, which next handles", unit.includes("KillSignal=SIGINT"));
+  // The default, control-group, signals everything in the unit's cgroup — and
+  // the PM2 daemon ends up there the first time the panel talks to it. Without
+  // this line, restarting the panel stops every native project on the host.
+  r.check("stopping the panel does not stop PM2 and its projects", unit.includes("KillMode=process"));
   // ~/.pm2 and the Docker socket have to stay reachable.
   r.check("home stays reachable", unit.includes("ProtectHome=no"));
   r.check("it runs as the resolved user", unit.includes(`User=${INPUT.user}`));

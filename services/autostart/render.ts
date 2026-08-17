@@ -79,6 +79,16 @@ export function renderUnit(input: UnitInput): string {
     "RestartSec=5",
     "TimeoutStopSec=30",
     "KillSignal=SIGINT",
+    // Only the panel is the panel's to kill.
+    //
+    // systemd's default (`control-group`) signals EVERY process in the unit's
+    // cgroup on stop, and the PM2 daemon lands in that cgroup the first time the
+    // panel talks to it. Restarting the panel therefore took down every native
+    // project on the host — measured, not theorised — and they came back only
+    // because autostart happens to run at boot. `process` limits the stop to the
+    // main process; PM2 and the projects it supervises are not part of the
+    // panel's lifecycle and must outlive its restarts.
+    "KillMode=process",
     "StandardOutput=journal",
     "StandardError=journal",
     "NoNewPrivileges=yes",
