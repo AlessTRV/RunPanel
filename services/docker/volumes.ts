@@ -31,7 +31,17 @@ export interface ContainerMount {
   destination: string;
 }
 
-const MOUNT_FORMAT = '{{range .Mounts}}{{.Name}}\t{{.Source}}\t{{.Destination}}{{"\\n"}}{{end}}';
+/*
+  `|` and not a tab, which is not a nicety.
+
+  A bind mount has no `.Name`, so its line begins with the separator — and
+  `lines()` trims each line before handing it over, which swallows a leading tab
+  and shifts every field one to the left. The mount then reported its *source*
+  as its name and its *destination* as its source, and a caller matching on the
+  destination found nothing. A pipe survives the trim; it is also what the
+  monitor's own inspect format has always used.
+*/
+const MOUNT_FORMAT = '{{range .Mounts}}{{.Name}}|{{.Source}}|{{.Destination}}{{"\\n"}}{{end}}';
 
 /**
  * Where a container's data actually is, as Docker sees it.
@@ -47,7 +57,7 @@ export async function containerMounts(container: string): Promise<ContainerMount
   if (!result) return [];
 
   return lines(result.stdout).map((line) => {
-    const [name, source, destination] = line.split("\t");
+    const [name, source, destination] = line.split("|");
     return { name: name ?? "", source: source ?? "", destination: destination ?? "" };
   });
 }
