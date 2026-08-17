@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { Input, Label, TextField } from "@heroui/react";
-import { Icon } from "@iconify/react";
 import { toast } from "sonner";
 import { useProjectStream } from "@/lib/hooks/useProjectStream";
 import { useResource } from "@/lib/hooks/useResource";
@@ -12,8 +11,8 @@ import { useLineBuffer } from "@/lib/hooks/useLineBuffer";
 import { FormDialog } from "@/components/ui/FormDialog";
 import { PageSkeleton } from "@/components/ui/Skeletons";
 import type { LogLine } from "@/components/ui/LogViewer";
+import { Tabs } from "@/components/ui/Tabs";
 import { parseContractJson } from "@/lib/deploy-contract";
-import { cn } from "@/lib/utils";
 
 import { ProjectHeader } from "./_components/ProjectHeader";
 import { ProjectStats } from "./_components/ProjectStats";
@@ -338,40 +337,7 @@ export default function ProjectDetailPage() {
 
       <ProjectStats info={processInfo} />
 
-      <div
-        role="tablist"
-        aria-label="Sezioni del progetto"
-        className="border-border mb-5 flex gap-1 overflow-x-auto border-b"
-      >
-        {tabs.map((tab) => {
-          const active = activeTab === tab.id;
-          return (
-            <button
-              key={tab.id}
-              role="tab"
-              aria-selected={active}
-              onClick={() => setActiveTab(tab.id)}
-              className={cn(
-                "flex items-center gap-1.5 border-b-2 px-3 py-2.5 text-sm whitespace-nowrap transition-colors",
-                active
-                  ? "border-accent text-foreground font-medium"
-                  : "text-muted hover:text-foreground border-transparent"
-              )}
-            >
-              {/* No wash here: a tab's grammar is the underline, and a filled
-                  pill fighting a bottom border reads as neither. The accent
-                  icon is what ties it to the rest of the language. */}
-              <Icon
-                icon={tab.icon}
-                width={15}
-                aria-hidden
-                className={cn(active && "text-accent")}
-              />
-              {tab.label}
-            </button>
-          );
-        })}
-      </div>
+      <Tabs tabs={tabs} value={activeTab} onChange={setActiveTab} label="Sezioni del progetto" />
 
       {/* Each tab is mounted only while selected. The file manager in
           particular used to render on every page load regardless. */}
