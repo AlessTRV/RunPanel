@@ -3,6 +3,7 @@ import { requireAuth } from "@/lib/auth-guard";
 import { getDb } from "@/lib/db";
 import { serviceEvents, type ServiceEvent } from "@/services/events";
 import { consoleBacklog, consoleState, touchConsole } from "@/services/service-console";
+import { isMoveInFlight, moveLog, parseMoveJournal } from "@/services/service-data-move";
 
 type Params = { params: Promise<{ serviceId: string }> };
 
@@ -24,7 +25,7 @@ export async function GET(request: NextRequest, { params }: Params) {
   const db = await getDb();
   const service = await db
     .selectFrom("services")
-    .select(["id", "status"])
+    .select(["id", "status", "data_move"])
     .where("id", "=", serviceId)
     .executeTakeFirst();
 
@@ -60,13 +61,22 @@ export async function GET(request: NextRequest, { params }: Params) {
       };
 
       const open = consoleState(serviceId);
-      send({ type: "ready", serviceId, status: service.status, console: open });
+      const move = parseMoveJournal(service.data_move);
+      send({ type: "ready", serviceId, status: service.status, console: open, move });
 
       // Whatever the session has already printed, so a reload or a second tab
       // does not start from a blank pane above a live shell.
       if (open) {
         for (const text of consoleBacklog(serviceId)) {
           send({ type: "console:output", mode: open.mode, text });
+        }
+      }
+
+      // The same for a move: it can run for minutes, and a page opened halfway
+      // through that showed nothing until the next line would look stuck.
+      if (isMoveInFlight(move)) {
+        for (const line of moveLog(serviceId).split("\n")) {
+          if (line) send({ type: "data:log", line });
         }
       }
 

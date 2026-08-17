@@ -185,6 +185,18 @@ export interface ServicesTable {
   access_allow: string | null;
   /** Where the real listener moved to while restricted. NULL when open. */
   access_port: number | null;
+  /**
+   * The host directory this service's data is bound to, or NULL for the named
+   * volume the template derives.
+   *
+   * A **declaration**, not an observation: Docker is the authority on where a
+   * container is really mounted, and anything that has to be sure — the restart
+   * recovery in `services/service-data-move.ts` above all — asks Docker and
+   * treats this column as what the panel intended.
+   */
+  data_path: string | null;
+  /** JSON — see `DataMoveJournal`. NULL when no move has ever been asked for. */
+  data_move: string | null;
   created_at: string;
   updated_at: string;
 }

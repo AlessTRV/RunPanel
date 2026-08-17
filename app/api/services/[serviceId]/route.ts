@@ -4,11 +4,13 @@ import { getDb, nowIso } from "@/lib/db";
 import { decrypt } from "@/lib/crypto";
 import { updateServiceSchema } from "@/lib/validation";
 import {
+  dataMountFor,
   internalPort,
-  provisionService,
+  recreateService,
   removeService,
-  stopService,
+  serviceRunConfig,
 } from "@/services/service-provisioner";
+import { parseMoveJournal } from "@/services/service-data-move";
 import { networkName } from "@/services/docker/labels";
 import {
   connectToNetwork,
@@ -22,48 +24,6 @@ import { allocateLoopbackPort, closeGate } from "@/services/access-gate";
 import { ServicesTable } from "@/lib/db/schema";
 
 type Params = { params: Promise<{ serviceId: string }> };
-
-/**
- * Put the container back with a different publish spec.
- *
- * Recreated rather than restarted: `-p` is fixed at `docker run`, and
- * `docker start` replays whatever the container was created with. Safe because
- * the data lives in named, labelled volumes that `rm -f` does not touch — this
- * is the same operation the panel already performs on every redeploy.
- *
- * A service that was not running goes back to not running. It does start for a
- * moment on the way, which is also the only way to find out that the new
- * binding is one the host will accept.
- */
-async function recreateWithAccess(
-  service: ServicesTable,
-  projectSlug: string | undefined,
-  access: AccessRow
-): Promise<{ containerId: string; status: ServicesTable["status"] }> {
-  const credentials = service.credentials
-    ? (JSON.parse(decrypt(service.credentials)) as { user: string; password: string; database: string })
-    : { user: "", password: "", database: "" };
-
-  const containerId = await provisionService(
-    {
-      name: service.name,
-      type: service.type,
-      version: service.version,
-      port: service.port,
-      credentials,
-      projectSlug,
-    },
-    projectSlug,
-    access
-  );
-
-  if (service.status === "running") return { containerId, status: "running" };
-
-  await stopService(service.container_name).catch(() => {
-    /* it is recreated either way; the status below is what the panel reports */
-  });
-  return { containerId, status: "stopped" };
-}
 
 export async function GET(request: NextRequest, { params }: Params) {
   const denied = await requireAuth();
@@ -132,6 +92,14 @@ export async function GET(request: NextRequest, { params }: Params) {
     // is actually up — the row says what was asked for, the gate says what is.
     access: readAccess(service),
     gate: reportGate("service", service.id),
+    // Where the data is, where it would be by default, and whether a move is in
+    // flight. Resolved here because the default comes from the template, and
+    // because the card that renders all three must not need a fetch of its own:
+    // `useResource` throws away the body of any non-2xx, so an explanation sent
+    // as an error is an explanation nobody reads.
+    dataPath: service.data_path,
+    dataDefault: dataMountFor(serviceRunConfig(service, project?.slug, { dataPath: null })),
+    dataMove: parseMoveJournal(service.data_move),
     credentials: reveal && service.credentials ? decrypt(service.credentials) : "hidden",
   }, {
     // `?reveal=true` returns the database password in clear. Not cacheable
@@ -289,7 +257,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       : undefined;
 
     try {
-      recreated = await recreateWithAccess(service, slug, nextAccess);
+      recreated = await recreateService(service, slug, nextAccess);
     } catch (err) {
       // Nothing is written: the row keeps describing the container that is
       // actually there. Reopening the previous gate is best-effort — if it

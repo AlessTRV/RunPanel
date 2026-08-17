@@ -344,6 +344,47 @@ These are the majors the official image supports today, minus the preview and
 short-cadence channels. An existing service is untouched when the list changes:
 the version is stored per row and recreations use that one.
 
+### The console
+
+The panel already knows the container name, the user and the password — the
+three things you would go and look up before typing `docker exec` on the host.
+The console uses them for you, in three modes: the **engine's own client**
+already authenticated (`psql`, `mysql`, `redis-cli`, `mongosh`), a **shell**
+inside the container, and the container's **log**, live. The log is read-only
+and stored nowhere: it exists for as long as you are looking at it.
+
+It is not a terminal emulator, and that is a choice: `docker exec` with stdin on
+a pipe cannot allocate a TTY, so it sends one line at a time. It is also why the
+flags matter — without `--table` MySQL answers in tab-separated columns instead
+of a grid, and without `--force` the first syntax error would end the session.
+
+There is a warning before the first session, and it has to be accepted: from
+there you can delete data irreversibly, and the panel keeps no copy.
+
+### Moving the data
+
+A service's data lives in a Docker volume whose name the panel derives. From the
+Database tab it can be moved to a directory on the host — a larger disk, a
+network mount — and moved back.
+
+The move stops the service, copies the data preserving ownership and mode,
+recreates the container on the new location and **checks that the databases are
+still there** before calling itself a success. That check is the point: "the
+container started" says nothing, because a database that finds an empty
+directory initialises from scratch, works perfectly, and has lost everything. If
+the comparison does not hold, the panel puts the container back where it was and
+shows the whole error — the copy is one-directional and its source is mounted
+read-only, so rolling back is safe by construction.
+
+If the destination is not empty it stops and says so: to use data that is
+already there — a previous installation, a disk you are re-adopting — there is a
+checkbox for exactly that, which skips the copy and mounts the directory as it
+is. And the original data **stays where it is**: deleting it is a separate,
+later confirmation that recommends verifying first. When the previous location
+was a host directory the panel does not delete it and hands you the command
+instead — an `rm -rf` on a hand-typed path has no upper bound on what it takes
+with it.
+
 ### Linking one to a project
 
 A service can be linked to a project, and then it supplies its connection URL in

@@ -214,6 +214,62 @@ export const serviceConsoleSchema = z.discriminatedUnion("action", [
 ]);
 
 /**
+ * A host directory RunPanel is willing to bind-mount as a service's storage.
+ *
+ * POSIX absolute, and deliberately nothing else. A Windows path cannot survive
+ * the `source:target` mapping this codebase builds — see `lib/mount.ts` for the
+ * drive letter that used to become a volume name — and Postgres refuses to run
+ * on one regardless, because it cannot set its data directory to 0700. Saying
+ * so here is more honest than failing at `docker run`.
+ *
+ * Two non-empty segments is one rule that refuses `/`, `/etc`, `/var`, `/home`
+ * and `/mnt` at once: every path whose whole purpose is to be somebody's
+ * parent. The explicit list below is for the ones that are two levels deep and
+ * still must never be handed to a database container.
+ *
+ * The panel's own data directory cannot be checked here — `config.dataDir` is
+ * server-only and this module is bundled for the browser — so
+ * `services/service-data-move.ts` re-runs this schema and adds that one. It is
+ * the entry that matters most: `<dataDir>/.secret` decrypts every credential
+ * the panel holds.
+ */
+export const DATA_PATH_RULE =
+  "Un percorso assoluto con almeno due livelli, es. /mnt/dati/postgres — niente \"..\"";
+
+const FORBIDDEN_DATA_PATHS = [
+  "/proc", "/sys", "/dev", "/boot", "/etc", "/bin", "/sbin", "/lib", "/lib64",
+  "/usr", "/var/lib/docker", "/var/run", "/run",
+] as const;
+
+export const dataPathSchema = z.string().trim().min(2).max(4096).superRefine((raw, ctx) => {
+  const reject = (message: string) => ctx.addIssue({ code: "custom", message });
+
+  if (raw.includes("\0") || raw.includes("\\")) return reject(DATA_PATH_RULE);
+  if (!raw.startsWith("/")) return reject(DATA_PATH_RULE);
+
+  const segments = raw.split("/").filter(Boolean);
+  if (segments.length < 2) return reject(DATA_PATH_RULE);
+  if (segments.some((segment) => segment === "." || segment === "..")) return reject(DATA_PATH_RULE);
+
+  const normalised = `/${segments.join("/")}`;
+  if (FORBIDDEN_DATA_PATHS.some((bad) => normalised === bad || normalised.startsWith(`${bad}/`))) {
+    reject(`${normalised} è una directory di sistema: non può ospitare i dati di un servizio`);
+  }
+});
+
+export const serviceDataPathSchema = z.object({
+  /** `null` means "back to the named volume the template derives". */
+  path: dataPathSchema.nullable(),
+  /**
+   * The answer to a refusal for a destination that is not empty: mount it as it
+   * is and copy nothing. It is the operator saying "those bytes are the data" —
+   * which is the only way a directory that already holds a database is ever
+   * used, and why it cannot be the default.
+   */
+  adoptExisting: z.boolean().optional(),
+});
+
+/**
  * What a deploy request may ask for.
  *
  * `commitSha` is what pins the project to one commit: the route writes it onto

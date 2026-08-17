@@ -1,4 +1,6 @@
 import crypto from "crypto";
+import { decrypt } from "@/lib/crypto";
+import type { ServicesTable } from "@/lib/db/schema";
 import { buildConnectionString } from "@/lib/service-env";
 import { IServiceTemplate, ServiceConfig } from "./service-templates/types";
 import { postgresqlTemplate } from "./service-templates/postgresql";
@@ -103,17 +105,18 @@ export async function provisionService(
 
   await dockerTry(["rm", "-f", containerName], { timeout: 15_000 });
 
+  const mounts = resolveMounts(dockerConfig.volumes, config.dataPath);
+
   // Create the volumes explicitly so they carry ownership labels. Left to
   // `docker run -v`, they would be created unlabelled and become invisible to
   // the garbage collector — which is why deleted services used to leak their
   // data directory forever.
-  for (const mapping of dockerConfig.volumes) {
-    const source = mountSource(mapping);
+  for (const mount of mounts) {
     // A host directory is the operator's, not the panel's: Docker binds it as
     // it finds it, and creating a "volume" of that name would be creating
     // something else entirely.
-    if (source && !isHostPath(source)) {
-      await ensureVolume(source, ownership);
+    if (mount.source && !isHostPath(mount.source)) {
+      await ensureVolume(mount.source, ownership);
     }
   }
 
@@ -133,8 +136,8 @@ export async function provisionService(
     }
   }
 
-  for (const volume of dockerConfig.volumes) {
-    args.push("-v", volume);
+  for (const mount of mounts) {
+    args.push("-v", `${mount.source}:${mount.target}`);
   }
 
   args.push(dockerConfig.image);
@@ -155,6 +158,97 @@ export async function provisionService(
   }
 
   return stdout.trim().slice(0, 12);
+}
+
+export interface VolumeMount {
+  source: string;
+  target: string;
+}
+
+/**
+ * The mappings a container is actually created with.
+ *
+ * The templates always declare the named volume they would create — that is the
+ * question `serviceVolumeNames` asks them, and the answer has to stay the same
+ * wherever the data has since been moved. So the substitution happens exactly
+ * here, once, on the first mapping: the data directory is the first volume in
+ * every template and none of them declares a second.
+ */
+export function resolveMounts(volumes: string[], dataPath?: string | null): VolumeMount[] {
+  return volumes.map((mapping, index) => {
+    const source = mountSource(mapping);
+    const target = mapping.slice(source.length + 1);
+    return index === 0 && dataPath ? { source: dataPath, target } : { source, target };
+  });
+}
+
+/** Where this service's data goes, as a structured pair. */
+export function dataMountFor(config: ServiceConfig): VolumeMount {
+  const template = getTemplate(config.type);
+  const volumes = template?.getDockerConfig(config).volumes ?? [];
+  return resolveMounts(volumes, config.dataPath)[0] ?? { source: "", target: "" };
+}
+
+/**
+ * A service row as the arguments it runs with.
+ *
+ * One function, because the mapping is easy to get *almost* right by hand and
+ * the omission is invisible: the access PATCH used to rebuild this inline, and
+ * the day a service could name its own data directory that rebuild would have
+ * silently remounted it on the default volume. On PostgreSQL 18 that is the
+ * trap `postgresVolumePath` documents — it initialises elsewhere, works
+ * perfectly, and comes back empty.
+ */
+export function serviceRunConfig(
+  service: ServicesTable,
+  projectSlug?: string,
+  overrides: { dataPath?: string | null } = {}
+): ServiceConfig {
+  let credentials = { user: "", password: "", database: "" };
+  try {
+    if (service.credentials) {
+      credentials = { ...credentials, ...JSON.parse(decrypt(service.credentials)) };
+    }
+  } catch {
+    /* an unreadable credential yields a container that fails loudly */
+  }
+
+  return {
+    name: service.name,
+    type: service.type,
+    version: service.version,
+    port: service.port,
+    credentials,
+    projectSlug,
+    dataPath: "dataPath" in overrides ? overrides.dataPath : service.data_path,
+  };
+}
+
+/**
+ * Put the container back with a different publish spec or a different data
+ * directory.
+ *
+ * Recreated rather than restarted: `-p` and `-v` are both fixed at
+ * `docker run`, and `docker start` replays whatever the container was created
+ * with. A service that was not running goes back to not running — it does start
+ * for a moment on the way, which is also the only way to find out that the new
+ * binding is one the host will accept.
+ */
+export async function recreateService(
+  service: ServicesTable,
+  projectSlug: string | undefined,
+  access: AccessRow,
+  overrides: { dataPath?: string | null } = {}
+): Promise<{ containerId: string; status: ServicesTable["status"] }> {
+  const config = serviceRunConfig(service, projectSlug, overrides);
+  const containerId = await provisionService(config, projectSlug, access);
+
+  if (service.status === "running") return { containerId, status: "running" };
+
+  await stopService(service.container_name).catch(() => {
+    /* it is recreated either way; the status returned is what the panel reports */
+  });
+  return { containerId, status: "stopped" };
 }
 
 export async function startService(containerName: string): Promise<void> {

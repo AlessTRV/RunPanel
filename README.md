@@ -351,6 +351,48 @@ Sono le major che l'immagine ufficiale supporta oggi, meno i canali di anteprima
 e quelli a cadenza breve. Un servizio già esistente non viene toccato quando
 l'elenco cambia: la versione è salvata per riga e le ricreazioni usano quella.
 
+### La console
+
+Il pannello sa già nome del container, utente e password — le tre cose che
+andresti a cercare prima di scrivere `docker exec` sull'host. La console le usa
+al posto tuo, in tre modalità: il **client del motore** già autenticato
+(`psql`, `mysql`, `redis-cli`, `mongosh`), una **shell** dentro il container, e
+il **log** del container in diretta. Il log è in sola lettura e non viene
+salvato da nessuna parte: esiste finché lo guardi.
+
+Non è un emulatore di terminale ed è una scelta: `docker exec` con lo standard
+input in pipe non può allocare un TTY, quindi si manda una riga alla volta. È
+anche il motivo per cui i flag contano — senza `--table` MySQL risponde in
+colonne separate da tabulazioni invece che con una tabella, e senza `--force`
+il primo errore di sintassi chiuderebbe la sessione.
+
+Prima della prima sessione c'è un avviso, e va accettato: da lì si cancellano
+dati in modo irreversibile, e il pannello non tiene una copia.
+
+### Spostare i dati
+
+I dati di un servizio stanno in un volume Docker con nome generato. Dalla scheda
+Database si possono spostare in una cartella dell'host — un disco più capiente,
+un mount di rete — e riportarli indietro.
+
+Lo spostamento ferma il servizio, copia i dati preservando proprietario e
+permessi, ricrea il container sulla posizione nuova e **controlla che i database
+ci siano ancora** prima di dichiararsi riuscito. Quel controllo è il punto:
+«il container è partito» non vuol dire niente, perché un database che si trova
+davanti una cartella vuota si inizializza da capo, funziona benissimo, e ha
+perso tutto. Se il confronto non torna, il pannello rimette il container dov'era
+e mostra l'errore per intero — la copia è a senso unico e la sorgente è montata
+in sola lettura, quindi tornare indietro è sicuro per costruzione.
+
+Se la cartella di destinazione non è vuota, si ferma e lo dice: per usare dei
+dati che ci sono già — un'installazione precedente, un disco che stai
+riadottando — c'è una casella apposta, che salta la copia e monta la cartella
+com'è. E i dati di partenza **restano dove sono**: eliminarli è una conferma
+separata e successiva, che ti consiglia di verificare prima. Se la posizione
+precedente era una cartella dell'host, il pannello non la cancella e ti dà il
+comando: un `rm -rf` su un percorso scritto a mano non ha un limite superiore a
+quello che porta via.
+
 ### Il collegamento a un progetto
 
 Un servizio può essere collegato a un progetto, e allora gli fornisce la propria

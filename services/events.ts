@@ -61,9 +61,23 @@ export type OpsEvent =
  */
 export type ConsoleMode = "engine" | "shell" | "logs";
 
+export type MovePhase =
+  | "checking"
+  | "stopping"
+  | "copying"
+  | "recreating"
+  | "starting"
+  | "rolling-back"
+  | "done"
+  | "failed";
+
 export type ServiceEvent =
   | { type: "console:output"; mode: ConsoleMode; text: string }
-  | { type: "console:closed"; mode: ConsoleMode; code: number | null };
+  | { type: "console:closed"; mode: ConsoleMode; code: number | null }
+  /** Moving the data somewhere else — see `services/service-data-move.ts`. */
+  | { type: "data:log"; line: string }
+  | { type: "data:phase"; phase: MovePhase; error?: string }
+  | { type: "data:progress"; copiedKb: number; totalKb: number | null };
 
 /**
  * One emitter, keyed by a channel string. Three instances rather than three

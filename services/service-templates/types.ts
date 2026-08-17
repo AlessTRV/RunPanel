@@ -5,6 +5,16 @@ export interface ServiceConfig {
   port: number;
   credentials: { user: string; password: string; database: string };
   projectSlug?: string;
+  /**
+   * A host directory to bind as this service's data, instead of the named
+   * volume the template declares.
+   *
+   * The templates do not read it, on purpose. They keep declaring the volume
+   * they would create, because that is the question `serviceVolumeNames` asks
+   * them and the answer has to stay the same wherever the data currently is —
+   * the substitution happens once, in `provisionService`.
+   */
+  dataPath?: string | null;
 }
 
 export interface DockerRunConfig {

@@ -3,7 +3,10 @@
 import { useState } from "react";
 import { toast } from "sonner";
 import { DangerZone } from "@/components/ui/DangerAction";
+import type { LogLine } from "@/components/ui/LogViewer";
+import type { DataMove } from "@/lib/hooks/useServiceStream";
 import { DatabasesPanel } from "./DatabasesPanel";
+import { DataPathPanel } from "./DataPathPanel";
 import type { Credentials, From, Service } from "./types";
 
 /**
@@ -19,12 +22,20 @@ export function DataSection({
   service,
   from,
   creds,
+  move,
+  moveLines,
+  moveProgress,
   onDeleted,
+  onChanged,
 }: {
   service: Service;
   from: From;
   creds: Credentials | null;
+  move: DataMove | null;
+  moveLines: LogLine[];
+  moveProgress: { copiedKb: number; totalKb: number | null } | null;
   onDeleted: () => void;
+  onChanged: () => void;
 }) {
   const [deleteData, setDeleteData] = useState(false);
 
@@ -50,6 +61,14 @@ export function DataSection({
         port={from === "network" ? service.internalPort : service.port}
         envKey={service.envKey}
         credentials={creds}
+      />
+
+      <DataPathPanel
+        service={service}
+        move={move}
+        lines={moveLines}
+        progress={moveProgress}
+        onChanged={onChanged}
       />
 
       {/*
