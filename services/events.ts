@@ -49,9 +49,26 @@ export type OpsEvent =
   | { type: "autostart:log"; line: string };
 
 /**
- * One emitter, keyed by a channel string. Two instances rather than two classes:
- * the wiring is identical and only the event union and the meaning of the key
- * differ.
+ * What one service emits: a console session, and the move of its data.
+ *
+ * A third channel rather than a corner of one of the two above, for the reason
+ * the comment on `OpsEvent` already gives. `projectEvents` is keyed by project
+ * and a service need not have one — `services.project_id` is nullable, and a
+ * standalone database is an ordinary thing here. `opsEvents` is keyed by the id
+ * of a run that starts, finishes and is then history; a service outlives every
+ * console session opened on it. Keyed by service id, which means exactly one
+ * thing.
+ */
+export type ConsoleMode = "engine" | "shell" | "logs";
+
+export type ServiceEvent =
+  | { type: "console:output"; mode: ConsoleMode; text: string }
+  | { type: "console:closed"; mode: ConsoleMode; code: number | null };
+
+/**
+ * One emitter, keyed by a channel string. Three instances rather than three
+ * classes: the wiring is identical and only the event union and the meaning of
+ * the key differ.
  */
 class ChannelBus<TEvent> {
   private emitter = new EventEmitter();
@@ -83,11 +100,15 @@ class ChannelBus<TEvent> {
 const globalRef = globalThis as typeof globalThis & {
   __runpanelEvents?: ChannelBus<ProjectEvent>;
   __runpanelOpsEvents?: ChannelBus<OpsEvent>;
+  __runpanelServiceEvents?: ChannelBus<ServiceEvent>;
 };
 
 export const projectEvents = (globalRef.__runpanelEvents ??= new ChannelBus<ProjectEvent>());
 
 /** Keyed by run id, or by `HOST_CHANNEL` for things that belong to the machine. */
 export const opsEvents = (globalRef.__runpanelOpsEvents ??= new ChannelBus<OpsEvent>());
+
+/** Keyed by service id. */
+export const serviceEvents = (globalRef.__runpanelServiceEvents ??= new ChannelBus<ServiceEvent>());
 
 export const HOST_CHANNEL = "host";

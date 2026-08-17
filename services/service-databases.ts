@@ -198,8 +198,17 @@ export function serviceTarget(service: ServicesTable): ServiceTarget {
  * reaches an engine is a decision with a rationale (see the module header); it
  * should be made once, not re-made by whoever writes the next caller.
  */
-export function execArgs(target: ServiceTarget, env: Record<string, string>): string[] {
+export function execArgs(
+  target: ServiceTarget,
+  env: Record<string, string>,
+  opts: { interactive?: boolean } = {}
+): string[] {
   const args = ["exec"];
+  // Only for a session that keeps reading: every one-shot caller here runs a
+  // command and wants its stdin closed. Never `-t` — with piped stdio Docker
+  // refuses to allocate a TTY at all, which is why the console has to pass the
+  // flags each client would otherwise infer from one.
+  if (opts.interactive) args.push("-i");
   for (const [key, value] of Object.entries(env)) args.push("-e", `${key}=${value}`);
   args.push(target.containerName);
   return args;

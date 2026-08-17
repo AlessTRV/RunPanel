@@ -184,6 +184,36 @@ export const controlActionSchema = z.object({
 });
 
 /**
+ * What may be asked of a service console.
+ *
+ * The project terminal it is modelled on reads `body as { action?, input? }`
+ * with nothing validating either — the one mutating route in the panel without
+ * a schema. This is that route written the way the rest of them are.
+ *
+ * `confirmed` is checked here rather than only in the dialog for the same
+ * reason `restoreRequestSchema` checks its own: the confirmation that counts is
+ * the one that cannot be skipped by posting straight at the endpoint. `logs` is
+ * exempt because it cannot change anything.
+ */
+export const consoleModeSchema = z.enum(["engine", "shell", "logs"]);
+
+export const serviceConsoleSchema = z.discriminatedUnion("action", [
+  z
+    .object({
+      action: z.literal("start"),
+      mode: consoleModeSchema,
+      confirmed: z.boolean().optional(),
+    })
+    .refine((value) => value.mode === "logs" || value.confirmed === true, {
+      message: "Serve la conferma prima di aprire una sessione",
+      path: ["confirmed"],
+    }),
+  /** One submitted line. Capped because it reaches a shell's stdin verbatim. */
+  z.object({ action: z.literal("input"), input: z.string().max(4096) }),
+  z.object({ action: z.literal("stop") }),
+]);
+
+/**
  * What a deploy request may ask for.
  *
  * `commitSha` is what pins the project to one commit: the route writes it onto
