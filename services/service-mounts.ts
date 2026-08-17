@@ -67,7 +67,11 @@ export interface MountJournal {
 /** The refusals the route answers with a 409 and a machine-readable code. */
 export class MountRefused extends Error {
   constructor(
-    readonly code: "destination-not-empty" | "apply-in-progress" | "insufficient-space",
+    readonly code:
+      | "destination-not-empty"
+      | "apply-in-progress"
+      | "insufficient-space"
+      | "data-mount-removed",
     message: string,
     readonly mountId?: string,
     readonly entries?: string[]
@@ -476,6 +480,15 @@ const inFlight = new Set<string>();
 export interface ApplyOptions {
   /** Ids whose destination is already non-empty and which are adopted as they are. */
   adopt?: string[];
+  /**
+   * Ids of data-directory binds the operator has agreed to give up.
+   *
+   * Switching one off puts the engine back on the volume it had before, which
+   * still holds whatever was there then — so the database silently becomes an
+   * older one. Refusing until it is said out loud is the whole point of the
+   * field; it is not a formality.
+   */
+  releaseData?: string[];
 }
 
 /**
@@ -496,6 +509,14 @@ export async function applyMounts(
 
   for (const mount of next) {
     assertMountable(mount.source);
+
+    // An engine cannot write its own data directory read-only. It would start,
+    // fail on the first write, and the reason would be buried in its log.
+    if (mount.enabled && mount.readOnly && isEngineDataPath(service, mount.target)) {
+      throw new Error(
+        `${mount.target} è la cartella dati del motore: montata in sola lettura il servizio non parte.`
+      );
+    }
   }
 
   const targets = next.filter((m) => m.enabled).map((m) => m.target.replace(/\/+$/, ""));
@@ -506,7 +527,36 @@ export async function applyMounts(
 
   const previous = parseMounts(service.mounts);
   const adopt = new Set(opts.adopt ?? []);
+  const release = new Set(opts.releaseData ?? []);
   const image = imageFor(service, projectSlug);
+
+  /*
+    Giving up a bind on the data directory is not the same kind of edit as the
+    others, and it is the one that can lose data without saying so.
+
+    The engine goes back to the volume it used before, which still holds
+    whatever was in it when the bind was made. Everything written since lives on
+    in the host directory, unreachable, while the service comes up on an older
+    database and works perfectly. Nothing downstream would notice — the
+    verification below only runs for mounts being switched *on*.
+  */
+  const released = previous.filter(
+    (old) =>
+      old.enabled &&
+      isEngineDataPath(service, old.target) &&
+      !next.some(
+        (m) => m.enabled && m.target === old.target && m.source === old.source
+      )
+  );
+
+  const unacknowledged = released.find((old) => !release.has(old.id));
+  if (unacknowledged) {
+    throw new MountRefused(
+      "data-mount-removed",
+      `${unacknowledged.source} contiene i dati di questo servizio. Togliendo il bind il motore torna sul volume di prima, che è fermo a com'era quando l'hai aggiunto: quello che hai scritto da allora resta nella cartella e il servizio riparte su dati più vecchi.`,
+      unacknowledged.id
+    );
+  }
 
   // Only the ones being switched on now need seeding: an existing bind already
   // holds whatever it holds, and turning one off changes nothing on disk.
@@ -640,11 +690,6 @@ async function runApply(
 
     await phase("recreating");
     emit("Ricreo il container…");
-    await db
-      .updateTable("services")
-      .set({ mounts: JSON.stringify(next), updated_at: nowIso() })
-      .where("id", "=", service.id)
-      .execute();
     await recreateService({ ...service, mounts: JSON.stringify(next) }, projectSlug, access);
     invalidateMounts(service.container_name);
 
@@ -655,6 +700,15 @@ async function runApply(
       const regression = inventoryRegressed(before, after);
       if (regression) throw new Error(`I dati non sono arrivati: ${regression}`);
     }
+
+    // Written last, deliberately. Until this line the row describes the
+    // container that actually exists, so a panel that dies anywhere above comes
+    // back knowing what to put back rather than what was hoped for.
+    await db
+      .updateTable("services")
+      .set({ mounts: JSON.stringify(next), updated_at: nowIso() })
+      .where("id", "=", service.id)
+      .execute();
 
     emit("Fatto.");
     await phase("done");
@@ -668,11 +722,6 @@ async function runApply(
     await phase("rolling-back");
     emit("Torno alla configurazione precedente…");
     try {
-      await db
-        .updateTable("services")
-        .set({ mounts: JSON.stringify(previous), updated_at: nowIso() })
-        .where("id", "=", service.id)
-        .execute();
       await recreateService({ ...service, mounts: JSON.stringify(previous) }, projectSlug, access);
       invalidateMounts(service.container_name);
       journal.rolledBack = true;
@@ -688,4 +737,73 @@ async function runApply(
     file.flush();
     await dockerTry(["rm", "-f", SEED_CONTAINER(service.id)], { timeout: 30_000 });
   }
+}
+
+// --- coming back up ----------------------------------------------------------
+
+/**
+ * An application that was in flight when the panel stopped.
+ *
+ * Never resumed, only explained — a half-finished `cp -a` cannot be told from a
+ * finished one without checksumming the tree, and carrying on into a
+ * partly-populated directory is how a database ends up starting and being
+ * subtly wrong.
+ *
+ * There is one thing it does repair, because leaving it would leave a service
+ * that no operator can start: the window between `docker rm -f` and
+ * `docker run`, where the container simply does not exist. The `mounts` column
+ * is written only after a verified recreate, so it still describes the last
+ * configuration known to work — which makes rebuilding from it safe.
+ */
+export async function reconcileMountApplies(): Promise<number> {
+  const db = await getDb();
+  const rows = await db
+    .selectFrom("services")
+    .selectAll()
+    .where("mount_apply", "is not", null)
+    .execute();
+
+  let repaired = 0;
+
+  for (const service of rows) {
+    const journal = parseApplyJournal(service.mount_apply);
+    if (!isApplyInFlight(journal) || !journal) continue;
+
+    await dockerTry(["rm", "-f", SEED_CONTAINER(service.id)], { timeout: 30_000 });
+
+    const exists = await dockerTry(["inspect", "-f", "{{.Id}}", service.container_name], {
+      timeout: 15_000,
+    });
+
+    if (!exists) {
+      const project = service.project_id
+        ? await db
+            .selectFrom("projects")
+            .select("slug")
+            .where("id", "=", service.project_id)
+            .executeTakeFirst()
+        : undefined;
+      try {
+        await recreateService(service, project?.slug, currentAccess(service));
+        invalidateMounts(service.container_name);
+      } catch (err) {
+        console.error(
+          `[mounts] Could not rebuild ${service.container_name}:`,
+          err instanceof Error ? err.message : err
+        );
+      }
+    }
+
+    journal.phase = "failed";
+    journal.finishedAt = nowIso();
+    journal.error = "Il pannello si è riavviato durante l'applicazione.";
+    journal.rolledBack = !exists;
+    await writeJournal(service.id, journal);
+    repaired++;
+  }
+
+  if (repaired > 0) {
+    console.log(`[mounts] ${repaired} interrupted application(s) marked for review`);
+  }
+  return repaired;
 }

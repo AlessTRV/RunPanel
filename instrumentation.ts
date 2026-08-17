@@ -27,6 +27,16 @@ export async function register() {
   const { getDb } = await import("./lib/db");
   await getDb();
 
+  // A bind list that was being applied when this process stopped. Before the
+  // schedulers and not behind their flag: it is correctness, not a chore. It
+  // never resumes an application — see the function for why — but it does
+  // rebuild a container that was removed and never recreated, which is the one
+  // state no operator can get out of from the panel.
+  const { reconcileMountApplies } = await import("./services/service-mounts");
+  await reconcileMountApplies().catch((err) => {
+    console.error("[mounts] Recovery failed:", err instanceof Error ? err.message : err);
+  });
+
   // An unclaimed panel is a panel anyone can claim, and the first person to do
   // so gets a shell on this host. Print the token the setup form has to quote,
   // so claiming it requires reading this log rather than merely arriving first.

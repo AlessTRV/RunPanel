@@ -75,6 +75,8 @@ export function MountsPanel({
   const [error, setError] = useState<string | null>(null);
   const [notEmpty, setNotEmpty] = useState<{ id: string; entries: string[] } | null>(null);
   const [adopt, setAdopt] = useState<string[]>([]);
+  const [releasing, setReleasing] = useState<{ id: string; message: string } | null>(null);
+  const [release, setRelease] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
 
   const inFlight = apply !== null && RUNNING.includes(apply.phase);
@@ -99,15 +101,17 @@ export function MountsPanel({
   const patch = (id: string, change: Partial<ServiceMount>) =>
     setRows((prev) => prev.map((row) => (row.id === id ? { ...row, ...change } : row)));
 
+  /** A row nobody has filled in yet is not an error, it is a row to drop. */
+  const filled = rows.filter((row) => row.source.trim() || row.target.trim());
+
   function validate(): string | null {
-    for (const row of rows) {
-      if (!row.enabled && !row.source && !row.target) continue;
+    for (const row of filled) {
       const source = hostPathSchema.safeParse(row.source);
       if (!source.success) return source.error.issues[0]?.message ?? HOST_PATH_RULE;
       const target = containerPathSchema.safeParse(row.target);
       if (!target.success) return target.error.issues[0]?.message ?? CONTAINER_PATH_RULE;
     }
-    const targets = rows.filter((r) => r.enabled).map((r) => r.target.replace(/\/+$/, ""));
+    const targets = filled.filter((r) => r.enabled).map((r) => r.target.replace(/\/+$/, ""));
     const duplicate = targets.find((t, i) => targets.indexOf(t) !== i);
     return duplicate ? `Due bind puntano a ${duplicate} dentro il container.` : null;
   }
@@ -124,7 +128,7 @@ export function MountsPanel({
       const res = await fetch(`/api/services/${service.id}/mounts`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mounts: rows, adopt }),
+        body: JSON.stringify({ mounts: filled, adopt, releaseData: release }),
       });
       const data = await res.json().catch(() => ({}));
 
@@ -135,13 +139,23 @@ export function MountsPanel({
         setError(data.error ?? null);
         return;
       }
+
+      if (res.status === 409 && data.code === "data-mount-removed") {
+        // Not a checkbox on a row that still exists — the row is the one being
+        // taken away — so it is asked here, once, in the words of what happens.
+        setReleasing({ id: data.mountId, message: data.error ?? "" });
+        setError(null);
+        return;
+      }
       if (!res.ok) {
         setError(data.details?.[0]?.message ?? data.error ?? "Applicazione non riuscita");
         return;
       }
       setError(null);
       setNotEmpty(null);
+      setReleasing(null);
       setAdopt([]);
+      setRelease([]);
       onApplied();
     } catch {
       setError("Applicazione non riuscita");
@@ -276,6 +290,29 @@ export function MountsPanel({
                 </div>
               ))}
             </div>
+          )}
+
+          {releasing && (
+            <Hint tone="warn" title="Stai togliendo il bind sui dati del servizio">
+              {releasing.message}
+              <label className="mt-2 flex cursor-pointer items-start gap-2.5">
+                <input
+                  type="checkbox"
+                  checked={release.includes(releasing.id)}
+                  onChange={(e) =>
+                    setRelease((prev) =>
+                      e.target.checked
+                        ? [...prev, releasing.id]
+                        : prev.filter((id) => id !== releasing.id)
+                    )
+                  }
+                  className="accent-danger mt-0.5 size-4"
+                />
+                <span className="text-xs leading-relaxed">
+                  Ho capito: rimetti il servizio sul volume di prima
+                </span>
+              </label>
+            </Hint>
           )}
 
           {error && !notEmpty && (

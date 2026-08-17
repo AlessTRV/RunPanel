@@ -62,6 +62,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
   try {
     const journal = await applyMounts(service, project?.slug, parsed.data.mounts, {
       adopt: parsed.data.adopt,
+      releaseData: parsed.data.releaseData,
     });
     return NextResponse.json({ status: "started", apply: journal }, { status: 202 });
   } catch (err) {

@@ -213,6 +213,74 @@ export async function run({ base }) {
     JSON.stringify(detail.containerMounts)
   );
 
+  // --- giving the data bind back is not an ordinary edit --------------------
+  //
+  // The engine would return to the volume it used before, which is frozen at the
+  // moment the bind was made. Everything written since stays in the host folder
+  // and the service comes up on an older database, working perfectly. Nothing
+  // downstream notices, which is exactly why it has to be refused until it is
+  // said out loud.
+  redisCli(container, "SET", "dopo-lo-spostamento", "solo-nel-bind");
+  redisCli(container, "SAVE");
+
+  res = await put({
+    mounts: [
+      { id: "cfg", source: EXTRA, target: "/etc", enabled: true, readOnly: false },
+      { id: "dat", source: DATA, target: "/data", enabled: false, readOnly: false },
+    ],
+    adopt: ["cfg"],
+  });
+  r.check(
+    "switching the data bind off is refused, with a code",
+    res.status === 409 && res.body.code === "data-mount-removed",
+    `${res.status} ${JSON.stringify(res.body)}`
+  );
+  r.check("and it names the row", res.body.mountId === "dat", String(res.body.mountId));
+
+  r.check(
+    "the refusal changed nothing",
+    redisCli(container, "GET", "dopo-lo-spostamento").includes("solo-nel-bind"),
+    redisCli(container, "GET", "dopo-lo-spostamento")
+  );
+
+  // Read-only on the data directory is a service that starts and cannot write.
+  res = await put({
+    mounts: [
+      { id: "cfg", source: EXTRA, target: "/etc", enabled: true, readOnly: false },
+      { id: "dat", source: DATA, target: "/data", enabled: true, readOnly: true },
+    ],
+    adopt: ["cfg"],
+  });
+  r.check(
+    "a read-only bind on the data directory is refused",
+    res.status === 400,
+    `${res.status} ${JSON.stringify(res.body)}`
+  );
+
+  res = await put({
+    mounts: [
+      { id: "cfg", source: EXTRA, target: "/etc", enabled: true, readOnly: false },
+      { id: "dat", source: DATA, target: "/data", enabled: false, readOnly: false },
+    ],
+    adopt: ["cfg"],
+    releaseData: ["dat"],
+  });
+  r.check("acknowledged, it goes through", res.status === 202, `${res.status} ${JSON.stringify(res.body)}`);
+  detail = await waitForPhase(api, serviceId, ["done", "failed"]);
+  r.check("and completes", detail.mountApply.phase === "done", JSON.stringify(detail.mountApply.error));
+
+  await sleep(2000);
+  r.check(
+    "the service is back on the managed volume",
+    (detail.containerMounts ?? []).some((m) => m.source.startsWith("runpanel-redis-") && m.target === "/data"),
+    JSON.stringify(detail.containerMounts)
+  );
+  r.check(
+    "with the older data, exactly as the refusal said",
+    !redisCli(container, "GET", "dopo-lo-spostamento").includes("solo-nel-bind"),
+    redisCli(container, "GET", "dopo-lo-spostamento")
+  );
+
   await api.call(`/api/services/${serviceId}?deleteData=true`, { method: "DELETE" });
   scrub();
   return r.result();

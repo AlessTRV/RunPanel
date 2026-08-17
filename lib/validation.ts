@@ -315,6 +315,13 @@ export const serviceMountsSchema = z.object({
    * something is ever used, and why it cannot be the default.
    */
   adopt: z.array(z.string().min(1).max(32)).max(32).optional(),
+  /**
+   * The ids of data-directory binds the operator agrees to give up. Switching
+   * one off puts the engine back on the volume it had before, which is frozen
+   * at the moment the bind was made — so the service comes up on an older
+   * database while everything written since stays in the host directory.
+   */
+  releaseData: z.array(z.string().min(1).max(32)).max(32).optional(),
 });
 
 /**
