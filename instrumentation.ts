@@ -137,13 +137,15 @@ export async function register() {
     void (async () => {
       try {
         const { notify } = await import("./services/notify");
-        const { panelVersion } = await import("./lib/version");
-        const { readCheckout } = await import("./services/panel-update/git");
-        const checkout = await readCheckout();
+        const { panelRelease } = await import("./services/panel-update/release");
+        const release = await panelRelease();
         await notify({
           key: "panel.restarted",
-          version: panelVersion(),
-          sha: checkout.head,
+          // The label rather than the bare semver: "v0.1.0" has been true since
+          // the first commit, so on a phone it says nothing about which build
+          // just came back.
+          version: release.label.replace(/^v/, ""),
+          sha: release.sha,
           afterUpdate: settled?.phase === "done" && Boolean(settled.bootedAt),
         });
       } catch {

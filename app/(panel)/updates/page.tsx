@@ -198,7 +198,7 @@ export default function UpdatesPage() {
 
         <Panel className="space-y-4">
           <PanelHeader
-            title={`RunPanel v${data.version}`}
+            title={`RunPanel ${data.release.label}`}
             description={
               checkout.isRepo
                 ? `Branch ${checkout.branch ?? "—"} · ${checkout.remote ?? "nessun remote"}`
@@ -207,7 +207,20 @@ export default function UpdatesPage() {
           />
 
           <dl className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm sm:grid-cols-3">
-            <Fact label="Commit in esecuzione" value={checkout.short ?? "—"} mono />
+            <Fact
+              label="Build in esecuzione"
+              value={
+                data.release.number !== null
+                  ? `${data.release.number} · ${data.release.short ?? "—"}`
+                  : (data.release.short ?? "—")
+              }
+              mono
+              title={
+                data.release.shallow
+                  ? "Il checkout è shallow, quindi il numero di build non è calcolabile"
+                  : (data.release.date ?? undefined)
+              }
+            />
             <Fact
               label="Ultimo controllo"
               value={check ? formatRelative(check.checkedAt) : "mai"}

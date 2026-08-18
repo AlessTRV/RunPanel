@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth-guard";
-import { panelVersion } from "@/lib/version";
+import { panelRelease } from "@/services/panel-update/release";
 import {
   DEFAULT_PANEL_UPDATE_INTERVAL,
   PANEL_UPDATE_INTERVAL_SETTING,
@@ -28,7 +28,7 @@ export async function GET() {
   const denied = await requireAuth();
   if (denied) return denied;
 
-  const [checkout, check, probe, interval] = await Promise.all([
+  const [checkout, check, probe, interval, release] = await Promise.all([
     readCheckout(),
     lastCheck(),
     // The CACHED probe, which matters more here than anywhere else it is used.
@@ -39,6 +39,7 @@ export async function GET() {
     // autostart page; calling the uncached function here undid it.
     autostartProbeCache.get(),
     getSetting(PANEL_UPDATE_INTERVAL_SETTING),
+    panelRelease(),
   ]);
 
   const verdict = canSelfUpdate(probe, process.platform, process.env.NODE_ENV);
@@ -51,7 +52,8 @@ export async function GET() {
 
   return NextResponse.json(
     {
-      version: panelVersion(),
+      version: release.version,
+      release,
       checkout: {
         isRepo: checkout.isRepo,
         branch: checkout.branch,

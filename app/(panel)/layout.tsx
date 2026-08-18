@@ -7,7 +7,7 @@ import { TopBar } from "@/components/TopBar";
 import { PollingProvider } from "@/lib/hooks/usePollingInterval";
 import { PanelUpdateProvider } from "@/lib/hooks/usePanelUpdate";
 import { UpdateBanner } from "@/components/UpdateBanner";
-import { panelVersion } from "@/lib/version";
+import { panelRelease } from "@/services/panel-update/release";
 
 export default async function PanelLayout({
   children,
@@ -23,7 +23,7 @@ export default async function PanelLayout({
     <PollingProvider>
     <PanelUpdateProvider>
     <div className="min-h-dvh">
-      <AppSidebar version={panelVersion()} />
+      <AppSidebar version={(await panelRelease()).label} />
       <MobileNav />
       <div className="md:ml-64">
         <TopBar />

@@ -53,8 +53,21 @@ export interface UpdateRun {
   manualCommands: string[];
 }
 
+export interface PanelRelease {
+  version: string;
+  /** Commits on the mainline, or null when git could not count them. */
+  number: number | null;
+  sha: string | null;
+  short: string | null;
+  date: string | null;
+  shallow: boolean;
+  /** `v0.1.0+142`, already assembled. */
+  label: string;
+}
+
 export interface UpdateStatus {
   version: string;
+  release: PanelRelease;
   checkout: {
     isRepo: boolean;
     branch: string | null;

@@ -281,3 +281,59 @@ export async function resetHard(checkout: PanelCheckout, ref: string): Promise<v
 export async function cleanUntracked(checkout: PanelCheckout): Promise<void> {
   await git(checkout.root, ["clean", "-fd", "-e", ".env*"], { timeout: 60_000 });
 }
+
+export interface PanelBuild {
+  /** Commits on the mainline, or null when git cannot honestly count them. */
+  number: number | null;
+  sha: string | null;
+  short: string | null;
+  /** Author date of HEAD, ISO 8601. */
+  date: string | null;
+  /**
+   * A shallow clone holds only the tip, so its count is not a position in the
+   * history — it is however many commits happened to be fetched. Reported so
+   * the caller can decline to show a number that would be a lie.
+   */
+  shallow: boolean;
+}
+
+/**
+ * A build number, from the only thing this project actually versions: its
+ * history.
+ *
+ * `package.json` has said `0.1.0` since the first commit and will go on saying
+ * it, because nothing bumps it — which makes it useless for the one question a
+ * version is asked: *is this the same code I looked at yesterday?* The commit
+ * count answers that, costs nothing to maintain and cannot be forgotten.
+ *
+ * `--first-parent`, so the number is a position on the mainline rather than a
+ * total of everything ever merged in. On a linear history the two agree; the
+ * moment a branch is merged they stop agreeing, and only the first-parent count
+ * keeps meaning "how far along main is this".
+ *
+ * Never throws: a panel unpacked from a tarball has no history to count, and
+ * that is a fact to report rather than an error.
+ */
+export async function readBuild(root: string = panelRoot()): Promise<PanelBuild> {
+  const empty: PanelBuild = { number: null, sha: null, short: null, date: null, shallow: false };
+  if (!fs.existsSync(path.join(root, ".git"))) return empty;
+
+  const [head, shallowOut] = await Promise.all([
+    git(root, ["log", "-1", "--format=%H%x1f%aI"]).catch(() => ""),
+    git(root, ["rev-parse", "--is-shallow-repository"]).catch(() => "false"),
+  ]);
+
+  const [sha, date] = head.trim().split("\x1f");
+  if (!sha) return empty;
+
+  const shallow = shallowOut.trim() === "true";
+  let number: number | null = null;
+
+  if (!shallow) {
+    const counted = await git(root, ["rev-list", "--count", "--first-parent", "HEAD"]).catch(() => "");
+    const parsed = Number.parseInt(counted.trim(), 10);
+    if (Number.isFinite(parsed) && parsed > 0) number = parsed;
+  }
+
+  return { number, sha, short: sha.slice(0, 7), date: date ?? null, shallow };
+}

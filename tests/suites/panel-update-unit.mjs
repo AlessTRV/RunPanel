@@ -61,6 +61,7 @@ export async function run({ repoRoot }) {
   const { detectPackageManager, resolvePackageManager } = await load("services", "package-manager.ts");
   const { isPanelUpdateInterval, DEFAULT_PANEL_UPDATE_INTERVAL, PANEL_UPDATE_INTERVALS } =
     await load("lib", "polling.ts");
+  const { releaseLabel } = await load("lib", "version.ts");
   const { hasUpdate, isUpdateActive } = await load("lib", "panel-update.ts");
 
   // --- The commit log -------------------------------------------------------
@@ -327,6 +328,31 @@ export async function run({ repoRoot }) {
   r.check("a finished one is not", isUpdateActive(status({ run: { phase: "done" } })) === false);
   r.check("nor is one waiting on a human",
     isUpdateActive(status({ run: { phase: "awaiting-manual" } })) === false);
+
+  // --- The version somebody actually reads ---------------------------------
+  //
+  // `package.json` has said 0.1.0 since the first commit and nothing bumps it,
+  // so the build number is the only part that answers "is this the same code as
+  // yesterday". These check it survives the cases where git cannot count.
+  r.check(
+    "a counted build reads as semver build metadata",
+    releaseLabel({ version: "0.1.0", build: 126, short: "bce7e35" }) === "v0.1.0+126",
+    releaseLabel({ version: "0.1.0", build: 126, short: "bce7e35" })
+  );
+  r.check(
+    "with no count it falls back to the sha",
+    releaseLabel({ version: "0.1.0", build: null, short: "bce7e35" }) === "v0.1.0 · bce7e35",
+    releaseLabel({ version: "0.1.0", build: null, short: "bce7e35" })
+  );
+  r.check(
+    "with neither it is still a version",
+    releaseLabel({ version: "0.1.0", build: null, short: null }) === "v0.1.0"
+  );
+  r.check(
+    "build 1 is a build, not a missing one",
+    releaseLabel({ version: "0.1.0", build: 1, short: "a".repeat(7) }) === "v0.1.0+1",
+    "a falsy check instead of a null check would drop the first commit"
+  );
 
   // --- The interval offered to the operator ---------------------------------
   r.check("the default is one of the options",

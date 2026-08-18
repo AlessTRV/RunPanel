@@ -581,7 +581,12 @@ tinge di rosso l'intero pannello.
 ## Aggiornare il pannello
 
 RunPanel si installa clonandolo, quindi la cartella da cui gira è un working tree
-git: è tutto quello che serve perché sappia se c'è una versione più recente. Ogni
+git: è tutto quello che serve perché sappia se c'è una versione più recente — e
+anche per sapere *quale* versione è. La versione mostrata è `v0.1.0+125`: il
+numero dopo il `+` è il conteggio dei commit sul ramo principale
+(`git rev-list --count --first-parent`), che sale da solo e non va ricordato,
+mentre `0.1.0` di `package.json` è fermo da sempre. Su un checkout shallow il
+conteggio non ha senso e il pannello mostra lo SHA. Ogni
 sei ore — l'intervallo si cambia dalla pagina — fa un `git fetch` sul proprio
 remote e confronta: solo traffico in uscita, esattamente come per i progetti, e
 per un repository pubblico non serve alcun token. Quando il branch si è mosso

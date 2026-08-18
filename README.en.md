@@ -570,7 +570,12 @@ panel red.
 ## Updating the panel
 
 RunPanel is installed by cloning it, so the directory it runs from is a git
-working tree — which is all it needs to know whether a newer version exists.
+working tree — which is all it needs to know whether a newer version exists, and
+also *which* version this is. The version shown reads `v0.1.0+125`: the number
+after the `+` is the mainline commit count
+(`git rev-list --count --first-parent`), which climbs on its own and cannot be
+forgotten, while `package.json`'s `0.1.0` has never moved. On a shallow checkout
+the count means nothing and the panel shows the SHA instead.
 Every six hours, and the interval is a setting on the page, it runs a `git fetch`
 against its own remote and compares: outbound only, exactly as for a project, and
 no token at all for a public repository. When the branch has moved a strip appears at
