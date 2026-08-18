@@ -57,7 +57,28 @@ const securityHeaders = [
     : []),
 ];
 
+/**
+ * Where the build lands. Do not remove this line.
+ *
+ * The panel updates itself while it is running, and `next build` empties and
+ * rewrites its output directory in place. Building over `.next` would pull the
+ * chunks out from under the very page showing the progress, and a build that
+ * failed halfway would leave the panel unable to start again. So
+ * `services/panel-update/run.ts` builds into `.next-update` and swaps it in
+ * only once the build has succeeded — and `next build` has no `--dist-dir`
+ * flag, so this is the only way to tell it where to go.
+ *
+ * The trap worth spelling out: this file arrives on a machine *inside the
+ * update itself*. A future commit that tidies this line away would make the
+ * next update build straight over the live `.next`. That is why the updater
+ * refuses to build when it cannot find `RUNPANEL_DIST_DIR` in this file, and
+ * why `tests/suites/panel-update-unit.mjs` asserts it is still here.
+ */
+const distDir = process.env.RUNPANEL_DIST_DIR || ".next";
+
 const nextConfig: NextConfig = {
+  distDir,
+
   // Native / driver packages that must stay outside the bundle.
   serverExternalPackages: ["better-sqlite3", "pg"],
 

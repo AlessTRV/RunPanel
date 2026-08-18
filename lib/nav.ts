@@ -100,6 +100,13 @@ export const NAV_ITEMS: NavItem[] = [
     group: "system",
   },
   {
+    label: "Aggiornamenti",
+    href: "/updates",
+    icon: "solar:refresh-circle-linear",
+    iconActive: "solar:refresh-circle-bold-duotone",
+    group: "system",
+  },
+  {
     label: "Diagnostica",
     href: "/diagnostics",
     icon: "solar:health-linear",

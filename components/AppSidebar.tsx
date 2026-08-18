@@ -5,6 +5,8 @@ import Link from "next/link";
 import { Icon } from "@iconify/react";
 import { cn } from "@/lib/utils";
 import { NAV_GROUPS, isActiveNav, navItemsIn, type NavItem } from "@/lib/nav";
+import { usePanelUpdate } from "@/lib/hooks/usePanelUpdate";
+import { hasUpdate } from "@/lib/panel-update";
 
 /**
  * The desktop navigation, and only that.
@@ -70,9 +72,12 @@ function NavLink({ item, active }: { item: NavItem; active: boolean }) {
   );
 }
 
-export function AppSidebar() {
+export function AppSidebar({ version }: { version: string }) {
   const pathname = usePathname();
   const footer = navItemsIn("footer");
+  // Shared with the banner rather than fetched again — see `usePanelUpdate`.
+  const { status } = usePanelUpdate();
+  const updateReady = hasUpdate(status);
 
   return (
     <aside className="border-border bg-surface/80 fixed top-0 left-0 z-40 hidden h-dvh w-64 flex-col overflow-hidden border-r backdrop-blur-xl md:flex">
@@ -113,7 +118,20 @@ export function AppSidebar() {
         {footer.map((item) => (
           <NavLink key={item.href} item={item} active={isActiveNav(pathname, item)} />
         ))}
-        <p className="text-muted/60 text-meta px-3 pt-2 pb-1 font-mono">v0.1.0</p>
+        {/* Read rather than written down. The literal that used to live here
+            said v0.1.0 while package.json — which the backup manifest reads —
+            was free to say something else. */}
+        <p className="text-muted/60 text-meta flex items-center gap-1.5 px-3 pt-2 pb-1 font-mono">
+          v{version}
+          {updateReady && (
+            <>
+              {/* The banner can be dismissed; this cannot, so after closing it
+                  there is still one place that remembers. */}
+              <span className="bg-accent size-1.5 rounded-full" aria-hidden />
+              <span className="sr-only">Aggiornamento disponibile</span>
+            </>
+          )}
+        </p>
       </div>
     </aside>
   );

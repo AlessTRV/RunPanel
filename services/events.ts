@@ -50,7 +50,23 @@ export type OpsEvent =
   | { type: "backup:artifact"; label: string; status: string; bytes?: number; error?: string }
   | { type: "restore:log"; line: string }
   | { type: "restore:status"; status: string; message?: string }
-  | { type: "autostart:log"; line: string };
+  | { type: "autostart:log"; line: string }
+  /**
+   * The panel updating itself — see `services/panel-update/run.ts`.
+   *
+   * On this channel and not a run-keyed one, even though an update has a run id,
+   * because the page has to be able to attach *before* it knows that id: it
+   * presses the button and the answer arrives on the same connection. There is
+   * also only ever one update in flight, which is the property a key would have
+   * bought.
+   */
+  | { type: "panel-update:log"; line: string }
+  | {
+      type: "panel-update:status";
+      phase: string;
+      step?: string;
+      error?: string;
+    };
 
 /**
  * What one service emits: a console session, and the move of its data.

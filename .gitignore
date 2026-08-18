@@ -15,6 +15,12 @@
 /.next/
 /out/
 
+# Self-update staging and rollback. Ignored for correctness, not tidiness: the
+# next update runs `git clean -fd`, and a tracked-but-untracked `.next-old`
+# would be deleted — that is the only copy of the build to roll back to.
+/.next-update/
+/.next-old/
+
 # production
 /build
 

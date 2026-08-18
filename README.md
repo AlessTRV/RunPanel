@@ -25,7 +25,7 @@ manutenzione di Docker che il disco lo libera davvero.
 [Configurazione](#configurazione) · [Distribuire un progetto](#distribuire-un-progetto) ·
 [Database e servizi](#database-e-servizi) · [Accesso di rete](#accesso-di-rete) ·
 [Backup e ripristino](#backup-e-ripristino) · [Avvio automatico](#avvio-automatico) ·
-[Registri privati](#registri-privati) · [Il pannello, giorno per giorno](#il-pannello-giorno-per-giorno) ·
+[Aggiornare il pannello](#aggiornare-il-pannello) · [Registri privati](#registri-privati) · [Il pannello, giorno per giorno](#il-pannello-giorno-per-giorno) ·
 [Sicurezza](#sicurezza) · [Architettura](#architettura) · [Sviluppo](#sviluppo) ·
 [Limiti noti](#limiti-noti)
 
@@ -577,6 +577,66 @@ avvia e non ferma niente, e per dichiarare fermo qualcosa che risultava avviato
 aspetta due letture d'accordo, così un `pm2` che non risponde per un istante non
 tinge di rosso l'intero pannello.
 
+## Aggiornare il pannello
+
+RunPanel si installa clonandolo, quindi la cartella da cui gira è un working tree
+git: è tutto quello che serve perché sappia se c'è una versione più recente. Ogni
+sei ore — l'intervallo si cambia dalla pagina — fa un `git fetch` sul proprio
+remote e confronta. Quando il branch si è mosso compare una striscia in cima a
+ogni pagina con il numero di commit e un pulsante **Aggiorna**; la pagina
+Aggiornamenti mostra l'elenco dei commit, così premere quel pulsante è una
+decisione e non un atto di fede.
+
+Il controllo **non applica mai niente da solo**. È la differenza deliberata con
+l'auto-deploy dei progetti: chi accende l'auto-deploy ha chiesto che il proprio
+codice venga ricostruito, mentre nessuno chiede che la cosa che sta guardando si
+riavvii sotto di lui.
+
+Premuto il pulsante, il pannello copia lo store, scarica, allinea il checkout,
+installa le dipendenze, builda e si riavvia. Due dettagli non ovvi:
+
+- **La build non va in `.next`.** `next build` svuota e riscrive la sua cartella,
+  e il pannello in esecuzione legge da lì a ogni richiesta: costruire sul posto
+  romperebbe la pagina che sta mostrando l'avanzamento, e una build fallita a
+  metà lascerebbe un pannello che non riparte. La nuova versione si costruisce in
+  `.next-update` e prende il posto di quella in uso con due rename, solo dopo
+  essere stata verificata. La precedente resta in `.next-old` fino al riavvio
+  successivo.
+- **Il riavvio è un'uscita.** Il pannello esce con codice 75 e a rimetterlo su ci
+  pensa chi lo supervisiona già: systemd con `Restart=always`, o il ciclo dello
+  script `@reboot`. Non serve `systemctl` né alcun privilegio. `KillMode=process`
+  garantisce che PM2, i progetti nativi e i container non vengano toccati.
+
+Se qualcosa fallisce prima dello scambio, il checkout torna al commit di partenza
+e le dipendenze vengono reinstallate: `.next` non è mai stato toccato, quindi il
+pannello continua a girare sulla versione di prima senza accorgersi di niente.
+
+L'aggiornamento viene rifiutato quando il pannello non è un checkout git, quando
+HEAD è staccato, quando gira in un container — lì la modifica vivrebbe nel layer
+scrivibile e sparirebbe alla prima ricreazione, quindi la strada è ricostruire
+l'immagine — e su Windows, dove la cartella di build non si può rinominare mentre
+il processo la tiene aperta. Se non c'è nessun supervisore l'aggiornamento viene
+comunque scaricato e costruito, ma si ferma **prima** dello scambio e ti consegna
+i due comandi da eseguire: una build scambiata sotto un processo che continua a
+girare non funzionerebbe.
+
+Le modifiche locali non committate vengono scartate (`git reset --hard` seguito da
+`git clean -fd`), ed è necessario: `lib/icons.generated.ts` è tracciato e il
+`prebuild` lo rigenera, quindi l'albero di un'installazione è sporco dopo ogni
+build. Il `clean` è senza `-x`, quindi non tocca niente di ignorato — `data/`,
+`node_modules/`, `.next` — e i file `.env*` sono esclusi esplicitamente. Quello
+che sta per essere rimosso viene elencato nel log prima di rimuoverlo.
+
+Prima di iniziare, il pannello prende una copia del proprio store con
+`VACUUM INTO` e ne scrive il percorso nel log: le migrazioni girano da sole al
+boot, e una migrazione che fallisce lascia un pannello spento, cioè senza
+un'interfaccia da cui rimediare. Un aggiornamento viene rifiutato mentre c'è un
+deploy o un backup in corso, perché il riavvio li interromperebbe a metà.
+
+Se il pannello non dovesse tornare su, i comandi per rimettere la versione
+precedente sono in due posti che non richiedono un pannello funzionante: stampati
+nel journal appena prima dell'uscita, e in `<dataDir>/panel-update.json`.
+
 ## Registri privati
 
 Le credenziali dei registri Docker si inseriscono dal pannello, sono cifrate a
@@ -596,6 +656,7 @@ niente di utile.
 | **Storage** | cosa occupa il disco: immagini, volumi, archivi, repository |
 | **Backup** | policy, esecuzioni, archivi, ripristini |
 | **Autostart** | cosa torna su dopo un riavvio |
+| **Aggiornamenti** | la versione del pannello, i commit nuovi, il pulsante che li applica |
 | **Diagnostica** | cosa manca a questa installazione e cosa premere |
 | **GitHub** | token, repository, branch |
 | **Account** | password, sessioni per dispositivo, preferenze |
@@ -670,6 +731,7 @@ services/
   access-gate.ts        il gate TCP davanti a una porta limitata
   backup/               policy, dump, archivi, destinazioni, ripristino
   autostart/            rilevamento, generazione della unit, riconciliazione
+  panel-update/         controllo, build in staging, scambio, uscita per riavvio
   docker/               cli, etichette di proprietà, immagini, volumi, statistiche, gc
   builders/             node, docker, static, compose, custom
   process-drivers/      pm2, docker, compose
@@ -732,6 +794,10 @@ build fallisce su un nome di icona che non esiste.
   la copia di sicurezza già presa.
 - L'installazione automatica all'avvio è **solo per Linux**; altrove il pannello
   mostra cosa fare a mano.
+- L'**aggiornamento del pannello dal pannello** richiede un supervisore che lo
+  rimetta su dopo l'uscita: systemd o lo script `@reboot`. Senza, la nuova
+  versione viene costruita ma lo scambio e il riavvio restano due comandi da
+  dare a mano. In un container e su Windows non è disponibile affatto.
 
 ## Licenza
 

@@ -34,3 +34,30 @@ export const POLL_INTERVAL_SETTING = "deploy_poll_interval";
 export function isPollInterval(value: unknown): value is PollInterval {
   return POLL_INTERVALS.includes(value as PollInterval);
 }
+
+/**
+ * How often the panel asks whether *it* has a new version.
+ *
+ * Here rather than in `services/panel-update/`, and for exactly the reason the
+ * comment at the top of this file gives: the account screen offers these as a
+ * choice and the settings schema validates against them, and both of those run
+ * where importing the checker — which pulls in the database and the git layer —
+ * would be wrong.
+ *
+ * The numbers are an order of magnitude larger than the deploy ones on purpose.
+ * That poller watches a repository somebody is actively pushing to; this one
+ * watches the panel, which moves on a scale of days, and a check costs a real
+ * `git fetch` rather than a conditional request.
+ */
+export const PANEL_UPDATE_INTERVALS = ["3600", "21600", "86400"] as const;
+
+export type PanelUpdateInterval = (typeof PANEL_UPDATE_INTERVALS)[number];
+
+/** Six hours: twice a working day, which is as often as this can matter. */
+export const DEFAULT_PANEL_UPDATE_INTERVAL: PanelUpdateInterval = "21600";
+
+export const PANEL_UPDATE_INTERVAL_SETTING = "panel_update_interval";
+
+export function isPanelUpdateInterval(value: unknown): value is PanelUpdateInterval {
+  return PANEL_UPDATE_INTERVALS.includes(value as PanelUpdateInterval);
+}

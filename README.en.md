@@ -25,7 +25,7 @@ reclaims disk.
 [Configuration](#configuration) · [Deploying a project](#deploying-a-project) ·
 [Databases and services](#databases-and-services) · [Network access](#network-access) ·
 [Backups and restore](#backups-and-restore) · [Starting at boot](#starting-at-boot) ·
-[Private registries](#private-registries) · [The panel, day to day](#the-panel-day-to-day) ·
+[Updating the panel](#updating-the-panel) · [Private registries](#private-registries) · [The panel, day to day](#the-panel-day-to-day) ·
 [Security](#security) · [Architecture](#architecture) · [Development](#development) ·
 [Known gaps](#known-gaps)
 
@@ -566,6 +566,65 @@ something stopped that claimed to be running it waits for two readings that
 agree, so a `pm2` that fails to answer for an instant does not paint the whole
 panel red.
 
+## Updating the panel
+
+RunPanel is installed by cloning it, so the directory it runs from is a git
+working tree — which is all it needs to know whether a newer version exists.
+Every six hours, and the interval is a setting on the page, it runs a `git fetch`
+against its own remote and compares. When the branch has moved a strip appears at
+the top of every page with the number of commits and an **Aggiorna** button; the
+Updates page lists the commits, so pressing that button is a decision rather than
+an act of faith.
+
+The check **never applies anything by itself**. That is the deliberate difference
+from a project's auto-deploy: somebody who turns auto-deploy on has asked for
+their own code to be rebuilt, and nobody asks for the thing they are currently
+looking at to restart underneath them.
+
+Once pressed, the panel copies its store, fetches, aligns the checkout, installs
+dependencies, builds and restarts. Two details are worth knowing:
+
+- **The build does not go into `.next`.** `next build` empties and rewrites its
+  output directory, and the running panel reads from there on every request:
+  building in place would break the page showing the progress, and a build that
+  failed halfway would leave a panel that cannot start. The new version is built
+  in `.next-update` and takes the place of the live one with two renames, only
+  after it has been verified. The previous build stays in `.next-old` until the
+  next boot.
+- **The restart is an exit.** The panel exits with code 75 and whatever already
+  supervises it brings it back: systemd with `Restart=always`, or the loop in the
+  `@reboot` script. No `systemctl`, no privileges. `KillMode=process` guarantees
+  PM2, native projects and containers are left alone.
+
+If anything fails before the swap, the checkout is reset to the commit it started
+from and dependencies are reinstalled: `.next` was never touched, so the panel
+carries on running the previous version without noticing.
+
+An update is refused when the panel is not a git checkout, when HEAD is detached,
+when it runs inside a container — there the change would live in the writable
+layer and vanish the first time the container is recreated, so the route is to
+rebuild the image — and on Windows, where a build directory cannot be renamed
+while the process holds it open. With no supervisor at all the update is still
+fetched and built, but stops **before** the swap and hands over the two commands
+to run: a build swapped under a process that keeps running would not work.
+
+Uncommitted local changes are discarded (`git reset --hard` followed by
+`git clean -fd`), and that is necessary: `lib/icons.generated.ts` is tracked and
+`prebuild` regenerates it, so an installation's tree is dirty after every build.
+The clean runs without `-x`, so nothing ignored is touched — `data/`,
+`node_modules/`, `.next` — and `.env*` files are excluded explicitly. Whatever is
+about to be removed is listed in the log before it is removed.
+
+Before starting, the panel takes a copy of its own store with `VACUUM INTO` and
+writes the path into the log: migrations run by themselves at boot, and a
+migration that fails leaves a panel that is down, which means there is no UI left
+to fix it from. An update is refused while a deploy or a backup is running,
+because the restart would cut either in half.
+
+Should the panel not come back, the commands to put the previous version back are
+in two places that need no working panel: printed to the journal immediately
+before the exit, and in `<dataDir>/panel-update.json`.
+
 ## Private registries
 
 Docker registry credentials are entered from the panel, encrypted at rest and
@@ -584,6 +643,7 @@ that tells you nothing useful.
 | **Storage** | what is using the disk: images, volumes, archives, repositories |
 | **Backups** | policies, runs, archives, restores |
 | **Autostart** | what comes back after a reboot |
+| **Updates** | the panel's version, the commits waiting, the button that applies them |
 | **Diagnostics** | what this installation is missing and what to press |
 | **GitHub** | token, repositories, branches |
 | **Account** | password, per-device sessions, preferences |
@@ -656,6 +716,7 @@ services/
   access-gate.ts        the TCP gate in front of a restricted port
   backup/               policies, dumps, archives, destinations, restore
   autostart/            probing, unit generation, reconciliation
+  panel-update/         the check, the staged build, the swap, the exit
   docker/               cli, ownership labels, images, volumes, stats, gc
   builders/             node, docker, static, compose, custom
   process-drivers/      pm2, docker, compose
@@ -715,6 +776,10 @@ name that does not exist.
   another is accepted and fails partway, with the safety copy already taken.
 - Installing at boot is **Linux-only**; elsewhere the panel shows what to do by
   hand.
+- **Updating the panel from the panel** needs something that will start it
+  again after it exits: systemd, or the `@reboot` script. Without one the new
+  version is still built, but the swap and the restart stay two commands to run
+  by hand. Inside a container and on Windows it is not available at all.
 
 ## License
 

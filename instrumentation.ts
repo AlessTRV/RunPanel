@@ -22,6 +22,23 @@ export async function register() {
   const { applyPendingStoreRestore } = await import("./services/backup/store-swap");
   applyPendingStoreRestore();
 
+  // An update that ended by killing this process cannot have reported its own
+  // outcome. Reaching this line is the proof that it worked — the only way to
+  // get here is a process that loaded the build the update swapped in — so this
+  // is where the run is closed out. Before the store for the same reason as the
+  // restore above: it is a plain file, and it has to be readable even when the
+  // database is what the update broke.
+  const { settlePanelUpdate, scheduleDistCleanup } = await import("./services/panel-update/state");
+  const settled = settlePanelUpdate(env.dataDir);
+  if (settled?.phase === "done" && settled.bootedAt) {
+    console.log(
+      `[RunPanel] Aggiornamento completato: ${settled.fromSha?.slice(0, 7)} → ${settled.toSha?.slice(0, 7)}`
+    );
+    if (settled.distBackup) scheduleDistCleanup(settled.distBackup);
+  } else if (settled?.phase === "failed" && settled.error) {
+    console.warn(`[RunPanel] Aggiornamento non completato: ${settled.error}`);
+  }
+
   // Opening the store here also applies migrations and crash recovery up front,
   // so the first real request does not pay for it.
   const { getDb } = await import("./lib/db");
@@ -94,6 +111,12 @@ export async function register() {
   // and compares, so a push made while the panel was down is picked up then.
   const { startDeployPoller } = await import("./services/deploy-poll");
   startDeployPoller();
+
+  // The same question asked about the panel itself. It only ever *asks*: an
+  // update is applied when somebody presses the button, never on a timer, since
+  // nobody asks for the thing they are looking at to restart underneath them.
+  const { startPanelUpdatePoller } = await import("./services/panel-update/check");
+  startPanelUpdatePoller();
 
   // Bring back whatever is marked to start at boot — after a delay, and without
   // being awaited: Docker is still restarting its own containers at this point,
