@@ -4,6 +4,7 @@ import { isReconcilable, reconciledStatus } from "@/lib/status";
 import { dockerTry, lines } from "./docker/cli";
 import { appContainerName } from "./docker/labels";
 import { processManager } from "./process-manager";
+import { notify } from "./notify";
 
 /**
  * Making the status column mean what it says.
@@ -111,7 +112,7 @@ async function runSweep(): Promise<ReconcileStatusResult> {
   const db = await getDb();
   const [projects, services] = await Promise.all([
     db.selectFrom("projects").select(["id", "slug", "status", "runtime_type"]).execute(),
-    db.selectFrom("services").select(["id", "container_name", "status"]).execute(),
+    db.selectFrom("services").select(["id", "name", "container_name", "status"]).execute(),
   ]);
 
   const containers = await runningContainers();
@@ -146,7 +147,25 @@ async function runSweep(): Promise<ReconcileStatusResult> {
       .where("status", "=", project.status)
       .executeTakeFirst();
 
-    if (rowCount(updated) > 0) result.projects++;
+    if (rowCount(updated) > 0) {
+      result.projects++;
+      /*
+        The one transition worth telling somebody about.
+
+        Only `running` → `stopped`, and only from here: this sweep is the only
+        place in the panel that learns a process went away *without being
+        asked to*. Everything else that writes `stopped` was told to stop.
+        It is also already confirmed twice — see `reconciledStatus()` — so the
+        message costs nothing in false alarms.
+      */
+      if (next === "stopped") {
+        void notify({
+          key: "project.crashed",
+          slug: project.slug,
+          runtime: project.runtime_type,
+        });
+      }
+    }
   }
 
   if (containers) {
@@ -167,7 +186,16 @@ async function runSweep(): Promise<ReconcileStatusResult> {
         .where("status", "=", service.status)
         .executeTakeFirst();
 
-      if (rowCount(updated) > 0) result.services++;
+      if (rowCount(updated) > 0) {
+        result.services++;
+        if (next === "stopped") {
+          void notify({
+            key: "service.crashed",
+            name: service.name,
+            container: service.container_name,
+          });
+        }
+      }
     }
   }
 

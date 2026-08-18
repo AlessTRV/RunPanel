@@ -25,7 +25,8 @@ reclaims disk.
 [Configuration](#configuration) · [Deploying a project](#deploying-a-project) ·
 [Databases and services](#databases-and-services) · [Network access](#network-access) ·
 [Backups and restore](#backups-and-restore) · [Starting at boot](#starting-at-boot) ·
-[Updating the panel](#updating-the-panel) · [Private registries](#private-registries) · [The panel, day to day](#the-panel-day-to-day) ·
+[Updating the panel](#updating-the-panel) ·
+[Telegram notifications](#telegram-notifications) · [Private registries](#private-registries) · [The panel, day to day](#the-panel-day-to-day) ·
 [Security](#security) · [Architecture](#architecture) · [Development](#development) ·
 [Known gaps](#known-gaps)
 
@@ -625,6 +626,74 @@ Should the panel not come back, the commands to put the previous version back ar
 in two places that need no working panel: printed to the journal immediately
 before the exit, and in `<dataDir>/panel-update.json`.
 
+## Telegram notifications
+
+The panel can tell you when something happens that you would want to know about
+without having the panel open. It is set up under **Impostazioni → Notifiche
+Telegram**: create a bot with `@BotFather`, paste the token, send your bot any
+message, and press **Rileva** — the panel asks Telegram who has written to it and
+offers the list, so the chat id is not something you have to go and find
+elsewhere.
+
+Telegram is the channel for the same reason the periodic repository check exists:
+**the panel only ever dials out**. It does not need to be reachable from the
+internet, which is true of a great many self-hosted installations — behind NAT,
+on a Tailscale network, on a laptop. The price is that the bot cannot be talked
+to: there are no commands, it only sends.
+
+The token is encrypted at rest like the GitHub one and never comes back out of
+this page: the screen only learns whether one exists.
+
+### What gets announced
+
+| Event | When |
+|---|---|
+| **Project or service stopped** | The process is gone and it was not the panel that stopped it |
+| **Docker unreachable** | The daemon stopped answering, and again when it comes back |
+| **Deploy finished** | Always for automatic deploys; for manual ones only on failure |
+| **Backup finished** | Success, partial or failure, with artefacts, size and duration |
+| **Update available** | The periodic check found new commits on RunPanel |
+| **The panel restarted** | After a reboot or an update |
+| **Disk space** | Below 10% free on the data directory, and when it recovers |
+
+Each one has its own switch: a noisy one can be silenced without losing the rest.
+
+Crashes come from the same pass that keeps the status column honest
+(`services/status-reconcile.ts`), which is the only place in the panel that
+learns a process went away *without being asked to*. They are already confirmed
+across two readings, so a `pm2` that fails to answer for a moment sends nothing.
+
+A manual deploy that succeeded is not announced, and that is deliberate: you are
+already watching it, with the log streaming. A manual deploy that failed is,
+because by then you have probably closed the tab.
+
+### Why it does not bury you
+
+Everything is **edge-triggered**: the crossing counts, not the state. "The disk
+is at 8%" would be true every five minutes for a week; what gets announced is the
+moment it crossed in, and later the moment it came back out. The disk threshold
+carries two points of hysteresis, because a disk that is filling up sits exactly
+on the threshold, and that is where a monitor without hysteresis starts
+alternating alarm and all-clear forever.
+
+On top of that there is a fifteen-minute silence per event and per subject: a
+project under a restart policy that crash-loops would be reported on every sweep,
+and the first message already says everything the twentieth would. Per subject
+rather than globally, so one project flapping does not hide another falling over
+at the same moment.
+
+A panel update is announced when the target commit changes, not while an update
+exists: the check runs every six hours and an unapplied update stays unapplied,
+so the latter would be four messages a day about the same piece of news.
+
+### When a notification cannot be sent
+
+Nothing happens. `notify()` never throws, never blocks its caller and never makes
+anything wait: a deploy does not fail because Telegram did not answer. A failed
+send lands in the panel's log with the reason, translated where Telegram is
+particularly cryptic — `chat not found` usually means you have not written to the
+bot yet, and until you do, a bot cannot write to you.
+
 ## Private registries
 
 Docker registry credentials are entered from the panel, encrypted at rest and
@@ -646,7 +715,7 @@ that tells you nothing useful.
 | **Updates** | the panel's version, the commits waiting, the button that applies them |
 | **Diagnostics** | what this installation is missing and what to press |
 | **GitHub** | token, repositories, branches |
-| **Account** | password, per-device sessions, preferences |
+| **Account** | password, per-device sessions, Telegram notifications, preferences |
 
 Details worth knowing:
 
@@ -717,6 +786,7 @@ services/
   backup/               policies, dumps, archives, destinations, restore
   autostart/            probing, unit generation, reconciliation
   panel-update/         the check, the staged build, the swap, the exit
+  notify/               events, message text, the Telegram bot, the host watch
   docker/               cli, ownership labels, images, volumes, stats, gc
   builders/             node, docker, static, compose, custom
   process-drivers/      pm2, docker, compose
@@ -776,6 +846,8 @@ name that does not exist.
   another is accepted and fails partway, with the safety copy already taken.
 - Installing at boot is **Linux-only**; elsewhere the panel shows what to do by
   hand.
+- **Notifications** have one channel, Telegram, and go to one chat. The bot
+  takes no commands: the panel talks, it does not listen.
 - **Updating the panel from the panel** needs something that will start it
   again after it exits: systemd, or the `@reboot` script. Without one the new
   version is still built, but the swap and the restart stay two commands to run

@@ -12,6 +12,7 @@ import { generateId } from "@/lib/utils";
 import { formatBytes } from "@/lib/format";
 import { panelVersion } from "@/lib/version";
 import { opsEvents } from "../events";
+import { notify } from "../notify";
 import { isDockerAvailable } from "../docker/cli";
 import { writeArchive } from "./archive";
 import { loadDestination } from "./destinations";
@@ -325,6 +326,27 @@ async function execute({ runId, request, startedAt, emit, log }: ExecuteArgs): P
     clearInterval(heartbeat);
     clearStaging(runId);
     log.flush();
+
+    /*
+      In the `finally`, which is the only line both exits pass through.
+
+      A backup is the one operation whose failure is invisible by design: it
+      runs at four in the morning, writes to a directory nobody opens, and the
+      day you find out it stopped working is the day you needed it. Success is
+      announced too, and deliberately — a channel that only ever speaks up when
+      something is wrong teaches you nothing about whether it is still working.
+    */
+    void notify({
+      key: "backup.finished",
+      policy: request.policyName ?? null,
+      status: summary.status,
+      ok: summary.ok,
+      failed: summary.failed,
+      skipped: summary.skipped,
+      bytes: summary.bytes,
+      durationMs: Date.now() - startedAt.getTime(),
+      error: summary.error ?? null,
+    });
   }
 
   return summary;

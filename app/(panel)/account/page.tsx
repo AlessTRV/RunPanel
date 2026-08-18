@@ -11,6 +11,7 @@ import { Code, FieldHint } from "@/components/ui/Hint";
 import { AccentPicker } from "@/components/ui/AccentPicker";
 import { SessionList } from "@/components/ui/SessionList";
 import { RegistryList } from "@/components/ui/RegistryList";
+import { NotificationSettings } from "@/components/ui/NotificationSettings";
 import {
   DEFAULT_POLL_INTERVAL,
   isPollInterval,
@@ -250,6 +251,13 @@ export default function AccountPage() {
 
         <Section title="Dispositivi" summary="Sessioni attive su questo account">
           <SessionList />
+        </Section>
+
+        <Section
+          title="Notifiche Telegram"
+          summary="Crash, esiti dei deploy, backup e aggiornamenti, su un bot"
+        >
+          <NotificationSettings />
         </Section>
 
         <Section title="Registry privati" summary="Credenziali per pull e build di immagini private">

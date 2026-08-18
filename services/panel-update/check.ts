@@ -5,6 +5,7 @@ import {
 } from "@/lib/polling";
 import { authArgs, getGitHubToken, gitEnv } from "../git-auth";
 import { whichSync } from "../env-utils";
+import { notify } from "../notify";
 import {
   commitsBehind,
   countBehind,
@@ -85,8 +86,29 @@ export async function lastCheck(): Promise<PanelUpdateCheck | null> {
  * checked", and only one of them is a reason to look at the network.
  */
 export async function checkPanelUpdate(now = new Date()): Promise<PanelUpdateCheck> {
+  const previous = await lastCheck();
   const result = await produce(now);
   await setSetting(PANEL_UPDATE_CHECK_SETTING, JSON.stringify(result));
+
+  /*
+    Announced when the *target* moves, not when a check finds work to do.
+
+    The difference matters because the check runs every six hours and an
+    unapplied update stays unapplied: keying on "there is an update" would send
+    the same message four times a day until somebody pressed the button, which
+    is how a channel gets muted. Keying on the SHA changing sends it once per
+    release, which is once per thing worth knowing.
+  */
+  if (result.behind > 0 && !result.error && result.remoteSha !== previous?.remoteSha) {
+    void notify({
+      key: "panel.update",
+      behind: result.behind,
+      from: result.localSha,
+      to: result.remoteSha,
+      branch: result.branch,
+    });
+  }
+
   return result;
 }
 

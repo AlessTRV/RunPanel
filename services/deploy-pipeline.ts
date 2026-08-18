@@ -13,6 +13,8 @@ import { buildProject } from "./builder-registry";
 import { processManager } from "./process-manager";
 import { isWindows } from "./env-utils";
 import { runReleaseCommand, waitForHealthy } from "./deploy-steps";
+import { notify } from "./notify";
+import { shouldAnnounceDeploy, type DeployTrigger } from "./notify/messages";
 import { writeEnvFileInto } from "./env-file";
 import { buildStartOpts } from "./start-opts";
 import { detectPreset, readRepoContract, RUNPANEL_CONFIG_FILE } from "./deploy-presets";
@@ -69,10 +71,65 @@ export async function executeDeploy(
 ): Promise<void> {
   try {
     await runDeploy(project, deploymentId, opts);
+    await announce(project, deploymentId);
   } catch (err) {
     // Only reachable if the store itself is unavailable — runDeploy handles
     // every failure it can still record.
     console.error(`[deploy] Unrecoverable error for deployment ${deploymentId}:`, err);
+  }
+}
+
+/**
+ * Tell somebody how it went.
+ *
+ * Out here rather than at the two points inside `runDeploy` that write the
+ * final status, and reading the row back rather than being handed the facts:
+ * by this line the deployment row already holds every one of them — outcome,
+ * trigger, commit, and both timestamps — so a second copy of that bookkeeping
+ * would only be a second thing to keep in step. It also means the two exits
+ * cannot disagree about what a finished deploy is.
+ *
+ * Never throws. A notification that cannot be sent is not a deploy that failed.
+ */
+async function announce(project: Project, deploymentId: string): Promise<void> {
+  try {
+    const db = await getDb();
+    const row = await db
+      .selectFrom("deployments")
+      .select([
+        "status",
+        "trigger_type",
+        "commit_sha",
+        "commit_message",
+        "started_at",
+        "finished_at",
+        "error_message",
+      ])
+      .where("id", "=", deploymentId)
+      .executeTakeFirst();
+
+    if (!row || (row.status !== "running" && row.status !== "failed")) return;
+
+    const ok = row.status === "running";
+    const trigger = (row.trigger_type ?? "manual") as DeployTrigger;
+    if (!shouldAnnounceDeploy(trigger, ok)) return;
+
+    const started = Date.parse(row.started_at ?? "");
+    const finished = Date.parse(row.finished_at ?? "");
+
+    void notify({
+      key: "deploy.finished",
+      slug: project.slug,
+      ok,
+      trigger,
+      commitSha: row.commit_sha,
+      commitMessage: row.commit_message,
+      durationMs:
+        Number.isFinite(started) && Number.isFinite(finished) ? finished - started : null,
+      error: row.error_message,
+    });
+  } catch (err) {
+    console.error("[deploy] Notifica dell'esito non riuscita:", err);
   }
 }
 

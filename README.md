@@ -25,7 +25,8 @@ manutenzione di Docker che il disco lo libera davvero.
 [Configurazione](#configurazione) · [Distribuire un progetto](#distribuire-un-progetto) ·
 [Database e servizi](#database-e-servizi) · [Accesso di rete](#accesso-di-rete) ·
 [Backup e ripristino](#backup-e-ripristino) · [Avvio automatico](#avvio-automatico) ·
-[Aggiornare il pannello](#aggiornare-il-pannello) · [Registri privati](#registri-privati) · [Il pannello, giorno per giorno](#il-pannello-giorno-per-giorno) ·
+[Aggiornare il pannello](#aggiornare-il-pannello) ·
+[Notifiche su Telegram](#notifiche-su-telegram) · [Registri privati](#registri-privati) · [Il pannello, giorno per giorno](#il-pannello-giorno-per-giorno) ·
 [Sicurezza](#sicurezza) · [Architettura](#architettura) · [Sviluppo](#sviluppo) ·
 [Limiti noti](#limiti-noti)
 
@@ -637,6 +638,75 @@ Se il pannello non dovesse tornare su, i comandi per rimettere la versione
 precedente sono in due posti che non richiedono un pannello funzionante: stampati
 nel journal appena prima dell'uscita, e in `<dataDir>/panel-update.json`.
 
+## Notifiche su Telegram
+
+Il pannello sa avvisarti quando succede qualcosa che vorresti sapere senza avere
+il pannello aperto. Si configura da **Impostazioni → Notifiche Telegram**: crei
+un bot con `@BotFather`, incolli il token, scrivi un messaggio qualsiasi al bot e
+premi **Rileva** — il pannello chiede a Telegram chi gli ha scritto e ti fa
+scegliere la chat, così non devi andare a cercarti l'id da un'altra parte.
+
+Telegram è scelto per la stessa ragione per cui esiste il controllo periodico dei
+repository: **il pannello parla solo in uscita**. Non serve che sia raggiungibile
+da internet, il che è vero per moltissime installazioni self-hosted — dietro NAT,
+su una rete Tailscale, su un portatile. Il rovescio della medaglia è che al bot
+non si può parlare: non ci sono comandi, manda e basta.
+
+Il token è cifrato a riposo come quello di GitHub e non viene mai restituito da
+questa pagina: lo schermo sa solo se ce n'è uno.
+
+### Cosa viene notificato
+
+| Evento | Quando |
+|---|---|
+| **Progetto o servizio fermo** | Il processo non c'è più e non è stato il pannello a fermarlo |
+| **Docker non risponde** | Il daemon è irraggiungibile, e di nuovo quando torna |
+| **Deploy concluso** | Sempre per i deploy automatici; per quelli manuali solo se falliscono |
+| **Backup concluso** | Riuscito, parziale o fallito, con artefatti, dimensione e durata |
+| **Aggiornamento disponibile** | Il controllo periodico ha trovato commit nuovi su RunPanel |
+| **Il pannello è ripartito** | Dopo un riavvio o un aggiornamento |
+| **Spazio su disco** | Sotto il 10% libero sulla cartella dei dati, e quando rientra |
+
+Ogni voce ha il suo interruttore: una che fa troppo rumore si spegne senza
+perdere le altre.
+
+I crash arrivano dallo stesso passaggio che tiene onesta la colonna dello stato
+(`services/status-reconcile.ts`), che è l'unico punto del pannello che scopre che
+un processo se n'è andato *senza che gli sia stato chiesto*. Sono già confermati
+su due letture, quindi un `pm2` che non risponde per un istante non manda niente.
+
+Il deploy manuale non viene annunciato quando riesce, e non è una svista: lo stai
+già guardando, con il log che scorre. Se fallisce sì, perché a quel punto la
+scheda l'hai probabilmente chiusa.
+
+### Perché non ti sommerge
+
+Tutto è **edge-triggered**: conta il passaggio, non lo stato. "Il disco è all'8%"
+sarebbe vero ogni cinque minuti per una settimana; quello che viene notificato è
+il momento in cui ci è entrato, e poi quello in cui ne è uscito. La soglia del
+disco ha due punti di isteresi, perché un disco che si sta riempiendo sta seduto
+esattamente sulla soglia ed è lì che un monitor senza isteresi comincia ad
+alternare allarme e cessato allarme all'infinito.
+
+Sopra a questo c'è un silenzio di quindici minuti per evento e per soggetto: un
+progetto sotto una restart policy che va in crash-loop verrebbe segnalato ad ogni
+sweep, e il primo messaggio dice già tutto quello che direbbe il ventesimo. Per
+soggetto, non globale, così un progetto che sbatte non copre un altro che cade
+nello stesso momento.
+
+L'aggiornamento del pannello viene annunciato quando cambia il commit di
+destinazione, non quando esiste un aggiornamento: il controllo gira ogni sei ore
+e un aggiornamento non applicato resta lì: notificarlo ogni volta significherebbe
+quattro messaggi al giorno per la stessa notizia.
+
+### Se la notifica non parte
+
+Non succede niente. `notify()` non lancia mai, non blocca mai chi la chiama e non
+fa aspettare nessuno: un deploy non fallisce perché Telegram non risponde. Un
+invio non riuscito finisce nel log del pannello con il motivo, tradotto dove
+Telegram è particolarmente criptico — `chat not found` di solito vuol dire che al
+bot non hai ancora scritto, e finché non gli scrivi tu un bot non può scriverti.
+
 ## Registri privati
 
 Le credenziali dei registri Docker si inseriscono dal pannello, sono cifrate a
@@ -659,7 +729,7 @@ niente di utile.
 | **Aggiornamenti** | la versione del pannello, i commit nuovi, il pulsante che li applica |
 | **Diagnostica** | cosa manca a questa installazione e cosa premere |
 | **GitHub** | token, repository, branch |
-| **Account** | password, sessioni per dispositivo, preferenze |
+| **Account** | password, sessioni per dispositivo, notifiche Telegram, preferenze |
 
 Dettagli che tornano utili:
 
@@ -732,6 +802,7 @@ services/
   backup/               policy, dump, archivi, destinazioni, ripristino
   autostart/            rilevamento, generazione della unit, riconciliazione
   panel-update/         controllo, build in staging, scambio, uscita per riavvio
+  notify/               eventi, testo dei messaggi, bot Telegram, watch dell'host
   docker/               cli, etichette di proprietà, immagini, volumi, statistiche, gc
   builders/             node, docker, static, compose, custom
   process-drivers/      pm2, docker, compose
@@ -794,6 +865,8 @@ build fallisce su un nome di icona che non esiste.
   la copia di sicurezza già presa.
 - L'installazione automatica all'avvio è **solo per Linux**; altrove il pannello
   mostra cosa fare a mano.
+- Le **notifiche** hanno un solo canale, Telegram, e vanno in una sola chat. Il
+  bot non accetta comandi: il pannello parla, non ascolta.
 - L'**aggiornamento del pannello dal pannello** richiede un supervisore che lo
   rimetta su dopo l'uscita: systemd o lo script `@reboot`. Senza, la nuova
   versione viene costruita ma lo scambio e il riavvio restano due comandi da

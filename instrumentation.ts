@@ -118,6 +118,41 @@ export async function register() {
   const { startPanelUpdatePoller } = await import("./services/panel-update/check");
   startPanelUpdatePoller();
 
+  // Docker reachability and free disk space, which are the two conditions
+  // nothing else here watches over time — every other notification is a side
+  // effect of something the panel was already doing.
+  const { startNotifyWatch } = await import("./services/notify/watch");
+  startNotifyWatch();
+
+  /*
+    "I am back."
+
+    Delayed and never awaited, because it reaches the network and boot is not
+    the place to wait on Telegram. It is also the only signal that catches a
+    panel in a crash-loop: systemd restarts it every five seconds and nothing
+    else would ever say so, since the panel that would have complained is the
+    one that keeps dying.
+  */
+  const restartNotice = setTimeout(() => {
+    void (async () => {
+      try {
+        const { notify } = await import("./services/notify");
+        const { panelVersion } = await import("./lib/version");
+        const { readCheckout } = await import("./services/panel-update/git");
+        const checkout = await readCheckout();
+        await notify({
+          key: "panel.restarted",
+          version: panelVersion(),
+          sha: checkout.head,
+          afterUpdate: settled?.phase === "done" && Boolean(settled.bootedAt),
+        });
+      } catch {
+        /* a notification is never a reason to make a boot noisy */
+      }
+    })();
+  }, 15_000);
+  restartNotice.unref?.();
+
   // Bring back whatever is marked to start at boot — after a delay, and without
   // being awaited: Docker is still restarting its own containers at this point,
   // and blocking here would delay the first request by a minute or more.
