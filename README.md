@@ -583,8 +583,10 @@ tinge di rosso l'intero pannello.
 RunPanel si installa clonandolo, quindi la cartella da cui gira è un working tree
 git: è tutto quello che serve perché sappia se c'è una versione più recente. Ogni
 sei ore — l'intervallo si cambia dalla pagina — fa un `git fetch` sul proprio
-remote e confronta. Quando il branch si è mosso compare una striscia in cima a
-ogni pagina con il numero di commit e un pulsante **Aggiorna**; la pagina
+remote e confronta: solo traffico in uscita, esattamente come per i progetti, e
+per un repository pubblico non serve alcun token. Quando il branch si è mosso
+compare una striscia in cima a ogni pagina con il numero di commit e un pulsante
+**Aggiorna**; la pagina
 Aggiornamenti mostra l'elenco dei commit, così premere quel pulsante è una
 decisione e non un atto di fede.
 

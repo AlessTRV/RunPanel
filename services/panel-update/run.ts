@@ -25,7 +25,12 @@ import {
   wouldClean,
   type PanelCheckout,
 } from "./git";
-import { canSelfUpdate, configSupportsStagedBuild, type RestartMethod } from "./policy";
+import {
+  canSelfUpdate,
+  configSupportsStagedBuild,
+  explainGitError,
+  type RestartMethod,
+} from "./policy";
 import {
   clearState,
   isTerminal,
@@ -624,8 +629,9 @@ function readIfPresent(file: string): string | null {
 }
 
 function errorText(err: unknown): string {
-  const text = err instanceof Error ? err.message : String(err);
-  return text.replace(/^Command failed: [^\n]*\n?/, "").trim() || "errore sconosciuto";
+  // Shared with the check, so "the repository is private" reads the same
+  // whether it was found by the six-hourly look or by pressing the button.
+  return explainGitError(err instanceof Error ? err.message : String(err));
 }
 
 // --- What the API needs to know ----------------------------------------------

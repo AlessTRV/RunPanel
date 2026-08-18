@@ -318,8 +318,10 @@ export default function UpdatesPage() {
             className={savingInterval ? "opacity-60" : undefined}
           />
           <FieldHint>
-            Il controllo è solo un <code>git fetch</code>: non applica mai niente da solo.
-            Aggiornare il pannello resta una cosa che decidi tu, perché comporta un riavvio.
+            Il controllo è un <code>git fetch</code> sul repository da cui il pannello è
+            installato, esattamente come per i progetti: solo traffico in uscita, nessuna
+            richiesta verso questa macchina. E non applica mai niente da solo — aggiornare resta
+            una cosa che decidi tu, perché comporta un riavvio.
           </FieldHint>
         </Section>
       </div>

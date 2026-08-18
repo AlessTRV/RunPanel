@@ -14,7 +14,7 @@ import {
   currentRun,
   updateBlockers,
 } from "@/services/panel-update/run";
-import { probeAutostart } from "@/services/autostart/probe";
+import { autostartProbeCache } from "@/services/autostart/probe";
 
 /**
  * Everything the update screen and the banner need, in one answer.
@@ -31,7 +31,13 @@ export async function GET() {
   const [checkout, check, probe, interval] = await Promise.all([
     readCheckout(),
     lastCheck(),
-    probeAutostart(),
+    // The CACHED probe, which matters more here than anywhere else it is used.
+    // One reading shells out to systemd, cron, Docker and pm2 *and opens a
+    // socket on the panel's own port* to see whether it is free — and this
+    // endpoint is polled by the update banner on every page of the panel, from
+    // every open tab. `services/autostart/probe.ts` says exactly this about the
+    // autostart page; calling the uncached function here undid it.
+    autostartProbeCache.get(),
     getSetting(PANEL_UPDATE_INTERVAL_SETTING),
   ]);
 

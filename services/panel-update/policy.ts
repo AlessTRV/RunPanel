@@ -100,3 +100,40 @@ export function canSelfUpdate(
 export function configSupportsStagedBuild(source: string): boolean {
   return source.includes("RUNPANEL_DIST_DIR");
 }
+
+/**
+ * What git actually said, with the command line taken off the front.
+ *
+ * `execFile` prefixes git's own words with the whole invocation, which is noise
+ * on a screen that already says which repository it is talking about.
+ *
+ * Two cases get a sentence of their own because git's wording sends people
+ * looking in the wrong place: a remote that refuses the request answers
+ * "Repository not found" even when the repository plainly exists — GitHub says
+ * that rather than "forbidden", so as not to confirm a private repository to a
+ * stranger — and a remote that cannot be reached at all reads like a git
+ * problem when it is a network one.
+ *
+ * Pure, so the unit suite can hold it against the real strings git emits.
+ */
+export function explainGitError(raw: string): string {
+  const text = raw.replace(/^Command failed: [^\n]*\n?/, "").trim();
+
+  if (
+    /could not read Username|terminal prompts disabled|Authentication failed|Invalid username or password|[Rr]epository .*not found|Repository not found/.test(
+      text
+    )
+  ) {
+    return (
+      "Il remote ha rifiutato la richiesta. Controlla che il repository esista ancora a " +
+      "quell'indirizzo; se nel frattempo è diventato privato serve un account GitHub collegato " +
+      "al pannello con accesso a questo repository."
+    );
+  }
+
+  if (/Could not resolve host|unable to access|Connection timed out|Failed to connect/i.test(text)) {
+    return `Il remote non è raggiungibile da questa macchina: ${text}`;
+  }
+
+  return text || "errore sconosciuto";
+}

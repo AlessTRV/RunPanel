@@ -572,7 +572,8 @@ panel red.
 RunPanel is installed by cloning it, so the directory it runs from is a git
 working tree — which is all it needs to know whether a newer version exists.
 Every six hours, and the interval is a setting on the page, it runs a `git fetch`
-against its own remote and compares. When the branch has moved a strip appears at
+against its own remote and compares: outbound only, exactly as for a project, and
+no token at all for a public repository. When the branch has moved a strip appears at
 the top of every page with the number of commits and an **Aggiorna** button; the
 Updates page lists the commits, so pressing that button is a decision rather than
 an act of faith.

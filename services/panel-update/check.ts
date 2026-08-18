@@ -6,6 +6,7 @@ import {
 import { authArgs, getGitHubToken, gitEnv } from "../git-auth";
 import { whichSync } from "../env-utils";
 import { notify } from "../notify";
+import { explainGitError } from "./policy";
 import {
   commitsBehind,
   countBehind,
@@ -136,7 +137,7 @@ async function produce(now: Date): Promise<PanelUpdateCheck> {
     const token = await getGitHubToken();
     await fetchRemote(checkout, authArgs(token, checkout.remote), gitEnv());
   } catch (err) {
-    return empty(now, `Non riesco a contattare il remote: ${message(err)}`, checkout);
+    return empty(now, message(err), checkout);
   }
 
   try {
@@ -162,10 +163,7 @@ async function produce(now: Date): Promise<PanelUpdateCheck> {
 }
 
 function message(err: unknown): string {
-  const text = err instanceof Error ? err.message : String(err);
-  // execFile puts the whole command line in front of git's own words, which is
-  // noise on a screen that already says which repository it is talking about.
-  return text.replace(/^Command failed: [^\n]*\n?/, "").trim() || "errore sconosciuto";
+  return explainGitError(err instanceof Error ? err.message : String(err));
 }
 
 // --- The timer ---------------------------------------------------------------

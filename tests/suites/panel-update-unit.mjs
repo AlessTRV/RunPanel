@@ -54,7 +54,7 @@ export async function run({ repoRoot }) {
   const { parseCommitLog, parseBranch, parseRemoteUrl, COMMIT_FORMAT } = await load(
     "services", "panel-update", "git.ts"
   );
-  const { canSelfUpdate, configSupportsStagedBuild } = await load(
+  const { canSelfUpdate, configSupportsStagedBuild, explainGitError } = await load(
     "services", "panel-update", "policy.ts"
   );
   const { settleOnBoot, isTerminal } = await load("services", "panel-update", "state.ts");
@@ -184,6 +184,39 @@ export async function run({ repoRoot }) {
     gitignore.includes("/.next-old/"),
     "otherwise the next update's `git clean -fd` deletes the only way back"
   );
+
+  // --- What git said, and what it means -------------------------------------
+  //
+  // The wording that sends people looking in the wrong place: GitHub answers a
+  // repository it will not serve with "not found", never "forbidden", so the
+  // message reads as if the remote URL were wrong when it is fine.
+  const refused = explainGitError(
+    "Command failed: git fetch origin" + String.fromCharCode(10) +
+      "remote: Repository not found." + String.fromCharCode(10) +
+      "fatal: repository 'https://github.com/AlessTRV/RunPanel.git/' not found"
+  );
+  r.check("a refused remote says so plainly", /rifiutato/i.test(refused), refused);
+  r.check("the command line is stripped", !refused.includes("Command failed"), refused);
+
+  for (const raw of [
+    "fatal: could not read Username for 'https://github.com': terminal prompts disabled",
+    "fatal: Authentication failed for 'https://github.com/AlessTRV/RunPanel.git/'",
+    "remote: Invalid username or password.",
+  ]) {
+    r.check(`"${raw.slice(0, 34)}…" reads as a refusal`, /rifiutato/i.test(explainGitError(raw)));
+  }
+
+  const offline = explainGitError(
+    "fatal: unable to access 'https://github.com/x/y.git/': Could not resolve host: github.com"
+  );
+  r.check(
+    "an unreachable remote is a network problem, not a permission one",
+    /raggiungibile/i.test(offline) && !/rifiutato/i.test(offline),
+    offline
+  );
+
+  r.check("anything else is passed through", explainGitError("fatal: bad object") === "fatal: bad object");
+  r.check("an empty message still says something", explainGitError("") === "errore sconosciuto");
 
   // --- Boot transitions -----------------------------------------------------
   const base = {
