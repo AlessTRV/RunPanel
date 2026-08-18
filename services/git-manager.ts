@@ -4,9 +4,8 @@ import crypto from "crypto";
 import fs from "fs";
 import path from "path";
 import { config } from "@/lib/config";
-import { getSetting } from "@/lib/settings";
-import { decrypt } from "@/lib/crypto";
 import { isCommitSha } from "@/lib/git-ref";
+import { authArgs, cleanRepoUrl, getGitHubToken, gitEnv, isGitHubHost } from "./git-auth";
 
 const exec = promisify(execFile);
 
@@ -15,53 +14,6 @@ export interface CommitInfo {
   message: string;
 }
 
-/** Strip any embedded credentials from a git HTTPS URL */
-function cleanRepoUrl(repoUrl: string): string {
-  return repoUrl.replace(/https:\/\/[^@]+@/, "https://");
-}
-
-/**
- * Whether this remote is one whose answers the panel may trust as GitHub's.
- *
- * Two callers, for two different reasons: `authArgs` because the token may only
- * be sent here, and `gitCheckoutCommit` because GitHub serves any reachable SHA
- * — so from here "not our ref" is a final answer rather than a limitation to
- * work around.
- */
-function isGitHubHost(remoteUrl: string): boolean {
-  let host: string;
-  try {
-    host = new URL(remoteUrl).hostname.toLowerCase();
-  } catch {
-    return false;
-  }
-  return host === "github.com" || host.endsWith(".github.com");
-}
-
-/**
- * Build git -c args to pass the GitHub token via an Authorization header
- * (avoids URL-embedded creds, which newer git/curl reject).
- *
- * Gated on the destination, and that is the whole point: `http.extraheader`
- * applies to the command, not to a host. Git sends it to whatever it connects
- * to, so calling this for a URL on someone else's server posts the panel's
- * GitHub token to that server's access log.
- */
-function authArgs(token: string | null, remoteUrl: string): string[] {
-  if (!token || !isGitHubHost(remoteUrl)) return [];
-
-  const encoded = Buffer.from(`x-access-token:${token}`).toString("base64");
-  return ["-c", `http.extraheader=Authorization: basic ${encoded}`];
-}
-
-/** Load GitHub token from settings (if configured) */
-async function getGitHubToken(): Promise<string | null> {
-  try {
-    const stored = await getSetting("github_token");
-    if (stored) return decrypt(stored);
-  } catch { /* not configured, or the secret changed — clone will go anonymous */ }
-  return null;
-}
 
 export async function gitClone(
   repoUrl: string,
@@ -79,7 +31,7 @@ export async function gitClone(
 
   await exec("git", [...authArgs(token, url), "clone", "--depth", "1", "--branch", branch, url, destDir], {
     timeout: 120_000,
-    env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+    env: gitEnv(),
   });
 }
 
@@ -133,7 +85,7 @@ export async function gitPull(
       {
         cwd: repoDir,
         timeout: 120_000,
-        env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+        env: gitEnv(),
       }
     );
   } catch (err: unknown) {
@@ -235,7 +187,6 @@ export async function gitCheckoutCommit(
   const repoDir = path.join(config.reposDir, projectSlug);
   const token = await getGitHubToken();
   const originUrl = await cleanOrigin(repoDir);
-  const gitEnv = { ...process.env, GIT_TERMINAL_PROMPT: "0" };
 
   /**
    * Whether the object is really here. A fetch that exits 0 having sent nothing
@@ -269,7 +220,7 @@ export async function gitCheckoutCommit(
     await exec("git", [...authArgs(token, originUrl), "fetch", "--depth", "1", "origin", target], {
       cwd: repoDir,
       timeout: 120_000,
-      env: gitEnv,
+      env: gitEnv(),
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
@@ -318,7 +269,7 @@ export async function gitCheckoutCommit(
         await exec("git", [...authArgs(token, originUrl), "fetch", ...args, "origin", refspec], {
           cwd: repoDir,
           timeout,
-          env: gitEnv,
+          env: gitEnv(),
         });
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);

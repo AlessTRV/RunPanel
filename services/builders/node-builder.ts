@@ -1,20 +1,8 @@
 import { IBuilder, BuildContext, BuildResult } from "./types";
 import { runCommand } from "./run-command";
+import { detectPackageManager } from "../package-manager";
 import fs from "fs";
 import path from "path";
-
-function detectPackageManager(projectDir: string): { cmd: string; install: string } {
-  if (fs.existsSync(path.join(projectDir, "pnpm-lock.yaml"))) {
-    return { cmd: "pnpm", install: "pnpm install" };
-  }
-  if (fs.existsSync(path.join(projectDir, "yarn.lock"))) {
-    return { cmd: "yarn", install: "yarn install" };
-  }
-  if (fs.existsSync(path.join(projectDir, "bun.lock")) || fs.existsSync(path.join(projectDir, "bun.lockb"))) {
-    return { cmd: "bun", install: "bun install" };
-  }
-  return { cmd: "npm", install: "npm install" };
-}
 
 export const nodeBuilder: IBuilder = {
   name: "node",

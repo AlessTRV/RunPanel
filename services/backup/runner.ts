@@ -10,6 +10,7 @@ import type {
 } from "@/lib/db/schema";
 import { generateId } from "@/lib/utils";
 import { formatBytes } from "@/lib/format";
+import { panelVersion } from "@/lib/version";
 import { opsEvents } from "../events";
 import { isDockerAvailable } from "../docker/cli";
 import { writeArchive } from "./archive";
@@ -95,18 +96,6 @@ function freeBytes(): number | null {
     // to refuse to take a backup.
     return null;
   }
-}
-
-let cachedVersion: string | null = null;
-function panelVersion(): string {
-  if (cachedVersion) return cachedVersion;
-  try {
-    const raw = fs.readFileSync(path.join(process.cwd(), "package.json"), "utf8");
-    cachedVersion = String((JSON.parse(raw) as { version?: string }).version ?? "sconosciuta");
-  } catch {
-    cachedVersion = "sconosciuta";
-  }
-  return cachedVersion;
 }
 
 /**
