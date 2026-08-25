@@ -1,4 +1,6 @@
 import { client, createReporter, SETUP_TOKEN } from "../harness.mjs";
+import { existsSync, statSync } from "node:fs";
+import { join } from "node:path";
 
 /**
  * The self-update API, exercised without ever updating anything.
@@ -25,7 +27,7 @@ const ROUTES = [
   ["/api/updates/stream", "GET"],
 ];
 
-export async function run({ base }) {
+export async function run({ base, dataDir }) {
   const r = createReporter("panel-update");
   const api = client(base);
 
@@ -128,6 +130,74 @@ export async function run({ base }) {
 
   res = await api.call("/api/updates");
   r.check("the status echoes the saved interval", res.body.interval === "3600", res.body.interval);
+
+  // --- Signature verification is off until it is asked for ------------------
+  //
+  // The default matters more than the mechanism: turning this on for everybody
+  // would stop the update button working on every panel whose operator does not
+  // sign commits.
+  res = await api.call("/api/settings");
+  r.check(
+    "signature verification defaults to off",
+    res.body.panel_update_require_signature !== "1",
+    String(res.body.panel_update_require_signature)
+  );
+
+  res = await api.call("/api/settings", {
+    method: "PUT",
+    body: JSON.stringify({ preferences: { panel_update_require_signature: "1" } }),
+  });
+  r.check("it can be turned on", res.status === 200, String(res.status));
+
+  res = await api.call("/api/settings", {
+    method: "PUT",
+    body: JSON.stringify({ preferences: { panel_update_require_signature: "yes" } }),
+  });
+  r.check("but only with a value the allowlist knows", res.status === 400, String(res.status));
+
+  res = await api.call("/api/settings", {
+    method: "PUT",
+    body: JSON.stringify({ panel_update_allowed_signers: "tu@esempio.it ssh-ed25519 AAAAC3Nza" }),
+  });
+  r.check("allowed signers are accepted", res.status === 200, String(res.status));
+
+  res = await api.call("/api/settings", {
+    method: "PUT",
+    body: JSON.stringify({ panel_update_allowed_signers: "x".repeat(9000) }),
+  });
+  r.check("an oversized paste is refused", res.status === 400, String(res.status));
+
+  // Turned back off so the rest of the suite, and any run after it, is not left
+  // with a control the developer did not switch on.
+  await api.call("/api/settings", {
+    method: "PUT",
+    body: JSON.stringify({ preferences: { panel_update_require_signature: "0" } }),
+  });
+
+  // --- Where a copy of the whole store is allowed to sit --------------------
+  //
+  // `<dataDir>/panel-update/` holds a full dump of the panel's database on the
+  // way into an update — encrypted env vars, registry logins, session hashes.
+  // It used to be created 0755 by an inline `path.join`, outside the only 0700
+  // tree in the repository.
+  if (process.platform === "win32") {
+    r.note("skip data directory mode checks (Windows filesystems do not carry POSIX modes)");
+  } else {
+    const updateDir = join(dataDir, "panel-update");
+    r.check("the update directory exists at boot", existsSync(updateDir), updateDir);
+    if (existsSync(updateDir)) {
+      const mode = statSync(updateDir).mode & 0o777;
+      r.check("and is 0700", mode === 0o700, `mode ${mode.toString(8)}`);
+    }
+
+    // The regression guard beside it: the chmod that already protected backups
+    // became a loop, and a loop is easier to get wrong than a single call.
+    const backupsDir = join(dataDir, "backups");
+    if (existsSync(backupsDir)) {
+      const mode = statSync(backupsDir).mode & 0o777;
+      r.check("backups are still 0700", mode === 0o700, `mode ${mode.toString(8)}`);
+    }
+  }
 
   return r.result();
 }

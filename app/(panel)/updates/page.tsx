@@ -23,6 +23,7 @@ import {
 import { hasUpdate, isUpdateActive, type UpdateStatus } from "@/lib/panel-update";
 import { Changelog } from "./_components/Changelog";
 import { UpdateLog } from "./_components/UpdateLog";
+import { SignatureSettings } from "./_components/SignatureSettings";
 
 /**
  * Updating the panel, from the panel.
@@ -336,6 +337,13 @@ export default function UpdatesPage() {
             richiesta verso questa macchina. E non applica mai niente da solo — aggiornare resta
             una cosa che decidi tu, perché comporta un riavvio.
           </FieldHint>
+        </Section>
+
+        <Section
+          title="Verifica della sorgente"
+          summary="Da dove il pannello accetta di aggiornarsi, e a quali condizioni"
+        >
+          <SignatureSettings />
         </Section>
       </div>
     </>

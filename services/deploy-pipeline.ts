@@ -1,6 +1,7 @@
 import { getDb, nowIso } from "@/lib/db";
 import type { DeploymentsTable, ProjectsTable } from "@/lib/db/schema";
 import { decrypt } from "@/lib/crypto";
+import { redactGitSecrets } from "@/lib/redact";
 import {
   gitPull,
   gitClone,
@@ -614,8 +615,16 @@ async function runDeploy(
       }
     }
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : "Deploy failed";
-    const stack = err instanceof Error ? err.stack : undefined;
+    // Redacted once, here, and not per log line: this is the point where a
+    // failure becomes something written down. An `execFile` rejection pastes
+    // the whole command line into its message, and the stack carries it again,
+    // so a fetch that failed while authenticating used to put the credential
+    // into the deploy log and into `deployments.error_message`. The header now
+    // travels in the environment instead of the argv, which closes that at the
+    // root; this is the belt to that pair of braces, and it also covers a
+    // remote URL somebody typed with the credentials still in it.
+    const message = redactGitSecrets(err instanceof Error ? err.message : "Deploy failed");
+    const stack = err instanceof Error && err.stack ? redactGitSecrets(err.stack) : undefined;
     appendLog(`\n=== ${label} FAILED: ${message} ===`);
     if (stack) appendLog(`Stack: ${stack}`);
     logFile.flush();

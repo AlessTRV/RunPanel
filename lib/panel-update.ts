@@ -108,3 +108,22 @@ export function hasUpdate(status: UpdateStatus | null): boolean {
   if (status.check.behind <= 0) return false;
   return status.check.localSha === status.checkout.head;
 }
+
+/**
+ * Whether an update must carry a signature the host can verify.
+ *
+ * Off by default, and deliberately so: a panel whose operator does not sign
+ * commits would otherwise stop being able to update itself the moment this
+ * shipped. Stored as `"0"` / `"1"` like every other preference in the settings
+ * table.
+ */
+export const PANEL_UPDATE_REQUIRE_SIGNATURE_SETTING = "panel_update_require_signature";
+
+/**
+ * The SSH allowed-signers file, verbatim.
+ *
+ * Public keys, so not a secret — but written to disk 0600 anyway, because the
+ * file *is* the trust root once signature verification is on, and a file
+ * anybody can append to is not a trust root.
+ */
+export const PANEL_UPDATE_ALLOWED_SIGNERS_SETTING = "panel_update_allowed_signers";

@@ -5,7 +5,8 @@ import fs from "fs";
 import path from "path";
 import { config } from "@/lib/config";
 import { isCommitSha } from "@/lib/git-ref";
-import { authArgs, cleanRepoUrl, getGitHubToken, gitEnv, isGitHubHost } from "./git-auth";
+import { isGitHubHost, stripRemoteCredentials } from "@/lib/git-remote";
+import { getGitHubToken, gitAuth } from "./git-auth";
 
 const exec = promisify(execFile);
 
@@ -27,25 +28,26 @@ export async function gitClone(
   }
 
   const token = await getGitHubToken();
-  const url = cleanRepoUrl(repoUrl);
+  const url = stripRemoteCredentials(repoUrl);
+  const auth = await gitAuth(token, url);
 
-  await exec("git", [...authArgs(token, url), "clone", "--depth", "1", "--branch", branch, url, destDir], {
+  await exec("git", [...auth.args, "clone", "--depth", "1", "--branch", branch, url, destDir], {
     timeout: 120_000,
-    env: gitEnv(),
+    env: auth.env,
   });
 }
 
 /**
  * The origin URL, with the credentials old clones used to carry stripped out.
  *
- * Returned as well as rewritten because `authArgs` has to decide on the real
+ * Returned as well as rewritten because the auth plan has to decide on the real
  * URL: the token goes to github.com and to nobody else.
  */
 async function cleanOrigin(repoDir: string): Promise<string> {
   try {
     const { stdout } = await exec("git", ["remote", "get-url", "origin"], { cwd: repoDir });
     const current = stdout.trim();
-    const cleaned = cleanRepoUrl(current);
+    const cleaned = stripRemoteCredentials(current);
     if (cleaned !== current) {
       await exec("git", ["remote", "set-url", "origin", cleaned], { cwd: repoDir });
     }
@@ -64,6 +66,7 @@ export async function gitPull(
 
   // Kept so the fetch below can decide whether the token may go along.
   const originUrl = await cleanOrigin(repoDir);
+  const auth = await gitAuth(token, originUrl);
 
   // Explicit refspec, and `--depth 1` again.
   //
@@ -76,7 +79,7 @@ export async function gitPull(
     await exec(
       "git",
       [
-        ...authArgs(token, originUrl),
+        ...auth.args,
         "fetch",
         "--depth", "1",
         "origin",
@@ -85,7 +88,7 @@ export async function gitPull(
       {
         cwd: repoDir,
         timeout: 120_000,
-        env: gitEnv(),
+        env: auth.env,
       }
     );
   } catch (err: unknown) {
@@ -187,6 +190,7 @@ export async function gitCheckoutCommit(
   const repoDir = path.join(config.reposDir, projectSlug);
   const token = await getGitHubToken();
   const originUrl = await cleanOrigin(repoDir);
+  const auth = await gitAuth(token, originUrl);
 
   /**
    * Whether the object is really here. A fetch that exits 0 having sent nothing
@@ -217,10 +221,10 @@ export async function gitCheckoutCommit(
     // No destination refspec: this writes FETCH_HEAD, and the object stays
     // around unreferenced until the reset below lands on it. Nothing runs a gc
     // in between.
-    await exec("git", [...authArgs(token, originUrl), "fetch", "--depth", "1", "origin", target], {
+    await exec("git", [...auth.args, "fetch", "--depth", "1", "origin", target], {
       cwd: repoDir,
       timeout: 120_000,
-      env: gitEnv(),
+      env: auth.env,
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
@@ -244,6 +248,11 @@ export async function gitCheckoutCommit(
     if (/does not allow request for unadvertised object|unadvertised object/i.test(message)) {
       refused = true;
     } else if (/not our ref|no such remote ref|couldn't find remote ref/i.test(message)) {
+      // `isGitHubHost` requires https, so an `http://github.com` origin takes
+      // the slow deepening path below instead of this shortcut. That is the
+      // safe direction to be wrong in — a few wasted fetches rather than a
+      // wrong final answer — and the scheme rule is there because the same
+      // predicate decides whether the token may travel.
       if (isGitHubHost(originUrl)) throw unreachable();
       refused = true;
     } else {
@@ -266,10 +275,10 @@ export async function gitCheckoutCommit(
 
     const deepen = async (args: string[], timeout: number) => {
       try {
-        await exec("git", [...authArgs(token, originUrl), "fetch", ...args, "origin", refspec], {
+        await exec("git", [...auth.args, "fetch", ...args, "origin", refspec], {
           cwd: repoDir,
           timeout,
-          env: gitEnv(),
+          env: auth.env,
         });
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);

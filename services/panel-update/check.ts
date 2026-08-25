@@ -3,10 +3,12 @@ import {
   DEFAULT_PANEL_UPDATE_INTERVAL,
   PANEL_UPDATE_INTERVAL_SETTING,
 } from "@/lib/polling";
-import { authArgs, getGitHubToken, gitEnv } from "../git-auth";
+import { isSecureRemote } from "@/lib/git-remote";
+import { redactGitSecrets } from "@/lib/redact";
+import { getGitHubToken, gitAuth } from "../git-auth";
 import { whichSync } from "../env-utils";
 import { notify } from "../notify";
-import { explainGitError } from "./policy";
+import { explainGitError, insecureRemoteReason } from "./policy";
 import {
   commitsBehind,
   countBehind,
@@ -132,10 +134,14 @@ async function produce(now: Date): Promise<PanelUpdateCheck> {
   if (!checkout.remote) {
     return empty(now, "Il checkout non ha un remote origin configurato.", checkout);
   }
+  if (!isSecureRemote(checkout.remote)) {
+    return empty(now, insecureRemoteReason(checkout.remote), checkout);
+  }
 
   try {
     const token = await getGitHubToken();
-    await fetchRemote(checkout, authArgs(token, checkout.remote), gitEnv());
+    const auth = await gitAuth(token, checkout.remote);
+    await fetchRemote(checkout, auth.args, auth.env);
   } catch (err) {
     return empty(now, message(err), checkout);
   }
@@ -163,7 +169,10 @@ async function produce(now: Date): Promise<PanelUpdateCheck> {
 }
 
 function message(err: unknown): string {
-  return explainGitError(err instanceof Error ? err.message : String(err));
+  // Redacted as well as explained: this string is persisted into the
+  // `panel_update_check` setting and handed to the browser, so it is one of the
+  // places a credential must not survive.
+  return redactGitSecrets(explainGitError(err instanceof Error ? err.message : String(err)));
 }
 
 // --- The timer ---------------------------------------------------------------

@@ -169,5 +169,167 @@ export async function run({ repoRoot }) {
   r.check("windows drive zip entry refused", !isSafeEntryPath("C:\\windows\\x"));
   r.check("ordinary zip entry accepted", isSafeEntryPath("src/index.js"));
 
+  // --- what a remote URL is allowed to be ----------------------------------
+  //
+  // Two copies of the credential strip exist on purpose: `lib/git-remote.ts` is
+  // the canonical one, and `services/panel-update/git.ts` carries a mirror
+  // because the unit suite loads that file with Node's strip-only loader, which
+  // resolves neither the `@/` alias nor an extensionless relative path. One
+  // table, both functions — which is what stops the two drifting apart in
+  // silence, the way the previous pair did until only one of them was fixed.
+  const { stripRemoteCredentials, isGitHubHost, isSecureRemote, authScope, gitAuthPlan } =
+    await load("lib", "git-remote.ts");
+  const { parseRemoteUrl } = await load("services", "panel-update", "git.ts");
+
+  const REMOTES = [
+    ["https://user:ghp_secret@github.com/A/R.git", "https://github.com/A/R.git"],
+    ["http://user:tok@github.com/A/R.git", "http://github.com/A/R.git"],
+    ["HTTPS://user:tok@github.com/A/R.git", "HTTPS://github.com/A/R.git"],
+    ["https://ghp_tokenonly@github.com/A/R.git", "https://github.com/A/R.git"],
+    // ssh keeps its user: it is the account, not the credential, and
+    // `cleanOrigin()` writes this value back with `git remote set-url`.
+    ["ssh://git:pw@github.com/A/R.git", "ssh://git@github.com/A/R.git"],
+    ["ssh://git@github.com/A/R.git", "ssh://git@github.com/A/R.git"],
+    ["git@github.com:AlessTRV/RunPanel.git", "git@github.com:AlessTRV/RunPanel.git"],
+    ["git://github.com/A/R.git", "git://github.com/A/R.git"],
+    ["https://github.com/A/R.git", "https://github.com/A/R.git"],
+    // The `@` is in the path, not the userinfo.
+    ["https://github.com/a@b/c.git", "https://github.com/a@b/c.git"],
+  ];
+
+  for (const [input, expected] of REMOTES) {
+    r.check(`strip: ${input}`, stripRemoteCredentials(input) === expected, stripRemoteCredentials(input));
+    r.check(
+      `mirror agrees: ${input}`,
+      parseRemoteUrl(`${input}\n`) === expected,
+      parseRemoteUrl(`${input}\n`)
+    );
+  }
+
+  for (const [input] of REMOTES) {
+    const out = `${stripRemoteCredentials(input)} ${parseRemoteUrl(`${input}\n`)}`;
+    r.check(
+      `no credential survives: ${input}`,
+      !out.includes("ghp_secret") && !out.includes("ghp_tokenonly") && !/:pw@|:tok@/.test(out),
+      out
+    );
+  }
+
+  // --- where the token is allowed to travel --------------------------------
+  //
+  // `http.extraheader` applies to the command, not to a host: git sends it to
+  // whatever it connects to. So the gate is the whole control, and the scheme is
+  // part of the gate — without it `http://github.com` counted as GitHub and the
+  // panel would have posted the operator's token in clear text.
+  r.check("github over https is github", isGitHubHost("https://github.com/x/y.git"));
+  r.check("a subdomain is too", isGitHubHost("https://gist.github.com/x"));
+  r.check("github over http is not", !isGitHubHost("http://github.com/x/y.git"));
+  r.check("a lookalike host is not", !isGitHubHost("https://api.github.com.evil.com/x"));
+  r.check("credentials in the url do not change the host", isGitHubHost("https://u:p@github.com/x"));
+  r.check("an ssh remote is not (nothing to attach a header to)", !isGitHubHost("git@github.com:x/y.git"));
+  r.check("garbage is not", !isGitHubHost("not a url"));
+
+  const TOKEN = "ghp_" + "a".repeat(36);
+  const carries = (plan) => JSON.stringify(plan.args) + JSON.stringify(plan.env);
+
+  r.check("no token, no plan", carries(gitAuthPlan(null, "https://github.com/x/y.git", true)) === "[]{}");
+  r.check(
+    "the token never leaves github",
+    carries(gitAuthPlan(TOKEN, "https://gitlab.com/x/y.git", true)) === "[]{}",
+    carries(gitAuthPlan(TOKEN, "https://gitlab.com/x/y.git", true))
+  );
+  r.check(
+    "and never over http",
+    carries(gitAuthPlan(TOKEN, "http://github.com/x/y.git", true)) === "[]{}",
+    carries(gitAuthPlan(TOKEN, "http://github.com/x/y.git", true))
+  );
+
+  const modern = gitAuthPlan(TOKEN, "https://github.com/x/y.git", true);
+  const encoded = Buffer.from(`x-access-token:${TOKEN}`).toString("base64");
+
+  // The point of the whole change: nothing on the command line, where
+  // /proc/<pid>/cmdline is world-readable and every execFile rejection message
+  // pastes the argv into the deploy log.
+  r.check("nothing lands in argv", modern.args.length === 0, JSON.stringify(modern.args));
+  r.check("the header is in the environment", modern.env.GIT_CONFIG_COUNT === "1", JSON.stringify(modern.env));
+  r.check(
+    "scoped to the remote, so a redirect cannot carry it",
+    modern.env.GIT_CONFIG_KEY_0 === "http.https://github.com.extraheader",
+    modern.env.GIT_CONFIG_KEY_0
+  );
+  r.check("and it is the token", modern.env.GIT_CONFIG_VALUE_0 === `Authorization: basic ${encoded}`);
+  r.check(
+    "the token is nowhere in argv",
+    !JSON.stringify(modern.args).includes(TOKEN) && !JSON.stringify(modern.args).includes(encoded),
+    JSON.stringify(modern.args)
+  );
+
+  // Git older than 2.31 ignores the environment block silently, so the fallback
+  // has to stay — but it is url-scoped now too, which the version it replaces
+  // was not.
+  const legacy = gitAuthPlan(TOKEN, "https://github.com/x/y.git", false);
+  r.check("old git still authenticates", legacy.args[0] === "-c", JSON.stringify(legacy.args));
+  r.check(
+    "and its fallback is scoped too",
+    legacy.args[1].startsWith("http.https://github.com.extraheader="),
+    legacy.args[1]
+  );
+
+  r.check("a scope keeps a non-default port", authScope("https://github.com:8443/x") === "https://github.com:8443");
+  r.check("an ssh remote has no scope", authScope("git@github.com:A/R.git") === null);
+  r.check("nor does an http one", authScope("http://github.com/x") === null);
+
+  // --- which transports an update may come from ----------------------------
+  //
+  // The self-update resets the tree to whatever the remote hands back and then
+  // runs that tree's install scripts. Over http:// or git:// whoever is on the
+  // network path chooses what runs.
+  r.check("https is a fetch that can be trusted", isSecureRemote("https://github.com/A/R.git"));
+  r.check("so is ssh", isSecureRemote("ssh://git@github.com/A/R.git"));
+  r.check("and scp-style ssh", isSecureRemote("git@github.com:A/R.git"));
+  r.check("http is not", !isSecureRemote("http://github.com/A/R.git"));
+  r.check("the git protocol is not", !isSecureRemote("git://github.com/A/R.git"));
+  r.check("a file url is not a fetch at all", !isSecureRemote("file:///srv/repo.git"));
+  r.check("nor is a bare path", !isSecureRemote("/srv/repo.git"));
+  r.check("nor is nothing", !isSecureRemote(""));
+
+  // --- nothing that looks like a credential gets written down --------------
+  //
+  // The header travels in the environment now, so it is no longer in the argv
+  // that execFile pastes into its rejection message. This is the belt to that
+  // pair of braces — and it also covers a remote URL somebody typed with the
+  // credentials still in it.
+  const { redactGitSecrets } = await load("lib", "redact.ts");
+
+  const failure =
+    `Command failed: git -c http.https://github.com.extraheader=Authorization: basic ${encoded} fetch origin\n` +
+    "fatal: repository not found";
+  const cleaned = redactGitSecrets(failure);
+  r.check("an extraheader is redacted", !cleaned.includes(encoded), cleaned);
+  r.check("and what git said survives", cleaned.includes("repository not found"), cleaned);
+
+  r.check(
+    "a credential in a url is redacted",
+    !redactGitSecrets("https://user:ghp_x@github.com/A/R.git").includes("ghp_x"),
+    redactGitSecrets("https://user:ghp_x@github.com/A/R.git")
+  );
+  r.check(
+    "but the host is kept",
+    redactGitSecrets("https://user:ghp_x@github.com/A/R.git").includes("github.com"),
+    "an error that no longer says where it was going is a worse error"
+  );
+  r.check("a bare token is redacted", !redactGitSecrets(`token ${TOKEN}`).includes(TOKEN));
+  r.check(
+    "a fine-grained pat is redacted",
+    !redactGitSecrets("github_pat_" + "b".repeat(40)).includes("b".repeat(40))
+  );
+
+  const ordinary = "error: pathspec 'main' did not match any file(s) known to git";
+  r.check(
+    "ordinary git output passes through untouched",
+    redactGitSecrets(ordinary) === ordinary,
+    "a deploy log full of <redatto> is a log nobody trusts"
+  );
+
   return r.result();
 }

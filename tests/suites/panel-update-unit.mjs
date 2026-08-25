@@ -1,7 +1,7 @@
 import { createReporter } from "../harness.mjs";
 import { pathToFileURL } from "node:url";
 import { join } from "node:path";
-import { mkdtempSync, readFileSync, writeFileSync, rmSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, statSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 
 /**
@@ -57,7 +57,10 @@ export async function run({ repoRoot }) {
   const { canSelfUpdate, configSupportsStagedBuild, explainGitError } = await load(
     "services", "panel-update", "policy.ts"
   );
-  const { settleOnBoot, isTerminal } = await load("services", "panel-update", "state.ts");
+  const { explainVerifyFailure, insecureRemoteReason, signatureAccepted } = await load(
+    "services", "panel-update", "policy.ts"
+  );
+  const { settleOnBoot, isTerminal, writeState } = await load("services", "panel-update", "state.ts");
   const { detectPackageManager, resolvePackageManager } = await load("services", "package-manager.ts");
   const { isPanelUpdateInterval, DEFAULT_PANEL_UPDATE_INTERVAL, PANEL_UPDATE_INTERVALS } =
     await load("lib", "polling.ts");
@@ -361,6 +364,146 @@ export async function run({ repoRoot }) {
   r.check("a listed value is accepted", isPanelUpdateInterval("21600") === true);
   r.check("an unlisted value is not", isPanelUpdateInterval("300") === false);
   r.check("a number is not a valid stored value", isPanelUpdateInterval(21600) === false);
+
+  // --- Signatures, when the operator asks for them --------------------------
+  //
+  // Exit status alone is not enough for GPG: a commit signed by a key that is
+  // merely *present* in the keyring verifies successfully and prints a warning
+  // nobody reads. For a control that decides what may run on this host, "I have
+  // seen this key" is not "I trust this key".
+  r.check("an unverified commit is refused", !signatureAccepted(false, ""));
+  r.check("a good signature is accepted", signatureAccepted(true, "[GNUPG:] GOODSIG ABC Someone"));
+  r.check(
+    "a key with no assigned trust is not",
+    !signatureAccepted(true, "[GNUPG:] GOODSIG ABC Someone\n[GNUPG:] TRUST_UNDEFINED 0 shell"),
+    "gpg exits 0 for this, which is why exit status alone would have let it through"
+  );
+  r.check(
+    "nor is one explicitly distrusted",
+    !signatureAccepted(true, "[GNUPG:] TRUST_NEVER 0 shell")
+  );
+  r.check(
+    "an ssh signature has no trust lines and passes on its own",
+    signatureAccepted(true, "Good \"git\" signature for tu@esempio.it with ED25519 key SHA256:xyz"),
+    "the allowed-signers file is the trust model there, and git has already applied it"
+  );
+
+  r.check(
+    "a missing public key says which one to import",
+    explainVerifyFailure("[GNUPG:] NO_PUBKEY ABC").includes("chiave pubblica"),
+    explainVerifyFailure("[GNUPG:] NO_PUBKEY ABC")
+  );
+  r.check(
+    "an unsigned commit says so plainly",
+    explainVerifyFailure("error: no signature found").includes("non è firmato"),
+    explainVerifyFailure("error: no signature found")
+  );
+  r.check(
+    "a missing gpg is not reported as a bad signature",
+    explainVerifyFailure("error: could not run gpg").includes("non è installato"),
+    explainVerifyFailure("error: could not run gpg")
+  );
+  r.check(
+    "the command line is stripped like everywhere else",
+    !explainVerifyFailure("Command failed: git verify-commit --raw abc\nboom").includes("Command failed"),
+    explainVerifyFailure("Command failed: git verify-commit --raw abc\nboom")
+  );
+
+  // --- An insecure remote is refused before the fetch ----------------------
+  r.check(
+    "the refusal names the remote it is refusing",
+    insecureRemoteReason("http://github.com/A/R.git").includes("http://github.com/A/R.git"),
+    insecureRemoteReason("http://github.com/A/R.git")
+  );
+  r.check(
+    "and says what to do about it",
+    insecureRemoteReason("git://x/y").includes("git remote set-url"),
+    insecureRemoteReason("git://x/y")
+  );
+
+  // --- The state file keeps its mode across rewrites ------------------------
+  //
+  // `writeFileSync` applies `mode` only when it creates the file, and this one
+  // is rewritten about ten times per run — so a wider mode set once, by an older
+  // RunPanel or a stray umask, would survive every write after it.
+  if (process.platform === "win32") {
+    r.note("skip panel-update.json 0600 check (Windows filesystems do not carry POSIX modes)");
+  } else {
+    const dir = mkdtempSync(join(tmpdir(), "rp-state-"));
+    try {
+      const seed = {
+        runId: "abc",
+        phase: "running",
+        step: null,
+        branch: "main",
+        fromSha: null,
+        toSha: null,
+        packageManager: null,
+        startedAt: new Date(0).toISOString(),
+        finishedAt: null,
+        bootedAt: null,
+        error: null,
+        storeBackup: null,
+        distBackup: null,
+        manualCommands: [],
+      };
+      writeState(dir, seed);
+      const file = join(dir, "panel-update.json");
+      chmodSync(file, 0o644);
+      writeState(dir, seed);
+      const mode = statSync(file).mode & 0o777;
+      r.check("panel-update.json is 0600 after a rewrite", mode === 0o600, `mode ${mode.toString(8)}`);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  // --- The pre-update store dump is not left readable -----------------------
+  //
+  // A source tripwire rather than a behavioural test, on the precedent of the
+  // `next.config.ts` and `.gitignore` checks above: `run.ts` cannot be loaded by
+  // a standalone suite, and the integration suite deliberately never runs an
+  // update against the developer's own checkout.
+  const runSource = readFileSync(join(repoRoot, "services", "panel-update", "run.ts"), "utf8");
+  const dumpStore = runSource.slice(runSource.indexOf("async function dumpStore"));
+
+  r.check(
+    "dumpStore tightens the file it writes",
+    /tighten\(destination, 0o600\)/.test(dumpStore),
+    "the dump is a whole copy of the store; SQLite creates it 0644 and Node has no mode option here"
+  );
+  r.check(
+    "and the directory it writes into",
+    /tighten\(dir, 0o700\)/.test(dumpStore),
+    "installations that predate the config getter still have it at 0755"
+  );
+  r.check(
+    "and refuses a dump that does not open",
+    /verifySqlite\(destination\)/.test(dumpStore),
+    "a corrupt copy that looks like a backup is worse than an obvious absence"
+  );
+  r.check(
+    "the dump directory has a config getter rather than an inline path",
+    /config\.panelUpdateDir/.test(dumpStore),
+    "an inline path.join is how it ended up outside ensureDataDirs in the first place"
+  );
+
+  // The dump is deleted once the panel has proved it can still boot, mirroring
+  // what `scheduleDistCleanup` does for the previous build. Asserted on the
+  // source because it is a timer at boot: easy to drop in a refactor, and
+  // silent when it goes — the copy simply stays on disk forever.
+  const boot = readFileSync(join(repoRoot, "instrumentation.ts"), "utf8");
+  r.check(
+    "a settled update schedules the store copy for deletion",
+    /scheduleStoreCleanup\(settled\.storeBackup\)/.test(boot),
+    "otherwise a full set of the panel's credentials stays on disk indefinitely"
+  );
+  r.check(
+    "and only once the boot proves the update worked",
+    boot.indexOf("scheduleStoreCleanup(settled.storeBackup)") >
+      boot.indexOf('settled?.phase === "done"'),
+    "before that point the copy is the only way back"
+  );
 
   return r.result();
 }

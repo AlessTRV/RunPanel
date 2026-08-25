@@ -11,9 +11,12 @@ import { HOST_CHANNEL, opsEvents } from "../events";
 import { runCommand } from "../builders/run-command";
 import { resolvePackageManager } from "../package-manager";
 import { whichSync } from "../env-utils";
-import { authArgs, getGitHubToken, gitEnv } from "../git-auth";
+import { isSecureRemote } from "@/lib/git-remote";
+import { redactGitSecrets } from "@/lib/redact";
+import { getGitHubToken, gitAuth, gitAuthWithConfig } from "../git-auth";
 import { probeAutostart } from "../autostart/probe";
 import { activeBackupRunId } from "../backup/runner";
+import { verifySqlite } from "../backup/panel-store";
 import {
   cleanUntracked,
   commitsBehind,
@@ -22,6 +25,7 @@ import {
   readCheckout,
   remoteHead,
   resetHard,
+  verifyCommit,
   wouldClean,
   type PanelCheckout,
 } from "./git";
@@ -29,8 +33,12 @@ import {
   canSelfUpdate,
   configSupportsStagedBuild,
   explainGitError,
+  explainVerifyFailure,
+  insecureRemoteReason,
+  signatureAccepted,
   type RestartMethod,
 } from "./policy";
+import { signatureRequired, signingConfig } from "./signing";
 import {
   clearState,
   isTerminal,
@@ -240,6 +248,10 @@ async function execute(base: Runner, opts: StartOptions): Promise<void> {
       finish("failed", "Il checkout non ha un remote origin configurato.");
       return;
     }
+    if (!isSecureRemote(checkout.remote)) {
+      finish("failed", insecureRemoteReason(checkout.remote));
+      return;
+    }
 
     const free = freeBytes(root);
     if (free !== null && free < REQUIRED_FREE_BYTES) {
@@ -257,7 +269,8 @@ async function execute(base: Runner, opts: StartOptions): Promise<void> {
     // --- Fetch --------------------------------------------------------------
     step("Scaricamento");
     const token = await getGitHubToken();
-    await fetchRemote(checkout, authArgs(token, checkout.remote), gitEnv());
+    const auth = await gitAuth(token, checkout.remote);
+    await fetchRemote(checkout, auth.args, auth.env);
 
     const target = await remoteHead(checkout);
     if (!target) {
@@ -279,6 +292,18 @@ async function execute(base: Runner, opts: StartOptions): Promise<void> {
         `Nota: avevi davanti ${opts.expectedSha.slice(0, 7)}, il branch è ora a ${target.slice(0, 7)}. ` +
           "Procedo con l'ultimo."
       );
+    }
+
+    // --- Signature ----------------------------------------------------------
+    //
+    // Before the store dump and before the reset, so a refusal costs nothing:
+    // nothing has been copied and nothing has been moved. The object is already
+    // in the object store from the fetch above, which is what makes verifying
+    // it here possible at all.
+    const signature = await verifySignature(runner, checkout, target, token);
+    if (!signature.ok) {
+      finish("failed", signature.reason);
+      return;
     }
 
     state.toSha = target;
@@ -531,6 +556,39 @@ function verifyBuild(dir: string): string | null {
 }
 
 /**
+ * Refuse to install a commit this host cannot vouch for.
+ *
+ * Off unless the operator turned it on, and silent when off — no probe, no
+ * process, nothing in the log. When it is on, a failure to even read the
+ * setting is treated as a refusal rather than as permission: a security control
+ * that switches itself off when the database hiccups is not a control.
+ */
+async function verifySignature(
+  runner: Runner,
+  checkout: PanelCheckout,
+  target: string,
+  token: string | null
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  let required: boolean;
+  try {
+    required = await signatureRequired();
+  } catch (err) {
+    return { ok: false, reason: errorText(err) };
+  }
+  if (!required) return { ok: true };
+
+  runner.step("Verifica della firma");
+  const auth = await gitAuthWithConfig(token, checkout.remote ?? "", await signingConfig());
+  const { exitOk, raw } = await verifyCommit(checkout, target, auth.env, auth.args);
+
+  if (signatureAccepted(exitOk, raw)) {
+    runner.say(`Firma verificata per ${target.slice(0, 7)}.`);
+    return { ok: true };
+  }
+  return { ok: false, reason: explainVerifyFailure(raw) };
+}
+
+/**
  * A copy of the store, taken before anything moves.
  *
  * Migrations run by themselves at boot (`instrumentation.ts` calls `getDb()`),
@@ -549,16 +607,43 @@ async function dumpStore(runner: Runner): Promise<string | null> {
     return null;
   }
 
-  const dir = path.join(config.dataDir, "panel-update");
+  const dir = config.panelUpdateDir;
   fs.mkdirSync(dir, { recursive: true });
+  // `ensureDataDirs()` already does this at boot; repeated here because this
+  // also runs on installations that predate the getter, where the directory was
+  // created 0755 by an older RunPanel and would keep that mode forever.
+  tighten(dir, 0o700);
+
   const destination = path.join(dir, `store-${runner.state.runId}.db`);
   fs.rmSync(destination, { force: true });
   pruneStoreDumps(dir, KEEP_STORE_DUMPS - 1);
+  // The survivors too, for the same reason: a dump written before this existed
+  // is still sitting there readable.
+  for (const stale of listStoreDumps(dir)) tighten(path.join(dir, stale.name), 0o600);
 
   try {
     const db = await getDb();
     await sql`VACUUM INTO ${sql.lit(destination)}`.execute(db);
-    runner.say(`Copia dello store in ${destination} (${formatBytes(fs.statSync(destination).size)})`);
+    // SQLite creates this file, not Node, so there is no `mode` option to pass
+    // at the call site the way `services/env-file.ts` does — the chmod is the
+    // whole of it. Without it the file lands 0644 with a complete copy of every
+    // credential the panel holds.
+    tighten(destination, 0o600);
+
+    const { integrity, projects } = await verifySqlite(destination);
+    if (integrity !== "ok") {
+      // Deleted rather than kept: a corrupt copy that looks like a backup is
+      // worse than an obvious absence, because it is only opened on the day it
+      // is the last thing left.
+      fs.rmSync(destination, { force: true });
+      runner.say(`Copia dello store scartata: non supera integrity_check (${integrity}).`);
+      return null;
+    }
+
+    runner.say(
+      `Copia dello store in ${destination} (${formatBytes(fs.statSync(destination).size)}, ` +
+        `${integrity}, ${projects} progetti)`
+    );
     return destination;
   } catch (err) {
     // Not fatal. A panel that refuses to update because it could not take a
@@ -578,17 +663,33 @@ async function dumpStore(runner: Runner): Promise<string | null> {
  */
 function pruneStoreDumps(dir: string, keep: number): void {
   try {
-    const dumps = fs
-      .readdirSync(dir)
-      .filter((name) => name.startsWith("store-") && name.endsWith(".db"))
-      .map((name) => ({ name, at: fs.statSync(path.join(dir, name)).mtimeMs }))
-      .sort((a, b) => b.at - a.at);
-
-    for (const stale of dumps.slice(Math.max(0, keep))) {
+    for (const stale of listStoreDumps(dir).slice(Math.max(0, keep))) {
       fs.rmSync(path.join(dir, stale.name), { force: true });
     }
   } catch {
     /* housekeeping is never a reason to fail an update */
+  }
+}
+
+/** Newest first. */
+function listStoreDumps(dir: string): Array<{ name: string; at: number }> {
+  try {
+    return fs
+      .readdirSync(dir)
+      .filter((name) => name.startsWith("store-") && name.endsWith(".db"))
+      .map((name) => ({ name, at: fs.statSync(path.join(dir, name)).mtimeMs }))
+      .sort((a, b) => b.at - a.at);
+  } catch {
+    return [];
+  }
+}
+
+/** Narrow a mode, where the platform has modes to narrow. */
+function tighten(target: string, mode: number): void {
+  try {
+    fs.chmodSync(target, mode);
+  } catch {
+    /* Windows and some network filesystems have no mode bits to set. */
   }
 }
 
@@ -631,7 +732,11 @@ function readIfPresent(file: string): string | null {
 function errorText(err: unknown): string {
   // Shared with the check, so "the repository is private" reads the same
   // whether it was found by the six-hourly look or by pressing the button.
-  return explainGitError(err instanceof Error ? err.message : String(err));
+  //
+  // Redacted as well as explained: this lands in `panel-update.json`, in the
+  // run log and on the updates page, and an error is exactly the path by which
+  // a credential that should never have been in a message travels furthest.
+  return redactGitSecrets(explainGitError(err instanceof Error ? err.message : String(err)));
 }
 
 // --- What the API needs to know ----------------------------------------------

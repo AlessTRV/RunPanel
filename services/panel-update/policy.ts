@@ -137,3 +137,87 @@ export function explainGitError(raw: string): string {
 
   return text || "errore sconosciuto";
 }
+
+/**
+ * Whether a signature git accepted is one the panel should act on.
+ *
+ * Exit status alone is not quite enough for GPG. A commit signed by a key that
+ * is *present* in the keyring but carries no trust assignment verifies
+ * successfully — `git verify-commit` exits 0 and prints a warning nobody reads.
+ * For a control whose whole job is deciding what may run on this host, "I have
+ * seen this key before" is not the same answer as "I trust this key", so
+ * `TRUST_NEVER` and `TRUST_UNDEFINED` are rejected explicitly.
+ *
+ * SSH signatures do not produce those status lines at all — their trust model
+ * is the allowed-signers file, which git has already applied by the time it
+ * exits 0 — so they pass on the exit status, which is correct.
+ *
+ * Pure, so the unit suite can hold it against the real strings gpg emits.
+ */
+export function signatureAccepted(exitOk: boolean, raw: string): boolean {
+  if (!exitOk) return false;
+  return !/\bTRUST_(NEVER|UNDEFINED)\b/.test(raw);
+}
+
+/**
+ * Why a signature was not accepted, in a sentence that says what to do next.
+ *
+ * The raw `--raw` output is gpg's machine-readable status protocol; showing it
+ * to an operator who has just been told their update is refused is showing them
+ * the wrong thing. Each case here is one an operator can actually act on.
+ */
+export function explainVerifyFailure(raw: string): string {
+  const text = raw.replace(/^Command failed: [^\n]*\n?/, "").trim();
+
+  if (/NO_PUBKEY|No public key|Can't check signature/i.test(text)) {
+    return (
+      "Il commit è firmato, ma questa macchina non ha la chiave pubblica per verificarlo. " +
+      "Importa la chiave nel portachiavi dell'utente che esegue il pannello, oppure incolla " +
+      "la chiave pubblica SSH fra i firmatari ammessi."
+    );
+  }
+
+  if (/\bTRUST_(NEVER|UNDEFINED)\b/.test(text)) {
+    return (
+      "La firma è valida ma la chiave non è considerata attendibile su questa macchina. " +
+      "Assegna un livello di fiducia alla chiave in GPG, oppure passa alla verifica SSH " +
+      "elencandola fra i firmatari ammessi."
+    );
+  }
+
+  if (/no signature found|NO_SIGNATURE/i.test(text)) {
+    return (
+      "Il commit da installare non è firmato. Firmalo alla sorgente, oppure disattiva la " +
+      "verifica della firma nelle impostazioni degli aggiornamenti se non ti serve."
+    );
+  }
+
+  if (/gpg.*not found|could not run gpg|ssh-keygen.*not found/i.test(text)) {
+    return (
+      "La verifica della firma è attiva ma lo strumento che la esegue non è installato su " +
+      "questo host: serve gpg per le firme GPG, ssh-keygen per quelle SSH."
+    );
+  }
+
+  return text
+    ? `La firma del commit non è stata accettata: ${text}`
+    : "La firma del commit non è stata accettata.";
+}
+
+/**
+ * Why an update will not be fetched from this remote.
+ *
+ * The self-update resets the working tree to whatever the remote hands back and
+ * then runs that tree's install scripts and its build. Over `http://` or
+ * `git://` anybody on the network path chooses what runs on this host, and
+ * `file://` is not a fetch at all — so the transport is refused before the
+ * fetch rather than explained after it.
+ */
+export function insecureRemoteReason(remote: string): string {
+  return (
+    `Il remote di questo checkout non usa un trasporto sicuro (${remote}). ` +
+    "Un aggiornamento scaricato da lì non è verificabile: chiunque sia sul percorso di rete " +
+    "sceglierebbe che cosa viene eseguito su questa macchina. Passa il remote a https:// o ssh:// " +
+    "con `git remote set-url origin`."
+  );
+}

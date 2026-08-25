@@ -112,11 +112,29 @@ export function parseBranch(stdout: string): { branch: string | null; detached: 
   return { branch: value, detached: false };
 }
 
-/** `git config --get remote.origin.url`, with any embedded credentials removed. */
+/**
+ * `git config --get remote.origin.url`, with any embedded credentials removed.
+ *
+ * A deliberate copy of `stripRemoteCredentials()` in `lib/git-remote.ts`, which
+ * this file cannot import: the unit suite loads it with Node's strip-only
+ * TypeScript loader, which resolves neither the `@/` alias nor an extensionless
+ * relative path. `tests/suites/security-unit.mjs` loads both modules and holds
+ * them against one table of URLs, so the two cannot drift apart in silence.
+ *
+ * ssh keeps its user and http(s) does not, for the reason spelled out there:
+ * on ssh the userinfo is the account, not the credential.
+ */
 export function parseRemoteUrl(stdout: string): string | null {
   const value = stdout.trim();
   if (!value) return null;
-  return value.replace(/https:\/\/[^@]+@/, "https://");
+  return value.replace(
+    /^([A-Za-z][A-Za-z0-9+.-]*:\/\/)([^/@]*)@/,
+    (_all, scheme: string, userinfo: string) => {
+      if (/^https?:\/\/$/i.test(scheme)) return scheme;
+      const user = userinfo.split(":")[0];
+      return user ? `${scheme}${user}@` : scheme;
+    }
+  );
 }
 
 // --- Running ----------------------------------------------------------------
@@ -207,6 +225,41 @@ export async function fetchRemote(
     ],
     { timeout: 120_000, env }
   );
+}
+
+/**
+ * Ask git whether a commit carries a signature it can verify.
+ *
+ * Its own exec rather than the `git()` helper above, for two reasons: git says
+ * everything it has to say about a signature on stderr, which `git()` discards,
+ * and a commit that is unsigned or signed by a stranger exits non-zero — which
+ * is a verdict to report, not a failure to throw. Both outcomes come back the
+ * same shape so the caller does not have to catch anything.
+ *
+ * The trust decision is not taken here: `signatureAccepted()` in `policy.ts`
+ * reads the `--raw` status lines, so it stays pure and can be held against the
+ * real strings gpg emits.
+ */
+export async function verifyCommit(
+  checkout: PanelCheckout,
+  sha: string,
+  env: NodeJS.ProcessEnv,
+  args: string[] = []
+): Promise<{ exitOk: boolean; raw: string }> {
+  try {
+    const { stderr } = await exec("git", [...args, "verify-commit", "--raw", sha], {
+      cwd: checkout.root,
+      timeout: 30_000,
+      windowsHide: true,
+      maxBuffer: 1024 * 1024,
+      env,
+    });
+    return { exitOk: true, raw: stderr.toString() };
+  } catch (err) {
+    const failure = err as { stderr?: Buffer | string; message?: string };
+    const raw = String(failure.stderr ?? "").trim() || String(failure.message ?? "");
+    return { exitOk: false, raw };
+  }
 }
 
 /** The SHA `origin/<branch>` points at, as last fetched. */

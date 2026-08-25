@@ -7,6 +7,10 @@ import { ACCENT_PRESETS, ACCENT_SETTING_KEY } from "@/lib/themes";
 import { PANEL_PUBLIC_URL_SETTING } from "@/lib/panel-url";
 import { panelPublicUrlSchema } from "@/lib/validation";
 import { PANEL_UPDATE_INTERVALS, POLL_INTERVALS } from "@/lib/polling";
+import {
+  PANEL_UPDATE_ALLOWED_SIGNERS_SETTING,
+  PANEL_UPDATE_REQUIRE_SIGNATURE_SETTING,
+} from "@/lib/panel-update";
 
 /**
  * Settings reported only as present or absent, never by value.
@@ -36,8 +40,26 @@ const preferencesSchema = z
     deploy_poll_interval: z.enum(POLL_INTERVALS).optional(),
     /** Seconds between checks for a new version of the panel itself. */
     panel_update_interval: z.enum(PANEL_UPDATE_INTERVALS).optional(),
+    /**
+     * Whether an update must carry a signature this host can verify.
+     *
+     * Off by default and deliberately so: turning it on for everybody would
+     * stop the self-update working on every panel whose operator does not sign
+     * commits, which is most of them.
+     */
+    [PANEL_UPDATE_REQUIRE_SIGNATURE_SETTING]: z.enum(["0", "1"]).optional(),
   })
   .strict();
+
+/**
+ * The SSH allowed-signers file, as typed into the box.
+ *
+ * Its own branch rather than a preference because it is multi-line and because
+ * it is a trust root: the size limit is here so a paste accident cannot fill
+ * the settings table, and the value is written to disk 0600 by
+ * `services/panel-update/signing.ts` when an update runs.
+ */
+const allowedSignersSchema = z.string().max(8192);
 
 /**
  * Everything `GET /api/settings` will hand back. The preferences a client
@@ -51,6 +73,8 @@ const READABLE_SETTINGS: readonly string[] = [
   PANEL_PUBLIC_URL_SETTING,
   "deploy_poll_interval",
   "panel_update_interval",
+  PANEL_UPDATE_REQUIRE_SIGNATURE_SETTING,
+  PANEL_UPDATE_ALLOWED_SIGNERS_SETTING,
 ];
 
 // GET: Read settings
@@ -98,6 +122,7 @@ export async function PUT(request: NextRequest) {
     newPassword?: unknown;
     preferences?: unknown;
     github_token?: unknown;
+    [PANEL_UPDATE_ALLOWED_SIGNERS_SETTING]?: unknown;
   };
 
   // Password change
@@ -143,6 +168,18 @@ export async function PUT(request: NextRequest) {
     for (const [key, value] of Object.entries(parsed.data)) {
       if (value !== undefined) await setSetting(key, value);
     }
+    return NextResponse.json({ success: true });
+  }
+
+  // Allowed signers for update verification. Public keys, so unlike the token
+  // below this is stored and read back as-is — the operator has to be able to
+  // see what they pasted.
+  if (body[PANEL_UPDATE_ALLOWED_SIGNERS_SETTING] !== undefined) {
+    const parsed = allowedSignersSchema.safeParse(body[PANEL_UPDATE_ALLOWED_SIGNERS_SETTING]);
+    if (!parsed.success) {
+      return NextResponse.json({ error: "Elenco dei firmatari non valido" }, { status: 400 });
+    }
+    await setSetting(PANEL_UPDATE_ALLOWED_SIGNERS_SETTING, parsed.data.trim());
     return NextResponse.json({ success: true });
   }
 
