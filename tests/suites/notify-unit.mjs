@@ -21,6 +21,7 @@ export async function run({ repoRoot }) {
 
   const {
     escapeHtml,
+    link,
     firstLine,
     duration,
     bytes,
@@ -51,27 +52,183 @@ export async function run({ repoRoot }) {
 
   // --- Nothing reaches Telegram unescaped ----------------------------------
   //
-  // The important assertion in this file: build an event out of the nastiest
-  // strings a project can produce and check none of it lands raw.
-  const nasty = '<script>alert("x")</script> & <b>';
-  const message = describe({
-    key: "deploy.finished",
-    slug: nasty,
-    ok: false,
-    trigger: "webhook",
-    commitSha: "4d480c77bd43af994d435e8437f9b4870a276172",
-    commitMessage: nasty,
-    durationMs: 91_000,
-    error: nasty,
-  });
-  const rendered = render(message);
+  // The important assertion in this file, and the one that used to be too
+  // narrow. The previous version built a single `deploy.finished` and checked
+  // for foreign tags with an allowlist that permitted `<b>` — so the one payload
+  // it could not see was the one shaped like the markup we generate. And two
+  // catalogue entries it never touched were interpolating raw: a backup policy
+  // name and the panel version.
+  //
+  // So: every event key, a hostile payload in every string field, and an
+  // assertion that the payload comes back as text rather than as markup.
+  const HOSTILE = '<i>&"\'<script>alert(1)</script>';
+  // Markup shaped like ours, but with an attribute ours never carries. That
+  // attribute is what makes a leak detectable: stripping our own generated tags
+  // would eat a bare injected `<b>` as if we had written it, which is precisely
+  // why the previous allowlist was blind to this case.
+  const MARKUP = '<b class="pwn">bold</b>';
 
-  r.check("no raw <script> survives", !rendered.includes("<script>"), rendered.slice(0, 120));
-  r.check("the payload is escaped", rendered.includes("&lt;script&gt;"), rendered.slice(0, 200));
+  const catalogue = (p) => [
+    { key: "project.crashed", slug: p, runtime: p },
+    { key: "service.crashed", name: p, container: p },
+    { key: "docker.down", up: false, detail: p },
+    { key: "docker.down", up: true },
+    {
+      key: "disk.low",
+      up: false,
+      freeBytes: 5 * 1024 ** 3,
+      totalBytes: 100 * 1024 ** 3,
+      path: p,
+    },
+    { key: "disk.low", up: true, freeBytes: 50 * 1024 ** 3, totalBytes: 100 * 1024 ** 3, path: p },
+    {
+      key: "deploy.finished",
+      slug: p,
+      ok: false,
+      trigger: "webhook",
+      commitSha: "a".repeat(40),
+      commitMessage: p,
+      durationMs: 91_000,
+      error: p,
+    },
+    {
+      key: "deploy.finished",
+      slug: p,
+      ok: true,
+      trigger: "poll",
+      commitSha: "a".repeat(40),
+      commitMessage: p,
+      durationMs: 1,
+      error: null,
+    },
+    {
+      key: "backup.finished",
+      policy: p,
+      status: "failed",
+      ok: 1,
+      failed: 1,
+      skipped: 1,
+      bytes: 1024,
+      durationMs: 1,
+      error: p,
+    },
+    {
+      key: "backup.finished",
+      policy: p,
+      status: "success",
+      ok: 1,
+      failed: 0,
+      skipped: 0,
+      bytes: 1024,
+      durationMs: 1,
+      error: null,
+    },
+    { key: "panel.update", behind: 2, from: p, to: p, branch: p },
+    { key: "panel.restarted", version: p, sha: p, afterUpdate: true },
+  ];
+
+  const balanced = (s) => {
+    for (const tag of ["b", "code"]) {
+      const open = (s.match(new RegExp(`<${tag}>`, "g")) ?? []).length;
+      const close = (s.match(new RegExp(`</${tag}>`, "g")) ?? []).length;
+      if (open !== close) return false;
+    }
+    return (s.match(/<a /g) ?? []).length === (s.match(/<\/a>/g) ?? []).length;
+  };
+
+  for (const payload of [HOSTILE, MARKUP]) {
+    const label = payload === MARKUP ? "markup" : "script";
+    for (const event of catalogue(payload)) {
+      const out = render(describe(event), undefined);
+
+      r.check(
+        `${event.key} (${label}): no foreign tag survives`,
+        !/<(?!\/?(b|code|a)\b)[a-zA-Z]/.test(out),
+        out.slice(0, 200)
+      );
+      r.check(`${event.key} (${label}): our own markup stays balanced`, balanced(out), out.slice(0, 200));
+    }
+  }
+
+  // The assertion the old allowlist could not make: markup shaped like ours
+  // must arrive escaped, and must never arrive as a tag.
+  for (const event of catalogue(MARKUP)) {
+    const out = render(describe(event));
+    r.check(
+      `${event.key}: injected markup never becomes a tag`,
+      !out.includes('<b class="pwn">'),
+      out.slice(0, 240)
+    );
+  }
+
+  // And the two fields that really were going out raw before this change, named
+  // explicitly so a regression on either is unmistakable rather than one row in
+  // a table of thirty.
+  const policyOut = render(
+    describe({
+      key: "backup.finished",
+      policy: MARKUP,
+      status: "failed",
+      ok: 0,
+      failed: 1,
+      skipped: 0,
+      bytes: 0,
+      durationMs: 1,
+      error: null,
+    })
+  );
   r.check(
-    "only the tags we generate remain",
-    (rendered.match(/<(?!\/?(b|code|a)\b)[a-zA-Z]/g) ?? []).length === 0,
-    rendered
+    "a backup policy name is escaped",
+    policyOut.includes("&lt;b class=") && !policyOut.includes('<b class='),
+    policyOut.slice(0, 240)
+  );
+
+  const versionOut = render(
+    describe({ key: "panel.restarted", version: MARKUP, sha: null, afterUpdate: true })
+  );
+  r.check(
+    "the panel version is escaped",
+    versionOut.includes("&lt;b class=") && !versionOut.includes('<b class='),
+    versionOut.slice(0, 240)
+  );
+
+  // A ninth event added without a hostile row would otherwise be tested by
+  // nothing at all.
+  const covered = new Set(catalogue(HOSTILE).map((event) => event.key));
+  for (const key of NOTIFY_EVENTS) {
+    r.check(`${key} has a hostile-payload row`, covered.has(key), "add one to `catalogue` above");
+  }
+
+  // --- Links, which escapeHtml cannot help with -----------------------------
+  //
+  // `escapeHtml` deliberately leaves `"` alone, which is right in text and fatal
+  // in an attribute — and `new URL('https://a.com"onmouseover=x').origin` keeps
+  // the quote rather than rejecting it, verified against Node.
+  r.check("a good url becomes a link", link("https://panel.esempio.it", "Apri").startsWith("<a href="));
+  r.check(
+    "a quote in the url never reaches the attribute",
+    !link('https://a.com"onmouseover=alert(1)', "Apri").includes("<a "),
+    link('https://a.com"onmouseover=alert(1)', "Apri")
+  );
+  r.check(
+    "a javascript: url is not a link",
+    !link("javascript:alert(1)", "Apri").includes("<a "),
+    link("javascript:alert(1)", "Apri")
+  );
+  r.check(
+    "a rejected url is still shown, as text",
+    link("javascript:alert(1)", "Apri").includes("javascript:"),
+    "a footer that silently vanishes is a bug nobody reports"
+  );
+
+  const withFooter = render(
+    describe({ key: "panel.restarted", version: HOSTILE, sha: null, afterUpdate: true }),
+    link("https://panel.esempio.it", "Apri RunPanel")
+  );
+  r.check(
+    "a message with a footer is still clean",
+    !/<(?!\/?(b|code|a)\b)[a-zA-Z]/.test(withFooter) && balanced(withFooter),
+    withFooter.slice(0, 240)
   );
 
   // --- Deploy wording -------------------------------------------------------
@@ -91,7 +248,17 @@ export async function run({ repoRoot }) {
   r.check("it does not print the full sha", !okDeploy.body.includes("4d480c77bd"), okDeploy.body);
   r.check("it says how the deploy was triggered", okDeploy.body.includes("controllo periodico"));
   r.check("it renders the duration in minutes", okDeploy.body.includes("1 m 31 s"), okDeploy.body);
-  r.check("a failed deploy reads as danger", message.level === "danger", message.level);
+  const failedDeploy = describe({
+    key: "deploy.finished",
+    slug: "spanel",
+    ok: false,
+    trigger: "webhook",
+    commitSha: "4d480c77bd43af994d435e8437f9b4870a276172",
+    commitMessage: subject,
+    durationMs: 91_000,
+    error: "build failed",
+  });
+  r.check("a failed deploy reads as danger", failedDeploy.level === "danger", failedDeploy.level);
 
   // --- Which deploys are announced -----------------------------------------
   r.check("an automatic deploy that worked is news", shouldAnnounceDeploy("webhook", true) === true);

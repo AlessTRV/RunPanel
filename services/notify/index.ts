@@ -8,7 +8,7 @@ import {
   parseNotifyEvents,
   type NotifyEventKey,
 } from "@/lib/notify-events";
-import { describe, render, type NotifyEvent } from "./messages";
+import { describe, escapeHtml, link, render, type Html, type NotifyEvent } from "./messages";
 import { sendMessage } from "./telegram";
 
 /**
@@ -139,12 +139,16 @@ function suppressed(event: NotifyEvent, now: number): boolean {
  * URL is built from the request, and there is no request here. Guessing would
  * produce a link to `localhost` on somebody's phone.
  */
-async function footer(): Promise<string | undefined> {
+async function footer(): Promise<Html | undefined> {
   // No request to fall back on, which is exactly the caller `panelBaseUrl` was
   // left optional for. Without the setting there is nothing honest to link to:
   // guessing would put a link to localhost on somebody's phone.
   const base = await panelBaseUrl();
-  return base ? `<a href="${base.origin}">Apri RunPanel</a>` : undefined;
+  // Through `link()` rather than built here: this is the only HTML *attribute*
+  // the panel writes, and `escapeHtml` deliberately leaves `"` alone. The origin
+  // comes from an operator-set setting, and `new URL()` does not remove a quote
+  // from a hostname it could not parse strictly.
+  return base ? link(base.origin, "Apri RunPanel") : undefined;
 }
 
 /**
@@ -188,7 +192,9 @@ export async function sendTest(): Promise<{ ok: boolean; error?: string }> {
       {
         level: "ok",
         title: "RunPanel è collegato",
-        body: "Questa è una prova. Da qui in poi ti arrivano crash, esiti dei deploy, backup e aggiornamenti del pannello.",
+        body: escapeHtml(
+          "Questa è una prova. Da qui in poi ti arrivano crash, esiti dei deploy, backup e aggiornamenti del pannello."
+        ),
       },
       await footer()
     )
