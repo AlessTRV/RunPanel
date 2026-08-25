@@ -28,13 +28,16 @@ export async function register() {
   // is where the run is closed out. Before the store for the same reason as the
   // restore above: it is a plain file, and it has to be readable even when the
   // database is what the update broke.
-  const { settlePanelUpdate, scheduleDistCleanup } = await import("./services/panel-update/state");
+  const { settlePanelUpdate, scheduleDistCleanup, scheduleStoreCleanup } = await import(
+    "./services/panel-update/state"
+  );
   const settled = settlePanelUpdate(env.dataDir);
   if (settled?.phase === "done" && settled.bootedAt) {
     console.log(
       `[RunPanel] Aggiornamento completato: ${settled.fromSha?.slice(0, 7)} → ${settled.toSha?.slice(0, 7)}`
     );
     if (settled.distBackup) scheduleDistCleanup(settled.distBackup);
+    if (settled.storeBackup) scheduleStoreCleanup(settled.storeBackup);
   } else if (settled?.phase === "failed" && settled.error) {
     console.warn(`[RunPanel] Aggiornamento non completato: ${settled.error}`);
   }

@@ -82,7 +82,17 @@ export function readState(dataDir: string): PanelUpdateState | null {
  */
 export function writeState(dataDir: string, state: PanelUpdateState): void {
   fs.mkdirSync(dataDir, { recursive: true });
-  fs.writeFileSync(stateFile(dataDir), `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600 });
+  const file = stateFile(dataDir);
+  fs.writeFileSync(file, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600 });
+  // `writeFileSync` only applies the mode when it creates the file, and this
+  // one is rewritten ten times per run — so a wider mode, set once by an older
+  // RunPanel or by a stray umask, would survive every single write. The same
+  // enforce-on-rewrite pattern as `services/env-file.ts` and
+  // `services/docker/registry.ts`, inlined because this file may not import
+  // anything outside `node:`.
+  try {
+    fs.chmodSync(file, 0o600);
+  } catch { /* Windows and some network filesystems have no mode bits to set. */ }
 }
 
 export function clearState(dataDir: string): void {
@@ -160,6 +170,27 @@ export function scheduleDistCleanup(dir: string): void {
   const timer = setTimeout(() => {
     fs.rm(dir, { recursive: true, force: true }, (err) => {
       if (err) console.warn(`[panel-update] Build precedente non rimossa (${dir}):`, err.message);
+    });
+  }, 60_000);
+  timer.unref?.();
+}
+
+/**
+ * Throw away the pre-update copy of the store, a minute after boot.
+ *
+ * The same reasoning as the build above, and the same timing. That copy exists
+ * to answer one question — can the panel still open its database after the
+ * update — and reaching this line is the answer. Keeping it afterwards leaves a
+ * full set of the panel's credentials sitting on disk indefinitely, guarding
+ * against something that has already not happened.
+ *
+ * The bounded retention in `run.ts` stays as the net for runs that never got
+ * this far.
+ */
+export function scheduleStoreCleanup(file: string): void {
+  const timer = setTimeout(() => {
+    fs.rm(file, { force: true }, (err) => {
+      if (err) console.warn(`[panel-update] Copia dello store non rimossa (${file}):`, err.message);
     });
   }, 60_000);
   timer.unref?.();

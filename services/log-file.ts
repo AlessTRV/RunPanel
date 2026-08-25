@@ -59,7 +59,11 @@ export class AppendLogFile {
     const chunk = `${this.pending.join("\n")}\n`;
     this.pending = [];
     try {
-      fs.appendFileSync(this.file, chunk);
+      // 0600, and only on creation, so the hot path pays nothing: these files
+      // carry build output, remote URLs and the names of environment
+      // variables, and an update log carries whatever git said when a fetch
+      // failed. None of that is for every local user on a shared host.
+      fs.appendFileSync(this.file, chunk, { mode: 0o600 });
     } catch (err) {
       console.error(`[log-file] Failed to write ${path.basename(this.file)}:`, err);
     }

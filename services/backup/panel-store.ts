@@ -119,8 +119,15 @@ async function dumpSqlite(
  * A dump nobody verified is a dump nobody can trust, and the row count goes
  * into the manifest so a suspiciously empty archive is visible in the panel
  * rather than discovered during a restore.
+ *
+ * Exported for the second consumer: `services/panel-update/run.ts` takes the
+ * same kind of dump on the way into an update, and a pre-update copy that
+ * cannot be opened is worse than none — it is the one somebody reaches for at
+ * midnight.
  */
-async function verifySqlite(file: string): Promise<{ integrity: string; projects: number }> {
+export async function verifySqlite(
+  file: string
+): Promise<{ integrity: string; projects: number }> {
   const { default: SQLite } = await import("better-sqlite3");
   const probe = new SQLite(file, { readonly: true });
   try {

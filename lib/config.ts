@@ -53,6 +53,15 @@ export const config = {
   get backupUploadsDir() {
     return path.join(config.backupsDir, "uploads");
   },
+  /**
+   * Where the updater parks a copy of the store before it resets the tree.
+   *
+   * A directory of its own rather than a loose file under `dataDir`, so the one
+   * chmod below covers every dump it will ever write.
+   */
+  get panelUpdateDir() {
+    return path.join(env().dataDir, "panel-update");
+  },
   get secretFile() {
     return path.join(env().dataDir, ".secret");
   },
@@ -71,17 +80,22 @@ export function ensureDataDirs() {
     config.backupArchivesDir,
     config.backupStagingDir,
     config.backupUploadsDir,
+    config.panelUpdateDir,
   ];
   for (const dir of dirs) {
     fs.mkdirSync(dir, { recursive: true });
   }
 
-  // Archives hold decrypted credentials, and on a shared host the default 0755
-  // would let any local user read last night's backup.
-  try {
-    fs.chmodSync(config.backupsDir, 0o700);
-  } catch {
-    /* Windows and some network filesystems have no mode bits to set. */
+  // Both hold a whole copy of the panel's store — encrypted env vars, registry
+  // logins, session hashes — and on a shared host the default 0755 would let
+  // any local user read last night's backup, or the copy the updater took
+  // twenty minutes ago.
+  for (const dir of [config.backupsDir, config.panelUpdateDir]) {
+    try {
+      fs.chmodSync(dir, 0o700);
+    } catch {
+      /* Windows and some network filesystems have no mode bits to set. */
+    }
   }
 }
 
