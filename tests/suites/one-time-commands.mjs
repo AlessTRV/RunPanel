@@ -132,6 +132,52 @@ export async function run({ base }) {
     JSON.stringify(stranded)
   );
 
+  /*
+    A stranded row must not hold the whole section hostage.
+
+    The editor sends the entire queue on every save, so checking every row for
+    phase availability meant one row left behind by a runtime change rejected
+    every later edit with a 400 about a command the operator was not touching —
+    while the section told them the row would simply stay in the queue. Both
+    cannot be true. An unchanged stored row passes; a new or edited one on an
+    unavailable phase still does not.
+  */
+  res = await api.call(url);
+  const carried = res.body.queued.map((command) => ({
+    id: command.id,
+    phase: command.phase,
+    command: command.command,
+    label: command.label,
+    continueOnError: command.continueOnError,
+  }));
+
+  res = await put([
+    ...carried,
+    { phase: "post-build", command: "echo nuovo", continueOnError: false },
+  ]);
+  r.check(
+    "a stranded row does not block saving the rest",
+    res.status === 200 && res.body.queued.length === carried.length + 1,
+    `${res.status} ${JSON.stringify(res.body).slice(0, 200)}`
+  );
+
+  const stillStranded = res.body.queued.find((command) => command.phase === "pre-install");
+  r.check("and it is still there, still flagged", Boolean(stillStranded?.blockedReason), JSON.stringify(stillStranded));
+
+  // Editing that same row onto the unavailable phase is still refused.
+  const edited = await put(
+    res.body.queued.map((command) =>
+      command.phase === "pre-install"
+        ? { id: command.id, phase: "pre-install", command: "echo cambiato", continueOnError: false }
+        : { id: command.id, phase: command.phase, command: command.command, continueOnError: command.continueOnError }
+    )
+  );
+  r.check(
+    "but editing it on that phase is refused",
+    edited.status === 400 && edited.body.code === "phase-unavailable",
+    `${edited.status} ${JSON.stringify(edited.body).slice(0, 160)}`
+  );
+
   // Back to native, and the block goes away on its own.
   await api.call(`/api/projects/${projectId}`, {
     method: "PATCH",
@@ -149,7 +195,7 @@ export async function run({ base }) {
   r.check("clearing an empty history is not an error", res.status === 200 && res.body.removed === 0, JSON.stringify(res.body));
 
   res = await api.call(url);
-  r.check("clearing the history leaves the queue alone", res.body.queued.length === 2, String(res.body.queued.length));
+  r.check("clearing the history leaves the queue alone", res.body.queued.length === 3, String(res.body.queued.length));
 
   res = await put([]);
   r.check("an empty list empties the queue", res.status === 200 && res.body.queued.length === 0, JSON.stringify(res.body));

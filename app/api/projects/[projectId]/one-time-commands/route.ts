@@ -108,17 +108,37 @@ export async function PUT(request: NextRequest, { params }: Params) {
     );
   }
 
-  // Refused here rather than dropped at deploy time: a command pinned to a
-  // phase this runtime does not have would sit in the queue forever, and the
-  // moment to say so is while somebody is looking at the form.
+  /*
+    Refused for a row being written here, not for one that is merely still
+    there.
+
+    Checking every row meant that changing a project's runtime made the whole
+    section unsaveable: the editor sends the full queue, so one row stranded on
+    a phase the new runtime does not have rejected every later edit with a 400
+    about a command the operator was not touching. The section flagged the
+    stranded row and said it would stay in the queue — which cannot both be
+    true and be a reason to refuse the save. So an unchanged stored row is
+    allowed through and keeps its warning; a new or edited one is not.
+  */
+  const stored = new Map(
+    (await queuedForProject(projectId, project.runtime_type)).map((row) => [row.id, row])
+  );
+
   for (const command of parsed.data.commands) {
     const reason = phaseUnavailableReason(command.phase, project.runtime_type);
-    if (reason) {
-      return NextResponse.json(
-        { error: `"${phaseLabel(command.phase)}": ${reason}`, code: "phase-unavailable" },
-        { status: 400 }
-      );
-    }
+    if (!reason) continue;
+
+    const previous = command.id ? stored.get(command.id) : undefined;
+    const unchanged =
+      previous !== undefined &&
+      previous.phase === command.phase &&
+      previous.command === command.command;
+    if (unchanged) continue;
+
+    return NextResponse.json(
+      { error: `"${phaseLabel(command.phase)}": ${reason}`, code: "phase-unavailable" },
+      { status: 400 }
+    );
   }
 
   const queued = await replaceQueue(projectId, project.runtime_type, parsed.data.commands);

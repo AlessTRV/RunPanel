@@ -166,15 +166,28 @@ export async function replaceQueue(
   const db = await getDb();
   const now = nowIso();
 
-  const existing = await db
-    .selectFrom("one_time_commands")
-    .selectAll()
-    .where("project_id", "=", projectId)
-    .where("status", "=", "queued")
-    .execute();
-  const byId = new Map(existing.map((row) => [row.id, row]));
+  return db.transaction().execute(async (trx) => {
+    /*
+      Read inside the transaction, and every write below carries
+      `status = 'queued'`.
 
-  await db.transaction().execute(async (trx) => {
+      The caller refuses this request when a deploy already holds a row, but
+      that check is a separate round trip: a claim landing between it and here
+      would meet an UPDATE and a DELETE that matched on `id` alone. The UPDATE
+      rewrote the text of a command the deploy was already executing — so the
+      old one ran and the history recorded the new one — and the DELETE removed
+      the row while its command ran anyway, leaving no trace at all. The
+      predicate makes a claimed row simply invisible to this function, which
+      turns the 409 back into a courtesy instead of the only defence.
+    */
+    const existing = await trx
+      .selectFrom("one_time_commands")
+      .selectAll()
+      .where("project_id", "=", projectId)
+      .where("status", "=", "queued")
+      .execute();
+    const byId = new Map(existing.map((row) => [row.id, row]));
+
     const kept = new Set<string>();
 
     for (const [index, input] of inputs.entries()) {
@@ -193,6 +206,7 @@ export async function replaceQueue(
             position: index,
           })
           .where("id", "=", previous.id)
+          .where("status", "=", "queued")
           .execute();
         continue;
       }
@@ -221,11 +235,23 @@ export async function replaceQueue(
 
     const dropped = existing.filter((row) => !kept.has(row.id)).map((row) => row.id);
     if (dropped.length > 0) {
-      await trx.deleteFrom("one_time_commands").where("id", "in", dropped).execute();
+      await trx
+        .deleteFrom("one_time_commands")
+        .where("id", "in", dropped)
+        .where("status", "=", "queued")
+        .execute();
     }
-  });
 
-  return queuedForProject(projectId, runtimeType);
+    const rows = await trx
+      .selectFrom("one_time_commands")
+      .selectAll()
+      .where("project_id", "=", projectId)
+      .where("status", "in", ["queued", "claimed"])
+      .orderBy("position")
+      .orderBy("created_at")
+      .execute();
+    return rows.map((row) => toView(row, runtimeType));
+  });
 }
 
 export async function clearHistory(projectId: string): Promise<number> {
