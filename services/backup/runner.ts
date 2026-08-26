@@ -118,8 +118,6 @@ export async function startBackup(
   const startedAt = new Date();
   const log = backupLog(runId);
 
-  globalRef.__runpanelBackupActive = runId;
-
   const emit = (line: string) => {
     log.append(line);
     opsEvents.emit(runId, { type: "backup:log", line });
@@ -147,6 +145,17 @@ export async function startBackup(
     .execute();
 
   opsEvents.emit(runId, { type: "backup:status", status: "running" });
+
+  /*
+    Claimed only once the row exists.
+
+    Set before the INSERT, a write that failed left the flag up with nothing to
+    ever take it down: the only code that clears it is the `.finally` below, on a
+    promise that is never created. From there the panel refuses backups, restores
+    and its own updates until the process restarts. `startRestore` already does
+    it in this order, so this was a slip rather than a trade.
+  */
+  globalRef.__runpanelBackupActive = runId;
 
   const done = execute({ runId, request, startedAt, emit, log }).finally(() => {
     globalRef.__runpanelBackupActive = null;

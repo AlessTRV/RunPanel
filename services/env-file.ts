@@ -91,6 +91,47 @@ export function writeEnvFileInto(repoDir: string, relativePath: string, envVars:
     .map(([key, value]) => serialize(key, value))
     .join("\n");
 
-  fs.writeFileSync(target, `${body}\n`, { mode: 0o600 });
+  /*
+    Opened with O_NOFOLLOW rather than written by path.
+
+    `resolveInside` above is a check, and a check is a moment: a link appearing
+    between it and the write would still be followed. That matters more here than
+    anywhere else in the panel, because what gets written is every one of the
+    project's variables in clear — a symlink at this path is an instruction to put
+    them somewhere else, and a repository can commit one.
+
+    Undefined on Windows, where `fs.constants` omits it; there the flag falls away
+    and the containment check is what stands.
+  */
+  const noFollow = fs.constants.O_NOFOLLOW ?? 0;
+  const flags = fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_TRUNC | noFollow;
+
+  let fd: number;
+  try {
+    fd = fs.openSync(target, flags, 0o600);
+  } catch (err: unknown) {
+    if ((err as NodeJS.ErrnoException).code === "ELOOP") {
+      throw new Error(
+        `envFile.path è un collegamento simbolico: ${relativePath}. ` +
+          `Il file uscirebbe dalla directory del progetto, quindi non viene scritto.`
+      );
+    }
+    throw err;
+  }
+
+  try {
+    fs.writeFileSync(fd, `${body}\n`);
+    // The mode above applies only when the file is created, so enforce it on a
+    // rewrite too. This is the chmod `writeEnvFile` does and this one did not,
+    // which left an already-tracked .env at 0644 with real secrets in it.
+    try {
+      fs.fchmodSync(fd, 0o600);
+    } catch {
+      /* chmod is a no-op on some Windows filesystems */
+    }
+  } finally {
+    fs.closeSync(fd);
+  }
+
   return target;
 }

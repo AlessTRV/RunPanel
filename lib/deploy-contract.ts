@@ -233,6 +233,18 @@ export function parseContractJson(json: string | null | undefined): DeployContra
  * where the project's decrypted secrets get written. Choosing a Docker runtime
  * is a choice for isolation, and the repository must not be able to revoke it.
  *
+ * `docker.context`, `docker.dockerfile` and `docker.target` are on the list for
+ * exactly that last reason, and they were missing from it. They become the
+ * final argument and the `-f` of `docker build`, which runs with the checkout
+ * as its working directory — so `"context": "../.."` makes the build context
+ * the panel's own data directory, where `.secret` and `runpanel.db` live. A
+ * Dockerfile that then `COPY`s them, in a repository that already owns its own
+ * Dockerfile, walks off with the master key and the whole encrypted store.
+ *
+ * `healthcheck.port` joins them because the probe is a request the panel makes
+ * on the operator's network on the repository's instruction: left settable it
+ * turns every deploy into a loopback port scan.
+ *
  * A project starts life with `builder_config` of `"{}"`, so without this every
  * one of these fields would come from the repository until an operator happened
  * to set it by hand.
@@ -242,7 +254,12 @@ const PANEL_ONLY_FIELDS: readonly (readonly [string, string])[] = [
   ["docker", "capAdd"],
   ["docker", "network"],
   ["docker", "extraHosts"],
+  ["docker", "context"],
+  ["docker", "dockerfile"],
+  ["docker", "target"],
   ["envFile", "path"],
+  ["healthcheck", "port"],
+  ["healthcheck", "path"],
 ];
 
 export interface StrippedContract {
@@ -341,6 +358,22 @@ export interface PreflightIssue {
 }
 
 /**
+ * A relative path that does not climb out of the directory it is resolved in.
+ *
+ * Deliberately textual and deliberately strict: it runs in `preflight`, which
+ * `lib/` keeps free of `fs`, and it is a first line rather than the last one —
+ * `docker-builder` resolves the same values against the real checkout with
+ * `resolveInside` before it uses them.
+ */
+export function escapesCheckout(value: string): boolean {
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+  if (trimmed.startsWith("/") || trimmed.startsWith("\\")) return true;
+  if (/^[A-Za-z]:/.test(trimmed)) return true;
+  return trimmed.split(/[/\\]/).some((part) => part === "..");
+}
+
+/**
  * Catch what can be known before a build starts.
  *
  * A ten-minute image build that fails on a missing build arg is a bad way to
@@ -379,6 +412,25 @@ export function preflight(
 
   if (contract.envFile.enabled && !contract.envFile.path.trim()) {
     issues.push({ field: "envFile.path", message: "Il percorso del file .env è vuoto." });
+  }
+
+  /*
+    The build context and the Dockerfile are resolved against the checkout, so a
+    value that climbs out of it hands `docker build` a directory the project has
+    no business reading. Said here as well as refused at the builder, because
+    preflight is where an operator finds out before the build runs.
+  */
+  for (const [field, value] of [
+    ["docker.context", contract.docker.context],
+    ["docker.dockerfile", contract.docker.dockerfile],
+  ] as const) {
+    if (!value) continue;
+    if (escapesCheckout(value)) {
+      issues.push({
+        field,
+        message: `${value} esce dalla cartella del progetto: deve essere un percorso relativo al checkout.`,
+      });
+    }
   }
 
   if (contract.healthcheck.enabled && !contract.healthcheck.path.startsWith("/")) {

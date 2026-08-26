@@ -206,7 +206,9 @@ Panel settings win where both specify a value — the operator can see the targe
 machine, the repository cannot.
 
 Some fields are **panel-only** and are ignored when they come from a repository:
-`docker.mounts`, `docker.capAdd`, `docker.network`, `docker.extraHosts` and
+`docker.mounts`, `docker.capAdd`, `docker.network`, `docker.extraHosts`,
+`docker.context`, `docker.dockerfile`, `docker.target`, `healthcheck.path`,
+`healthcheck.port` and
 `envFile.path`. The rest of the contract describes how to build and run the app,
 which is the repository's business; these describe what it may reach outside its
 own container, which is yours. Choosing a Docker runtime is a choice for

@@ -210,7 +210,8 @@ vede la macchina di destinazione, il repository no.
 
 Alcuni campi sono **solo del pannello** e vengono ignorati se arrivano da un
 repository: `docker.mounts`, `docker.capAdd`, `docker.network`,
-`docker.extraHosts` e `envFile.path`. Il resto del contratto descrive come
+`docker.extraHosts`, `docker.context`, `docker.dockerfile`, `docker.target`,
+`envFile.path`, `healthcheck.path` e `healthcheck.port`. Il resto del contratto descrive come
 costruire e avviare l'app, che è affare del repository; questi descrivono cosa
 può raggiungere fuori dal proprio container, che è affare tuo. Scegliere un
 runtime Docker è una scelta di isolamento, e un `runpanel.json` non deve poter

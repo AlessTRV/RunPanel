@@ -175,8 +175,34 @@ async function probeHttp(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 3000);
 
+  /*
+    Built, not concatenated.
+
+    `${port}${path}` looks like it can only ever address loopback, and it cannot:
+    a path of `@example.com/` makes `127.0.0.1:3000` the URL's *userinfo* and
+    `example.com` its host, so the panel goes and fetches whatever the path said.
+    `healthcheck.path` is now panel-only alongside `healthcheck.port`, which closes
+    the repository's route to it — this closes the shape of the bug, so a value an
+    operator typed cannot do it either.
+  */
+  const base = `http://127.0.0.1:${port}`;
+  let url: URL;
   try {
-    const res = await fetch(`http://127.0.0.1:${port}${path}`, {
+    url = new URL(path, base);
+  } catch {
+    clearTimeout(timer);
+    return { ok: false, reason: `il path ${path} non è un percorso valido` };
+  }
+  if (url.origin !== new URL(base).origin) {
+    clearTimeout(timer);
+    return {
+      ok: false,
+      reason: `il path ${path} punta fuori da 127.0.0.1:${port} e non viene interrogato`,
+    };
+  }
+
+  try {
+    const res = await fetch(url, {
       signal: controller.signal,
       redirect: "manual",
     });

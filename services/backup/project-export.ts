@@ -1,4 +1,6 @@
 import fs from "fs";
+import { parseContractJson } from "@/lib/deploy-contract";
+import { resolveInside } from "@/lib/fs-safe";
 import path from "path";
 import crypto from "crypto";
 import { decrypt, encrypt } from "@/lib/crypto";
@@ -199,6 +201,21 @@ export async function exportProjectRepo(
   const files: StagedFile[] = [];
   let skipped = 0;
 
+  /*
+    The dotenv the panel itself writes into the checkout is not part of the
+    repository, and it holds every one of the project's variables in clear.
+
+    Without this the archive carried them decrypted even when the operator
+    declined `includeSecretKey` — which is precisely the moment they said they
+    did not want the archive to be able to decrypt anything. The path is read
+    from the project's own contract rather than guessed, because it is
+    configurable, and `resolveInside` maps it the same way the deploy did.
+  */
+  const contract = parseContractJson(project.builder_config);
+  const envFileAbsolute = contract.envFile.enabled
+    ? resolveInside(root, contract.envFile.path)
+    : null;
+
   const walk = (dir: string, relative: string) => {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
       if (REPO_EXCLUDES.has(entry.name)) {
@@ -207,6 +224,11 @@ export async function exportProjectRepo(
       }
       const absolute = path.join(dir, entry.name);
       const rel = relative ? `${relative}/${entry.name}` : entry.name;
+
+      if (envFileAbsolute && absolute === envFileAbsolute) {
+        skipped++;
+        continue;
+      }
 
       if (entry.isDirectory()) {
         walk(absolute, rel);

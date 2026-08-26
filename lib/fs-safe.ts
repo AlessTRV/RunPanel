@@ -17,6 +17,12 @@ import path from "path";
  *    — git preserves them, and `tar -xf` recreates them from a ZIP — resolves
  *    to a path under the repo and passes, while the read or write that follows
  *    lands wherever the link points. `fs.realpathSync` is what closes it.
+ *
+ * And a third, which the first version of this file got wrong: a **dangling**
+ * link is invisible to `fs.existsSync`, because that follows the link and finds
+ * nothing. Treated as a missing file it was re-attached to a resolved parent
+ * and passed containment — and `writeFileSync` on a dangling link creates the
+ * link's target. The walk below therefore asks `lstat`, not `stat`.
  */
 
 function isInside(root: string, candidate: string): boolean {
@@ -29,6 +35,24 @@ function realpathOrSelf(target: string): string {
     return fs.realpathSync(target);
   } catch {
     return target;
+  }
+}
+
+/**
+ * Whether anything sits at this path, INCLUDING a symlink whose target is gone.
+ *
+ * `fs.existsSync` uses `stat`, which follows links, so it answers false for a
+ * dangling one. That was the whole bug this replaces: a dangling link counted
+ * as a missing file, its name was re-attached to a resolved parent, containment
+ * passed, and the write that followed landed wherever the link pointed.
+ * `lstat` looks at the link itself.
+ */
+function lexists(target: string): boolean {
+  try {
+    fs.lstatSync(target);
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -57,14 +81,29 @@ export function resolveInside(base: string, relative: string): string | null {
 
   let existing = target;
   const missing: string[] = [];
-  while (!fs.existsSync(existing)) {
+  while (!lexists(existing)) {
     const parent = path.dirname(existing);
     if (parent === existing) return null;
     missing.unshift(path.basename(existing));
     existing = parent;
   }
 
-  const resolved = path.join(realpathOrSelf(existing), ...missing);
+  /*
+    Resolved for real, and a failure here is a refusal rather than a fallback.
+
+    `realpathOrSelf` cannot be used: it hands back its input, and for a dangling
+    symlink the input is the link's own path — which sits inside the root and
+    sails through the check below. A link that cannot be resolved is a link
+    nobody can vouch for, so it does not get to be a destination.
+  */
+  let real: string;
+  try {
+    real = fs.realpathSync(existing);
+  } catch {
+    return null;
+  }
+
+  const resolved = path.join(real, ...missing);
   return isInside(root, resolved) ? resolved : null;
 }
 

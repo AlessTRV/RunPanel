@@ -1,4 +1,5 @@
 import { IBuilder, BuildContext, BuildResult } from "./types";
+import { resolveInside } from "@/lib/fs-safe";
 import { docker, DockerError, lines } from "../docker/cli";
 import { labelArgs } from "../docker/labels";
 import { buildArgsToFlags, currentImageTag, imageTag, pullImage } from "../docker/images";
@@ -49,9 +50,35 @@ export const dockerBuilder: IBuilder = {
       ...buildArgsToFlags(buildArgs),
     ];
 
-    if (ctx.dockerfile) args.push("-f", ctx.dockerfile);
+    /*
+      The context and the Dockerfile are resolved against the checkout and
+      refused if they leave it.
+
+      Both are panel-only in the contract, so a repository cannot set them any
+      more — but the operator can, and the value that reaches `docker build`
+      decides which directory is handed to the daemon. `../..` from a checkout
+      is the panel's data directory: `.secret`, the store, and every other
+      project. This is the check that makes the deny-list a boundary rather
+      than an intention.
+    */
+    const context = resolveInside(projectDir, ctx.buildContext ?? ".");
+    if (!context) {
+      const message = `Il contesto di build esce dalla cartella del progetto: ${ctx.buildContext}`;
+      onLog(`ERROR: ${message}`);
+      return { success: false, artifactDir: projectDir, startCmd: "", error: message };
+    }
+
+    if (ctx.dockerfile) {
+      const dockerfile = resolveInside(projectDir, ctx.dockerfile);
+      if (!dockerfile) {
+        const message = `Il Dockerfile esce dalla cartella del progetto: ${ctx.dockerfile}`;
+        onLog(`ERROR: ${message}`);
+        return { success: false, artifactDir: projectDir, startCmd: "", error: message };
+      }
+      args.push("-f", dockerfile);
+    }
     if (ctx.target) args.push("--target", ctx.target);
-    args.push(ctx.buildContext ?? ".");
+    args.push(context);
 
     const argNames = Object.keys(buildArgs);
     if (argNames.length > 0) {

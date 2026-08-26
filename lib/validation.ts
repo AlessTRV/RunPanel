@@ -174,11 +174,18 @@ export const updateProjectSchema = z.object({
   access: accessSchema.optional(),
 });
 
+/**
+ * Bounded like every other list in this file, and for a sharper reason than
+ * symmetry: a value here is decrypted into the environment of a spawned
+ * process, and an environment block has a size the kernel will refuse. A
+ * megabyte pasted into one variable turns every deploy of that project into
+ * `E2BIG` from `execve`, which reads as the app being broken.
+ */
 export const envVarsSchema = z.object({
   vars: z.array(z.object({
-    key: z.string().min(1).regex(/^[A-Za-z_][A-Za-z0-9_]*$/, "Invalid env var name"),
-    value: z.string(),
-  })),
+    key: z.string().min(1).max(64).regex(/^[A-Za-z_][A-Za-z0-9_]*$/, "Invalid env var name"),
+    value: z.string().max(65536),
+  })).max(500),
 });
 
 export const controlActionSchema = z.object({
@@ -197,6 +204,23 @@ export const controlActionSchema = z.object({
  * the one that cannot be skipped by posting straight at the endpoint. `logs` is
  * exempt because it cannot change anything.
  */
+/**
+ * What the project terminal accepts.
+ *
+ * It was the one mutating route with no schema, and it cost two things. An
+ * `action` nobody checked meant a `stop` arriving with no live session fell
+ * through to the first branch and OPENED a shell in the container instead of
+ * closing one. And an `input` nobody typed meant a number reached
+ * `stdin.write()`, which throws — a 500 where a 400 was the answer.
+ */
+export const terminalActionSchema = z
+  .object({
+    action: z.enum(["start", "stop"]).optional(),
+    /** One keystroke to a pasted block; anything larger is not a terminal. */
+    input: z.string().max(65536).optional(),
+  })
+  .strict();
+
 export const consoleModeSchema = z.enum(["engine", "shell", "logs"]);
 
 export const serviceConsoleSchema = z.discriminatedUnion("action", [
@@ -254,8 +278,23 @@ export const hostPathSchema = z.string().trim().min(2).max(4096).superRefine((ra
   if (segments.some((segment) => segment === "." || segment === "..")) return reject(HOST_PATH_RULE);
 
   const normalised = `/${segments.join("/")}`;
-  if (FORBIDDEN_HOST_PATHS.some((bad) => normalised === bad || normalised.startsWith(`${bad}/`))) {
-    reject(`${normalised} è una directory di sistema: non può essere montata in un container`);
+
+  /*
+    Three relationships, not one.
+
+    The list used to reject a path that IS a forbidden entry or sits UNDER one,
+    and stopped there — so `/var/lib/docker` was refused while `/var/lib`, its
+    parent, sailed through and handed the container the same directory one level
+    up. An ancestor of a forbidden path is a superset of it, so it has to go too.
+  */
+  const forbidden = FORBIDDEN_HOST_PATHS.some(
+    (bad) =>
+      normalised === bad ||
+      normalised.startsWith(`${bad}/`) ||
+      bad.startsWith(`${normalised}/`)
+  );
+  if (forbidden) {
+    reject(`${normalised} è o contiene una directory di sistema: non può essere montata in un container`);
   }
 });
 
@@ -329,11 +368,14 @@ export const serviceMountsSchema = z.object({
 /**
  * A mount in the spelling a deploy contract stores: `source:target[:ro]`.
  *
- * Checked here, at the route, and **not** inside `deployContractSchema`.
+ * Applied by `buildStartOpts`, where these strings become `docker run -v`
+ * arguments, and **not** inside `deployContractSchema`.
  * `parseContract` falls back to the whole default contract when parsing fails,
  * so one stale mount string tightened into an error would cost a project its
  * commands, its network and its restart policy at the same time. The contract
- * stays permissive; this is where an operator's input is refused.
+ * stays permissive; this is where a mapping that cannot be parsed is dropped
+ * before the daemon sees it — including one arriving from a restored backup or a
+ * hand-edited column, which no editor ever validated.
  */
 export const mountStringSchema = z.string().trim().min(3).max(8192).superRefine((raw, ctx) => {
   const parsed = parseMountString(raw);

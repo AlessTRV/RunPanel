@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth-guard";
+import { terminalActionSchema } from "@/lib/validation";
 import { getDb } from "@/lib/db";
 import { spawn, type ChildProcess } from "child_process";
 import { projectEvents } from "@/services/events";
@@ -60,7 +61,14 @@ export async function POST(request: NextRequest, { params }: Params) {
   } catch {
     return NextResponse.json({ error: "Richiesta non valida" }, { status: 400 });
   }
-  const { action, input } = body as { action?: string; input?: string };
+  const parsed = terminalActionSchema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: "Dati non validi", details: parsed.error.issues },
+      { status: 400 }
+    );
+  }
+  const { action, input } = parsed.data;
 
   const db = await getDb();
   const project = await db
@@ -80,6 +88,22 @@ export async function POST(request: NextRequest, { params }: Params) {
 
   const containerName = `runpanel-${project.slug}`;
   const sessionKey = `term-${projectId}`;
+
+  /*
+    A `stop` is never a reason to start one.
+
+    The condition used to be `action === "start" || !sessions.has(...)`, so a
+    stop arriving after the shell had already gone — which is exactly when a
+    client sends one — opened a fresh container shell and reported it started.
+  */
+  if (action === "stop") {
+    const session = sessions.get(sessionKey);
+    if (session) {
+      try { session.proc.kill(); } catch { /* ignore */ }
+      sessions.delete(sessionKey);
+    }
+    return NextResponse.json({ status: "stopped" });
+  }
 
   if (action === "start" || !sessions.has(sessionKey)) {
     // Kill existing session
@@ -118,27 +142,29 @@ export async function POST(request: NextRequest, { params }: Params) {
       session.buffer.push(notice);
       projectEvents.emit(projectId, { type: "terminal:output", text: notice });
       projectEvents.emit(projectId, { type: "terminal:closed", code });
+
+      // Out of the map as soon as it is gone. Left in, a dead session kept the
+      // reaper from collecting it for as long as anything polled the route, and
+      // every later write answered `ok` into a shell that no longer existed.
+      // Compared by identity: a restart puts a NEW session under this same key,
+      // and the old one's close must not take it down with it.
+      if (sessions.get(sessionKey) === session) sessions.delete(sessionKey);
     });
 
     return NextResponse.json({ status: "started", container: containerName });
   }
 
-  if (action === "stop") {
-    const session = sessions.get(sessionKey);
-    if (session) {
-      try { session.proc.kill(); } catch { /* ignore */ }
-      sessions.delete(sessionKey);
-    }
-    return NextResponse.json({ status: "stopped" });
-  }
-
   // Send input to shell
   if (input !== undefined) {
     const session = sessions.get(sessionKey);
-    if (session && session.proc.stdin?.writable) {
-      session.proc.stdin.write(input);
-      session.lastActivity = Date.now();
+    // Answered rather than swallowed: writing into a shell that has exited used
+    // to return `ok` and do nothing, so the operator typed into a dead terminal
+    // with no way to tell.
+    if (!session || !session.proc.stdin?.writable) {
+      return NextResponse.json({ status: "dead" });
     }
+    session.proc.stdin.write(input);
+    session.lastActivity = Date.now();
     return NextResponse.json({ status: "ok" });
   }
 

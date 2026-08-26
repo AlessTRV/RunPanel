@@ -27,6 +27,18 @@ const MAX_ATTEMPTS_PER_IP = 5;
  * `RUNPANEL_TRUSTED_PROXY_HOPS` and the tighter per-address limit applies too.
  */
 const MAX_ATTEMPTS_GLOBAL = 20;
+
+/**
+ * A login body is `{password, setup, setupToken}` and nothing else.
+ *
+ * This route is one of the few `proxy.ts` lets through without a session, and
+ * `request.json()` buffers whatever arrives before anything can look at it. The
+ * rate limiter caps how MANY of these an unauthenticated caller gets, not how
+ * big each one is — twenty concurrent multi-gigabyte POSTs are inside the
+ * budget. Refused on the declared length, the same cheap first line the upload
+ * route takes, then again on what was actually read.
+ */
+const MAX_BODY_BYTES = 8 * 1024;
 const GLOBAL_KEY = "login:global";
 const WINDOW_MS = 15 * 60 * 1000;
 
@@ -49,10 +61,21 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // A malformed body is a bad request, not a crash.
+  const declaredLength = Number.parseInt(request.headers.get("content-length") ?? "0", 10);
+  if (declaredLength > MAX_BODY_BYTES) {
+    return NextResponse.json({ error: "Richiesta troppo grande" }, { status: 413 });
+  }
+
+  // A malformed body is a bad request, not a crash. Read as text first: a
+  // chunked request declares no length, so the header check above sees nothing
+  // and this is where the size is actually known.
   let body: unknown;
   try {
-    body = await request.json();
+    const raw = await request.text();
+    if (raw.length > MAX_BODY_BYTES) {
+      return NextResponse.json({ error: "Richiesta troppo grande" }, { status: 413 });
+    }
+    body = JSON.parse(raw);
   } catch {
     return NextResponse.json({ error: "Richiesta non valida" }, { status: 400 });
   }
