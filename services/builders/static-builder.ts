@@ -14,6 +14,18 @@ export const staticBuilder: IBuilder = {
     const { projectDir, buildCmd, envVars, onLog } = ctx;
 
     try {
+      /*
+        Adjacent rather than wrapped around an install, because a static
+        project has no install step to wrap. The two points still exist for a
+        command that has to prepare the machine before the build —
+        `apt-get install imagemagick` is exactly the case — and
+        `phaseUnavailableReason` leaves them available for this runtime on
+        purpose. A rejection surfaces as a build failure through the catch
+        below; see the note in node-builder.
+      */
+      await ctx.onPhase?.("pre-install");
+      await ctx.onPhase?.("post-install");
+
       // Run optional build command
       if (buildCmd) {
         onLog(`> ${buildCmd}`);

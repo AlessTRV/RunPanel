@@ -14,6 +14,7 @@ import * as serviceDataPath from "./012-service-data-path";
 import * as serviceMounts from "./013-service-mounts";
 import * as projectMountApply from "./014-project-mount-apply";
 import * as projectRepoPath from "./015-project-repo-path";
+import * as oneTimeCommands from "./016-one-time-commands";
 
 /**
  * Migrations are registered statically rather than read from disk with
@@ -38,6 +39,7 @@ export const migrations: Record<string, Migration> = {
   "013-service-mounts": serviceMounts,
   "014-project-mount-apply": projectMountApply,
   "015-project-repo-path": projectRepoPath,
+  "016-one-time-commands": oneTimeCommands,
 };
 
 export class StaticMigrationProvider implements MigrationProvider {

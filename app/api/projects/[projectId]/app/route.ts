@@ -79,5 +79,18 @@ export async function DELETE(_request: NextRequest, { params }: Params) {
   // ON DELETE SET NULL, so the delivery records survive with a null link.
   await db.deleteFrom("deployments").where("project_id", "=", projectId).execute();
 
+  /*
+    7. And the record of the one-time commands that ran, for the same
+    reason. The QUEUE stays: removing the app deletes what happened, not
+    what was asked for — which is why this route leaves the environment
+    variables alone too. A chore lined up for the next deploy is still
+    lined up for the next deploy.
+  */
+  await db
+    .deleteFrom("one_time_commands")
+    .where("project_id", "=", projectId)
+    .where("status", "in", ["done", "failed"])
+    .execute();
+
   return NextResponse.json({ success: true });
 }

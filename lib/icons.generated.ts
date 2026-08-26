@@ -2,7 +2,7 @@
 // Regenerate with: npm run icons
 import type { IconifyJSON } from "@iconify/types";
 
-/** 80 icons, extracted from @iconify-json/solar. */
+/** 81 icons, extracted from @iconify-json/solar. */
 export const solarSubset = {
   "prefix": "solar",
   "width": 24,
@@ -28,6 +28,9 @@ export const solarSubset = {
     },
     "arrow-left-linear": {
       "body": "<path fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"1.5\" d=\"M20 12H4m0 0l6-6m-6 6l6 6\"/>"
+    },
+    "bolt-circle-linear": {
+      "body": "<g fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\"><path d=\"m9.212 10.174l2.015-1.605c1.303-1.037 1.954-1.556 2.364-1.3s.196 1.05-.229 2.636l-.04.15c-.153.572-.23.858-.095 1.086l.007.012c.14.226.438.306 1.033.465c1.072.287 1.608.43 1.702.804l.004.019c.082.376-.34.712-1.186 1.386l-2.015 1.604c-1.302 1.038-1.953 1.556-2.363 1.3s-.197-1.05.228-2.636l.04-.15c.154-.571.23-.857.096-1.086l-.007-.012c-.14-.225-.438-.305-1.033-.465c-1.072-.287-1.608-.43-1.702-.804l-.004-.019c-.083-.375.34-.712 1.185-1.385Z\"/><path d=\"M2 12C2 6.477 6.477 2 12 2s10 4.477 10 10s-4.477 10-10 10S2 17.523 2 12Z\"/></g>"
     },
     "bolt-linear": {
       "body": "<path fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" d=\"m5.67 9.914l3.062-4.143c1.979-2.678 2.969-4.017 3.892-3.734s.923 1.925.923 5.21v.31c0 1.185 0 1.777.379 2.148l.02.02c.387.363 1.003.363 2.236.363c2.22 0 3.329 0 3.704.673l.018.034c.354.683-.289 1.553-1.574 3.29l-3.062 4.144c-1.98 2.678-2.969 4.017-3.892 3.734s-.923-1.925-.923-5.21v-.31c0-1.185 0-1.777-.379-2.148l-.02-.02c-.387-.363-1.003-.363-2.236-.363c-2.22 0-3.329 0-3.703-.673l-.019-.034c-.354-.683.289-1.552 1.574-3.29Z\"/>"

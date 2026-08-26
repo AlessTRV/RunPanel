@@ -3,6 +3,7 @@ import { isValidTimeZone, parseCron } from "./cron";
 import { BRANCH_NAME_RULE, COMMIT_SHA_RULE, isBranchName, isCommitSha } from "./git-ref";
 import { parseMountString } from "./mount";
 import { ruleProblem } from "./ip-access";
+import { deployPhases } from "./deploy-phases";
 
 
 
@@ -367,6 +368,33 @@ export const projectMountsSchema = z.object({
    * have never had one.
    */
   adopt: z.array(containerPathSchema).max(32).optional(),
+});
+
+export const deployPhaseSchema = z.enum(deployPhases);
+
+/**
+ * One command to run exactly once, at a chosen point of the next deploy.
+ *
+ * The 4000-character cap is the same as `shellCommand` in the deploy contract:
+ * this is the same kind of value — a shell script somebody typed — and two
+ * different limits for it would be two things to keep in step.
+ *
+ * `id` travels back on an edit so the row keeps its attempt count and the note
+ * from the tentativo that failed. Without it a save would look like a delete
+ * plus an insert, and a command that had already failed once would come back
+ * looking untouched.
+ */
+export const oneTimeCommandSchema = z.object({
+  id: z.string().trim().min(1).max(32).optional(),
+  phase: deployPhaseSchema,
+  command: z.string().trim().min(1).max(4000),
+  label: z.string().trim().max(80).nullable().optional(),
+  continueOnError: z.boolean(),
+});
+
+export const oneTimeCommandsSchema = z.object({
+  /** Replace semantics: this is the whole queue, not a patch. */
+  commands: z.array(oneTimeCommandSchema).max(50),
 });
 
 /**

@@ -14,6 +14,12 @@ import { buildProject } from "./builder-registry";
 import { processManager } from "./process-manager";
 import { isWindows } from "./env-utils";
 import { runReleaseCommand, waitForHealthy } from "./deploy-steps";
+import {
+  claimForDeploy,
+  releaseUnrun,
+  runPhase,
+  type PhaseContext,
+} from "./one-time-commands";
 import { notify } from "./notify";
 import { shouldAnnounceDeploy, type DeployTrigger } from "./notify/messages";
 import { writeEnvFileInto } from "./env-file";
@@ -171,6 +177,11 @@ async function runDeploy(
   // part. Until then, the panel's settings alone.
   let contract = parseContractJson(project.builder_config);
 
+  // Known only once the source has been fetched, and only interesting to the
+  // one-time commands, which record the commit they ran against so the history
+  // stays readable after the deployment row has been swept away.
+  let commitSha: string | null = null;
+
   async function updateDeployment(fields: Partial<DeploymentsTable>) {
     await db.updateTable("deployments").set(fields).where("id", "=", deploymentId).execute();
     if (fields.status) {
@@ -199,6 +210,74 @@ async function runDeploy(
   try {
     await updateDeployment({ status: "building" });
     appendLog(`=== ${label} started ===`);
+
+    /*
+      The environment is read here rather than after the contract, which is
+      where it used to sit. Nothing between the two points depends on it —
+      only the service injection below does, and that stays where it is
+      because it needs the contract's network. Moving it up is what lets a
+      `pre-deploy` command see the project's own variables, which is half the
+      reason to put a command there at all: a dump, an authenticated call, a
+      notification.
+    */
+    const envRows = await db
+      .selectFrom("env_vars")
+      .select(["key", "value"])
+      .where("project_id", "=", project.id)
+      .execute();
+
+    appendLog(`Loaded ${envRows.length} env var(s)`);
+
+    const envVars: Record<string, string> = {};
+    for (const row of envRows) {
+      envVars[row.key] = decrypt(row.value);
+    }
+
+    // Container runtimes publish whatever their own definition says, so an
+    // unset port means "no HTTP probe" rather than "assume 3000".
+    const isContainerRuntime = project.runtime_type === "docker" || project.runtime_type === "compose";
+    const port = project.port ?? (isContainerRuntime ? 0 : 3000);
+    if (port > 0) {
+      envVars.PORT = port.toString();
+    }
+    if (!envVars.NODE_ENV) {
+      envVars.NODE_ENV = "production";
+    }
+
+    const isDockerApp = project.runtime_type === "docker";
+
+    /*
+      Take the project's one-time commands for this deploy, all of them, now.
+
+      Claiming once at the top rather than per phase is the point: the queue a
+      deploy runs is the queue as it stood when the deploy started, so a
+      command added while it is running belongs to the next one and cannot be
+      run twice. Whatever is never reached goes back in the `finally`.
+    */
+    const oneTime = await claimForDeploy(project, deploymentId, appendLog);
+
+    /*
+      `contract`, `envVars` and `commitSha` are read at call time rather than
+      captured: the contract is still being resolved when the first phase
+      runs, and the commit is not known until the source has been fetched.
+
+      `projectDir` is the repository in every phase — deliberately not the
+      artifact directory the release command gets. For a static project the
+      two differ, and a one-time chore belongs to the project rather than to
+      the folder that ends up being served.
+    */
+    const phaseCtx = (image: string | null): PhaseContext => ({
+      runtimeType: project.runtime_type,
+      slug: project.slug,
+      projectDir: getRepoPath(project.slug),
+      image,
+      env: envVars,
+      contract,
+      commitSha,
+      onLog: appendLog,
+    });
+
+    await runPhase("pre-deploy", oneTime, phaseCtx(null));
 
     // REBUILD only: stop + clean first
     if (mode === "rebuild") {
@@ -263,17 +342,20 @@ async function runDeploy(
           project.pinned_sha,
           { repoUrl: project.source_url, onLog: appendLog }
         );
+        commitSha = commit.sha;
         await updateDeployment({ commit_sha: commit.sha, commit_message: commit.message });
         appendLog(`Commit: ${commit.sha.slice(0, 7)} - ${commit.message}`);
       } else if (repoExists(project.slug)) {
         appendLog(`Pulling latest from ${project.source_branch}...`);
         const commit = await gitPull(project.slug, project.source_branch);
+        commitSha = commit.sha;
         await updateDeployment({ commit_sha: commit.sha, commit_message: commit.message });
         appendLog(`Commit: ${commit.sha.slice(0, 7)} - ${commit.message}`);
       } else {
         appendLog(`Cloning ${project.source_url}...`);
         await gitClone(project.source_url, project.source_branch, project.slug);
         const commit = await getLatestCommit(project.slug);
+        commitSha = commit.sha;
         await updateDeployment({ commit_sha: commit.sha, commit_message: commit.message });
         appendLog(`Cloned at: ${commit.sha.slice(0, 7)} - ${commit.message}`);
       }
@@ -325,33 +407,6 @@ async function runDeploy(
         );
       }
     }
-
-    // Load env vars
-    const envRows = await db
-      .selectFrom("env_vars")
-      .select(["key", "value"])
-      .where("project_id", "=", project.id)
-      .execute();
-
-    appendLog(`Loaded ${envRows.length} env var(s)`);
-
-    const envVars: Record<string, string> = {};
-    for (const row of envRows) {
-      envVars[row.key] = decrypt(row.value);
-    }
-
-    // Container runtimes publish whatever their own definition says, so an
-    // unset port means "no HTTP probe" rather than "assume 3000".
-    const isContainerRuntime = project.runtime_type === "docker" || project.runtime_type === "compose";
-    const port = project.port ?? (isContainerRuntime ? 0 : 3000);
-    if (port > 0) {
-      envVars.PORT = port.toString();
-    }
-    if (!envVars.NODE_ENV) {
-      envVars.NODE_ENV = "production";
-    }
-
-    const isDockerApp = project.runtime_type === "docker";
 
     // Auto-inject service connection URLs (DB, Redis, etc.).
     //
@@ -410,6 +465,18 @@ async function runDeploy(
       appendLog(`Wrote env file to ${path.relative(projectDir, written)}`);
     }
 
+    /*
+      The new commit is on disk, the contract is resolved, the environment is
+      decrypted with the linked services injected, and the dotenv is written —
+      and nothing has been installed or built yet. That is the most useful
+      reading of "dopo il git, prima degli install", and it is why this sits
+      here rather than immediately after the fetch.
+
+      The one thing a command here cannot do is change the contract of the
+      very deploy running it: that was resolved a few lines above.
+    */
+    await runPhase("post-source", oneTime, phaseCtx(null));
+
     // Windows cannot replace a file that a running process has mapped, and a
     // native addon is always mapped — Prisma's query engine, better-sqlite3,
     // sharp. Since an in-place build writes into the very node_modules the old
@@ -417,7 +484,7 @@ async function runDeploy(
     // costs the whole deploy: `prisma generate` dies with
     //
     //   EPERM: operation not permitted, rename
-    //   '…/.prisma/client/query_engine-windows.dll.node.tmp3776' -> '….node'
+    //   '…/.prisma/client/query_engine-windows.dll.node.tmp3776' -> '….nodè
     //
     // and every subsequent deploy of a Prisma project fails the same way, for
     // as long as the app is up. Real zero-downtime here needs a separate build
@@ -458,6 +525,8 @@ async function runDeploy(
       target: contract.docker.target,
       buildArgs: buildEnv,
       buildTimeout: contract.build.timeoutSec * 1000,
+      // Only the native builders call this back — see `BuildContext.onPhase`.
+      onPhase: (phase) => runPhase(phase, oneTime, phaseCtx(null)),
       // Build-time env for native runtimes, plus any Node heap override.
       envVars: {
         ...envVars,
@@ -470,6 +539,22 @@ async function runDeploy(
     if (!buildResult.success) {
       throw new Error(buildResult.error || "Build failed");
     }
+
+    /*
+      The tag of what was just built, for the phases that can run inside it.
+      `startsWith` rather than the `replace(/^docker:/)` used below, because a
+      compose build answers `compose:<file>` and that is not an image anybody
+      can `docker run` — the phase runner has to be able to tell "there is an
+      image" from "there is not".
+    */
+    const builtImage = buildResult.startCmd.startsWith("docker:")
+      ? buildResult.startCmd.slice("docker:".length)
+      : null;
+
+    // Before the release command on purpose: `commands.release` is the
+    // contract's migration slot and should be the last thing before the app
+    // starts, so a chore that prepares for it has to come first.
+    await runPhase("post-build", oneTime, phaseCtx(builtImage));
 
     // Release command: one-shot work that must happen after the build and
     // before the app serves traffic — migrations, schema push, cache warm.
@@ -503,6 +588,11 @@ async function runDeploy(
         appendLog("No previous instance to stop.");
       }
     }
+
+    // After the stop and before the start, which is what the name has to
+    // mean: in this instant nothing is serving, and that is the window a
+    // chore like swapping a database file needs.
+    await runPhase("pre-start", oneTime, phaseCtx(builtImage));
 
     // Start new process
     appendLog("\n--- Starting application ---");
@@ -552,6 +642,12 @@ async function runDeploy(
       }
     }
 
+    // Before the probe, so a chore that warms a cache is what makes the probe
+    // pass. The app may not be answering yet at this instant — the settings
+    // tab says so, and points at "A deploy riuscito" for anything that needs
+    // it up.
+    await runPhase("post-start", oneTime, phaseCtx(builtImage));
+
     appendLog("\n--- Health check ---");
     const health = await waitForHealthy({
       slug: project.slug,
@@ -578,6 +674,15 @@ async function runDeploy(
         `Health check failed after ${contract.healthcheck.timeoutSec}s: ${health.reason}`
       );
     }
+
+    /*
+      The app is up and answering. Placed before the row is written rather
+      than after, so a failure here produces a cleanly failed deploy instead
+      of a row that flips from running back to failed. The cost is that
+      "a deploy riuscito" means "the health check passed" rather than "it is
+      already recorded", which is the smaller of the two lies.
+    */
+    await runPhase("post-deploy", oneTime, phaseCtx(builtImage));
 
     // Finalize
     appendLog(`\n=== ${label} successful ===`);
@@ -657,6 +762,10 @@ async function runDeploy(
       .where("id", "=", project.id)
       .execute();
   } finally {
+    // Anything this deploy took and never got to goes back in the queue. A
+    // no-op after a run that reached every phase; after one that failed early
+    // it is what stops the rest of the queue being swallowed by it.
+    await releaseUnrun(deploymentId);
     logFile.flush();
   }
 }

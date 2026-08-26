@@ -4,6 +4,7 @@ import Link from "next/link";
 import { Button } from "@heroui/react";
 import { Icon } from "@iconify/react";
 import { StatusBadge } from "@/components/StatusBadge";
+import { phaseLabel } from "@/lib/deploy-phases";
 import type { Project } from "./types";
 
 /**
@@ -33,6 +34,15 @@ export function ProjectHeader({
   const canStop = project.status === "running" || project.status === "error";
   const canStart = project.status === "stopped" || project.status === "error";
   const canPickVersion = project.source_type === "github" && Boolean(project.source_url);
+
+  /*
+    A queue nobody is reminded of is a queue that runs weeks later, on a
+    deploy triggered by somebody who never put anything in it. So it is said
+    next to the button that will run it, and not only on the tab where it was
+    written.
+  */
+  const oneTime = project.oneTimeCommands ?? [];
+  const oneTimePhases = [...new Set(oneTime.map((command) => command.phase))];
 
   return (
     <header className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -64,6 +74,20 @@ export function ProjectHeader({
               >
                 <Icon icon="solar:pin-linear" width={12} aria-hidden />
                 Fermo su <span className="font-mono">{project.pinned_sha.slice(0, 7)}</span>
+              </span>
+            )}
+            {oneTime.length > 0 && (
+              <span
+                title={oneTimePhases.map(phaseLabel).join(', ')}
+                className="border-accent/35 text-accent inline-flex items-center gap-1 rounded-[var(--radius)] border px-1.5 py-0.5 text-meta"
+              >
+                <Icon icon="solar:bolt-circle-linear" width={12} aria-hidden />
+                {oneTime.length === 1
+                  ? "1 comando una tantum"
+                  : `${oneTime.length} comandi una tantum`}
+                {oneTimePhases.length === 1
+                  ? ` · ${phaseLabel(oneTimePhases[0])}`
+                  : ` · ${oneTimePhases.length} passi`}
               </span>
             )}
             <button

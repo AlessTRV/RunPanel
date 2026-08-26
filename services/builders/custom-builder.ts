@@ -24,6 +24,12 @@ export const customBuilder: IBuilder = {
     }
 
     try {
+      // Both hooks fire even with no install command: the boundary exists
+      // regardless of whether anything is configured to sit on it. A rejection
+      // comes back as a build failure through the catch below, which is fine —
+      // see the note in node-builder.
+      await ctx.onPhase?.("pre-install");
+
       // Install — join all lines with && so they run in the same shell session
       // (needed for venv activation to persist across commands)
       if (installCmd) {
@@ -33,6 +39,8 @@ export const customBuilder: IBuilder = {
         await runCommand(joined, { cwd: projectDir, env: envVars, onLog });
         onLog("Install completed.");
       }
+
+      await ctx.onPhase?.("post-install");
 
       // Build — same: single shell session
       if (buildCmd) {

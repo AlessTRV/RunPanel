@@ -329,6 +329,65 @@ start.
 `.next`, `venv` and the like per runtime, then rebuilds from the code already
 checked out.
 
+### One-time commands
+
+The contract's commands run on *every* deploy. One-time commands run once, at the
+point of the sequence you pick, and then leave the queue: the migration you need
+now, a `git submodule update` after changing repository, a permissions fix, a
+cache purge. You write them in **Settings → Comandi una tantum**, and while the
+queue is not empty the panel says so next to the Deploy button.
+
+| Step | When | Docker | Native and Compose |
+|---|---|---|---|
+| Before the deploy | Before anything is touched; the old app is still up | host | host |
+| After git | New commit on disk, env loaded, nothing installed yet | host | host |
+| Before install | Immediately before the dependencies | — | host |
+| After install | Dependencies installed, build not run yet | — | host |
+| After build | Build succeeded, before the release command | container | host |
+| Before start | Old process stopped, new one not started | container | host |
+| After start | Process started, health check not passed yet | container | host |
+| On success | Health check passed | container | host |
+
+The two steps around the install do not exist under Docker and Compose: there,
+install and build are a single `docker build`, and there is no moment between them
+to pin anything to. Changing a project's runtime does not delete a command queued
+on one of them — it stays, flagged, and the deploy log says why it did not run.
+
+Where a command runs is decided by the step, not by an option: under Docker the
+steps after the build use a throwaway container from the freshly built image —
+same network, same mounts, same environment, exactly like the release command —
+while the two before the build necessarily run on the host, because that image
+does not exist yet. Under Compose everything runs on the host: there is no single
+image to make a container from, and reaching one service means writing it out
+(`docker compose run --rm api sh -c '…'`).
+
+**If one fails, the deploy fails** and the command **stays queued**: fix the cause
+and the next deploy retries it, with the attempt count and the last error in view.
+Tick *Continua anche se fallisce* and the deploy carries on, consuming the command
+anyway and recording it as failed. Whatever succeeds leaves the queue for the
+history, with its step, duration and commit; you can empty that by hand, and it
+collects itself after 90 days.
+
+One warning about *On success*: a command failing there marks the deploy failed
+**even though the app is alive and healthy**. It is the same state a failed health
+check produces, and it is deliberate — but it is the one step where "failed" does
+not mean "not serving".
+
+**They are not part of the deploy contract, and that is not an oversight.** The
+contract is merged with the repository's `runpanel.json`, so a field there would be
+arbitrary shell on the host that anyone able to push could run. They live in a
+table of their own, where nothing is merged and the only writer is an
+authenticated route: a repository cannot reach them, and there is no exception list
+to keep in step. It is not a new capability either — `commands.install` and `build`
+already run on the host for native runtimes — but it is one only whoever can sign
+in to the panel has. Do not put passwords in them: the command ends up in the
+deploy log.
+
+Execution is **at least once**, not exactly once: if the panel restarts while a
+command is running, that command goes back in the queue and will run again. The
+panel would rather repeat a migration than record one as done without knowing, and
+it flags interrupted rows instead of hiding them.
+
 ## Databases and services
 
 A *service* is a database managed by the panel: a labelled container, with its
@@ -782,11 +841,13 @@ app/
 lib/
   db/                   Kysely schema, migrations, both dialects
   deploy-contract.ts    the contract, its parser and preflight checks
+  deploy-phases.ts      the eight points a one-time command can pin to
   ip-access.ts          CIDR matching, and the host's own networks
   service-versions.ts   which engine versions are offered
   hooks/                useProjectStream (SSE), useResource (polling)
 services/
   deploy-pipeline.ts    the deploy orchestrator
+  one-time-commands.ts  the one-time queue: claim, run, outcome, history
   deploy-queue.ts       per-project serialisation and coalescing
   access-gate.ts        the TCP gate in front of a restricted port
   backup/               policies, dumps, archives, destinations, restore
@@ -841,6 +902,8 @@ name that does not exist.
 
 ## Known gaps
 
+- One-time commands run **at least once**, not exactly once: a panel restart
+  mid-execution puts the command back in the queue.
 - **Light theme** is not shipped; the token layer is structured for it.
 - Port restrictions are enforced by the panel process, so they do not survive it
   being stopped — the port simply closes. A rule set that has to hold with the

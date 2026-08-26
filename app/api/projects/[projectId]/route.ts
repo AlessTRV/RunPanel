@@ -14,6 +14,7 @@ import { readAccess, reportGate, syncGate } from "@/services/access";
 import { allocateLoopbackPort, closeGate } from "@/services/access-gate";
 import { restartFromLastDeployment } from "@/services/project-restart";
 import { getPreset } from "@/services/deploy-presets";
+import { queuedForProject } from "@/services/one-time-commands";
 import { processManager } from "@/services/process-manager";
 import { removeService } from "@/services/service-provisioner";
 import { removeProjectNetwork } from "@/services/docker-network";
@@ -76,6 +77,11 @@ export async function GET(_request: NextRequest, { params }: Params) {
     // the column: they differ exactly when something went wrong.
     repo_location: repoLocation(project.slug),
     repoMove: parseRepoMove(project.repo_move),
+    // The queue only. It is small, and the header needs it on every poll to
+    // say that the next deploy will not be an ordinary one. The history is
+    // fetched by the section that shows it, so a project with two years of
+    // chores does not widen a payload re-read on every deploy status change.
+    oneTimeCommands: await queuedForProject(projectId, project.runtime_type),
   });
 }
 

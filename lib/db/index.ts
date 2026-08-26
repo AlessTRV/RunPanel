@@ -197,15 +197,51 @@ async function recoverFromCrash(db: Kysely<Database>): Promise<void> {
     .where("status", "=", "running")
     .executeTakeFirst();
 
+  /*
+    A `claimed` one-time command is owned by a deploy in flight, and after a
+    restart no deploy is in flight — the statements above have just said so. So
+    it goes back in the queue.
+
+    The hazard is real and cannot be closed without a two-phase commit: a
+    command that DID run, and whose outcome was never written, comes back queued
+    and will run again. Re-running is the right default — the alternative is
+    silently marking a migration done that may never have happened. It is made
+    visible instead of hidden: `attempts` is incremented and `started_at`
+    written BEFORE the process is spawned, so a row that comes back with
+    `started_at` set was genuinely interrupted, and the queue says so.
+
+    Two statements, in this order, because the note belongs only on the rows
+    that actually started.
+  */
+  const interrupted = await db
+    .updateTable("one_time_commands")
+    .set({
+      status: "queued",
+      deployment_id: null,
+      error_message: "Il server è stato riavviato durante l'esecuzione",
+      finished_at: nowIso(),
+    })
+    .where("status", "=", "claimed")
+    .where("started_at", "is not", null)
+    .executeTakeFirst();
+
+  const unclaimed = await db
+    .updateTable("one_time_commands")
+    .set({ status: "queued", deployment_id: null })
+    .where("status", "=", "claimed")
+    .executeTakeFirst();
+
   const deployCount = rowCount(deployments);
   const projectCount = rowCount(projects);
   const backupCount = rowCount(backups);
   const restoreCount = rowCount(restores);
-  if (deployCount > 0 || projectCount > 0 || backupCount > 0 || restoreCount > 0) {
+  const oneTimeCount = rowCount(interrupted) + rowCount(unclaimed);
+  if (deployCount > 0 || projectCount > 0 || backupCount > 0 || restoreCount > 0 || oneTimeCount > 0) {
     console.log(
       `[RunPanel] Crash recovery: ${deployCount} deployment(s) marked failed, ` +
         `${projectCount} project(s) reset to stopped, ` +
-        `${backupCount} backup(s) and ${restoreCount} restore(s) marked failed`
+        `${backupCount} backup(s) and ${restoreCount} restore(s) marked failed, ` +
+        `${oneTimeCount} one-time command(s) put back in the queue`
     );
   }
 }

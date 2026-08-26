@@ -217,6 +217,9 @@ runtime Docker è una scelta di isolamento, e un `runpanel.json` non deve poter
 consegnare a sé stesso l'host. Quando ci prova, il log del deploy nomina i campi
 che ha scartato.
 
+Per la stessa ragione i [comandi una tantum](#comandi-una-tantum) non fanno parte
+del contratto: stanno in una tabella loro, dove un `runpanel.json` non arriva.
+
 ### Variabili d'ambiente
 
 Le variabili del progetto si gestiscono nella scheda **Variabili** e sono cifrate
@@ -335,6 +338,65 @@ più vecchio di quello che c'è, può non partire.
 
 Il **Re-Build** è la variante che pulisce prima: rimuove `node_modules`, `.next`,
 `venv` e simili secondo il runtime, e poi rifà tutto dal codice già presente.
+
+### Comandi una tantum
+
+I comandi del contratto girano a *ogni* deploy. Quelli una tantum girano una volta
+sola, al punto della scala che scegli tu, e poi spariscono dalla coda: la
+migrazione da fare adesso, un `git submodule update` dopo aver cambiato repository,
+un fix di permessi, uno svuotamento di cache. Si scrivono in **Impostazioni →
+Comandi una tantum**, e finché la coda non è vuota il pannello lo dice accanto al
+pulsante Deploy.
+
+| Passo | Quando | Docker | Nativo e Compose |
+|---|---|---|---|
+| Prima del deploy | Prima che venga toccato qualsiasi cosa; l'app vecchia gira ancora | host | host |
+| Dopo il git | Nuovo commit sul disco, variabili caricate, niente ancora installato | host | host |
+| Prima dell'install | Subito prima delle dipendenze | — | host |
+| Dopo l'install | Dipendenze installate, build non ancora fatto | — | host |
+| Dopo il build | Build riuscito, prima del release command | container | host |
+| Prima dell'avvio | Processo vecchio fermo, nuovo non ancora partito | container | host |
+| Dopo l'avvio | Processo avviato, health check non ancora passato | container | host |
+| A deploy riuscito | Health check passato | container | host |
+
+I due passi attorno all'install non esistono con Docker e Compose: lì install e
+build sono un unico `docker build`, e non c'è un momento fra i due a cui agganciare
+niente. Se cambi il runtime di un progetto che ne aveva uno in coda, il comando non
+sparisce: resta lì segnalato, e il log del deploy dice perché non è partito.
+
+Dove girano è deciso dal passo, non da un'opzione: sotto Docker i passi dopo il
+build usano un container usa-e-getta creato dall'immagine appena costruita — stessa
+rete, stessi mount, stesso ambiente, esattamente come il release command — mentre i
+due prima del build girano per forza sull'host, perché quell'immagine non esiste
+ancora. Con Compose girano sempre sull'host: non c'è una sola immagine da cui
+creare un container, e per entrare in un servizio serve scriverlo a mano
+(`docker compose run --rm api sh -c '…'`).
+
+**Se uno fallisce, il deploy fallisce** e il comando **resta in coda**: sistemi la
+causa e il deploy successivo lo riprova, con il numero di tentativi e l'errore
+dell'ultimo sotto gli occhi. Se spunti *Continua anche se fallisce* il deploy tira
+dritto e il comando viene consumato lo stesso, registrato come fallito. Quello che
+riesce esce dalla coda e finisce nella cronologia, con passo, durata e commit; si
+svuota a mano, e da sola dopo 90 giorni.
+
+Un avvertimento su *A deploy riuscito*: se un comando lì fallisce, il deploy viene
+registrato come fallito **anche se l'app è viva e sana**. È lo stesso stato in cui
+finisce un health check fallito, ed è voluto — ma è l'unico passo in cui "fallito"
+non vuol dire "non sta servendo".
+
+**Non stanno nel contratto di deploy, e non è una svista.** Il contratto si fonde
+con il `runpanel.json` del repository, quindi un campo lì dentro sarebbe shell
+arbitraria sull'host che chiunque possa pushare riesce a far girare. Stanno in una
+tabella loro, dove niente si fonde e l'unico che scrive è una rotta autenticata: un
+repository non li può toccare, e non c'è nessuna lista di eccezioni da tenere
+aggiornata. Non è comunque un permesso nuovo — `commands.install` e `build` girano
+già sull'host per i runtime nativi — ma è un permesso che ha solo chi entra nel
+pannello. Non metterci password: il comando finisce nel log del deploy.
+
+L'esecuzione è **almeno una volta**, non esattamente una volta: se il pannello si
+riavvia mentre un comando sta girando, il comando torna in coda e ripartirà. Il
+pannello preferisce ripetere una migrazione piuttosto che darla per fatta senza
+saperlo, e segnala le righe interrotte invece di nasconderle.
 
 ## Database e servizi
 
@@ -799,11 +861,13 @@ app/
 lib/
   db/                   schema Kysely, migrazioni, entrambi i dialetti
   deploy-contract.ts    il contratto, il suo parser e i controlli preliminari
+  deploy-phases.ts      gli otto punti a cui si aggancia un comando una tantum
   ip-access.ts          confronto CIDR, e le reti della macchina
   service-versions.ts   quali versioni dei motori sono offerte
   hooks/                useProjectStream (SSE), useResource (polling)
 services/
   deploy-pipeline.ts    l'orchestratore del deploy
+  one-time-commands.ts  la coda una tantum: presa, esecuzione, esito, cronologia
   deploy-queue.ts       serializzazione e accorpamento per progetto
   access-gate.ts        il gate TCP davanti a una porta limitata
   backup/               policy, dump, archivi, destinazioni, ripristino
@@ -858,6 +922,8 @@ build fallisce su un nome di icona che non esiste.
 
 ## Limiti noti
 
+- I comandi una tantum girano **almeno una volta**, non esattamente una volta:
+  un riavvio del pannello a metà esecuzione rimette il comando in coda.
 - Il **tema chiaro** non è incluso; il livello dei token è strutturato per
   accoglierlo.
 - Le restrizioni sulle porte sono applicate dal processo del pannello, quindi non

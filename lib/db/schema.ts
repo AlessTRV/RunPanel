@@ -30,6 +30,17 @@ export type DeployTrigger = "webhook" | "poll";
 export type ServiceType = "postgresql" | "mysql" | "redis" | "mongodb";
 export type WebhookStatus = "accepted" | "rejected" | "ignored";
 
+/**
+ * `queued`  waiting for the next deploy. May carry `error_message` and a
+ *           raised `attempts` from a previous critical failure — a failure
+ *           does not consume the row.
+ * `claimed` a deploy holds it. `started_at is not null` means the process was
+ *           actually spawned, which is what crash recovery reads.
+ * `done`    ran, exit 0. History.
+ * `failed`  ran non-zero AND `continue_on_error`, so consumed anyway. History.
+ */
+export type OneTimeCommandStatus = "queued" | "claimed" | "done" | "failed";
+
 // Declared where the column semantics live, so the two cannot disagree.
 export type { AccessMode } from "../access-columns";
 import type { AccessMode } from "../access-columns";
@@ -139,6 +150,57 @@ export interface DeploymentsTable {
   error_message: string | null;
   start_cmd: string | null;
   artifact_dir: string | null;
+}
+
+/**
+ * A command an operator wants run exactly once, at a chosen point of the next
+ * deploy.
+ *
+ * A table of its own and NOT a field of the deploy contract, for a reason that
+ * is structural rather than tidy: `builder_config` is merged with whatever
+ * `runpanel.json` the repository shipped (`resolveContract`), so a contract
+ * field would be arbitrary shell on the host that a pushed file could set.
+ * `PANEL_ONLY_FIELDS` cannot even express a top-level key — it is a list of
+ * parent/child pairs. Out here there is no deny-list to keep in step: nothing
+ * merges into this table, and the only writer is an authenticated route.
+ */
+export interface OneTimeCommandsTable {
+  id: string;
+  project_id: string;
+  /** One of `deployPhases` — see lib/deploy-phases.ts, which owns the list. */
+  phase: string;
+  /** Newline-separated, joined with `&&` exactly like `commands.release`. */
+  command: string;
+  /** The operator's name for it. NULL falls back to the first line of `command`. */
+  label: string | null;
+  /**
+   * 0 | 1 — a non-zero exit is recorded and the deploy carries on, and the row
+   * is consumed either way. Off, a failure fails the deploy and puts the row
+   * back in the queue for the next one.
+   */
+  continue_on_error: number;
+  status: OneTimeCommandStatus;
+  /** Order within a phase. Ties broken by `created_at`. */
+  position: number;
+  /**
+   * How many times the command was actually spawned.
+   *
+   * Written *before* the process starts, so a row that comes back queued after
+   * a crash can be told apart from one that never ran.
+   */
+  attempts: number;
+  /**
+   * The deploy that last took this row. `set null` rather than the cascade used
+   * elsewhere: the 90-day deployment sweep must not erase the record that a
+   * command ran.
+   */
+  deployment_id: string | null;
+  /** Denormalised so the history stays readable once the deployment is gone. */
+  commit_sha: string | null;
+  error_message: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  created_at: string;
 }
 
 export interface EnvVarsTable {
@@ -377,6 +439,7 @@ export interface Database {
   projects: ProjectsTable;
   deployments: DeploymentsTable;
   env_vars: EnvVarsTable;
+  one_time_commands: OneTimeCommandsTable;
   services: ServicesTable;
   service_databases: ServiceDatabasesTable;
   webhook_deliveries: WebhookDeliveriesTable;

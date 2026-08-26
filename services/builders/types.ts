@@ -1,3 +1,5 @@
+import type { BuildPhase } from "@/lib/deploy-phases";
+
 export interface BuildContext {
   projectDir: string;
   /** Project slug — used for image naming and ownership labels. */
@@ -11,6 +13,20 @@ export interface BuildContext {
   packageManager?: "auto" | "npm" | "bun" | "pnpm" | "yarn";
   envVars: Record<string, string>;
   onLog: (line: string) => void;
+
+  /**
+   * Run whatever one-time commands are pinned to this point of the build.
+   *
+   * Resolves when they are done and REJECTS when a critical one failed, which
+   * is what fails the build. The phase type is narrowed to the two a builder
+   * owns, so it cannot be handed one it does not run.
+   *
+   * Optional because the deploy pipeline is the only caller that supplies it,
+   * and a builder invoked from anywhere else has nothing to run. Only the
+   * native builders call it: under Docker install and build are a single
+   * `docker build`, so there is no boundary between them to offer.
+   */
+  onPhase?: (phase: BuildPhase) => Promise<void>;
 
   // Docker template fields
   dockerImage?: string;

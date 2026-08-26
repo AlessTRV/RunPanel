@@ -10,6 +10,27 @@ import { processManager } from "./process-manager";
  * that behaviour differently: the release command, and the health check.
  */
 
+/**
+ * Turn a multi-line command field into one shell invocation.
+ *
+ * Joined with `&&` rather than run line by line so the lines share a session:
+ * `source venv/bin/activate` on one line has to still be in effect on the next,
+ * and a separate spawn per line loses that. `&&` also stops the rest as soon as
+ * one of them fails, which is what "eseguiti in ordine" has to mean.
+ *
+ * Here rather than in each caller because there were four copies of these three
+ * lines — install and build in the node builder, the same pair in the custom
+ * builder, and the release command below — and a fifth was about to be written
+ * for the one-time commands.
+ */
+export function joinScript(command: string): string {
+  return command
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join(" && ");
+}
+
 interface ReleaseOptions {
   runtimeType: string;
   slug: string;
@@ -31,11 +52,7 @@ interface ReleaseOptions {
  * project was containerised.
  */
 export async function runReleaseCommand(command: string, opts: ReleaseOptions): Promise<void> {
-  const script = command
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .join(" && ");
+  const script = joinScript(command);
 
   if (!script) return;
 

@@ -13,11 +13,17 @@ export const nodeBuilder: IBuilder = {
 
   async build(ctx: BuildContext): Promise<BuildResult> {
     const { projectDir, buildCmd, startCmd, installCmd, packageManager, envVars, onLog } = ctx;
+    // A rejection from `onPhase` lands in the catch below and comes back as a
+    // build failure rather than as an exception. That is fine: its message
+    // already names the command, and the row's lifecycle was settled before it
+    // threw — see `runPhase`.
     const pm = packageManager && packageManager !== "auto"
       ? { cmd: packageManager, install: `${packageManager} install` }
       : detectPackageManager(projectDir);
 
     try {
+      await ctx.onPhase?.("pre-install");
+
       // Install dependencies — multi-line custom or auto-detected
       if (installCmd) {
         const cmds = installCmd.split("\n").map(c => c.trim()).filter(Boolean);
@@ -29,6 +35,8 @@ export const nodeBuilder: IBuilder = {
         await runCommand(pm.install, { cwd: projectDir, env: envVars, onLog });
       }
       onLog("Dependencies installed.");
+
+      await ctx.onPhase?.("post-install");
 
       // Build — multi-line custom or auto-detected
       const pkgJson = JSON.parse(fs.readFileSync(path.join(projectDir, "package.json"), "utf-8"));

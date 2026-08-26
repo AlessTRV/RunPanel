@@ -241,6 +241,8 @@ const GC_INTERVAL_MS = 6 * 60 * 60 * 1000;
 /** History worth keeping for a panel nobody is auditing. */
 const DEPLOYMENT_RETENTION_DAYS = 90;
 const WEBHOOK_RETENTION_DAYS = 30;
+/** Spent one-time commands. Long enough to answer "did that chore run?". */
+const ONE_TIME_RETENTION_DAYS = 90;
 
 /**
  * The rows nothing else collects.
@@ -291,10 +293,21 @@ async function pruneStore(): Promise<void> {
       .executeTakeFirst()
   );
 
-  if (rateLimits + deployed + webhooks > 0) {
+  // Spent one-time commands only. A `queued` row is configuration an
+  // operator wrote and a `claimed` one is work in flight, and neither
+  // becomes collectable by sitting still for ninety days.
+  const oneTime = rowCount(
+    await db
+      .deleteFrom("one_time_commands")
+      .where("status", "in", ["done", "failed"])
+      .where("finished_at", "<", cutoff(ONE_TIME_RETENTION_DAYS))
+      .executeTakeFirst()
+  );
+
+  if (rateLimits + deployed + webhooks + oneTime > 0) {
     console.log(
       `[gc] Store: ${deployed} deployment(s), ${webhooks} webhook delivery(ies), ` +
-        `${rateLimits} rate-limit window(s)`
+        `${oneTime} spent one-time command(s), ${rateLimits} rate-limit window(s)`
     );
   }
 }

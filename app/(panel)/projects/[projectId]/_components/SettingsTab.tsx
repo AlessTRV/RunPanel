@@ -14,45 +14,16 @@ import { StickySaveBar } from "@/components/ui/StickySaveBar";
 import { DangerZone } from "@/components/ui/DangerAction";
 import { InfoTip } from "@/components/ui/Tooltip";
 import { Code, FieldHint } from "@/components/ui/Hint";
+import { CommandField } from "@/components/ui/CommandField";
 import { EnvFilePathHint, HealthcheckHint, PortHint } from "@/components/DeployHints";
 import { AccessSection } from "@/components/AccessSection";
 import { MountsSection } from "./MountsSection";
+import { OneTimeCommandsSection } from "./OneTimeCommandsSection";
 import { RepoPathSection } from "./RepoPathSection";
 import { WebhookSection } from "./WebhookSection";
 import { parseContractJson, type DeployContract } from "@/lib/deploy-contract";
 import type { RuntimeType } from "@/lib/validation";
 import type { Project } from "./types";
-
-/** A labelled multi-line field. Six of these were inline copies before. */
-function CommandField({
-  label,
-  hint,
-  value,
-  placeholder,
-  rows = 2,
-  onChange,
-}: {
-  label: string;
-  hint?: React.ReactNode;
-  value: string;
-  placeholder?: string;
-  rows?: number;
-  onChange: (value: string) => void;
-}) {
-  return (
-    <div>
-      <label className="text-muted mb-1 block text-sm font-medium">{label}</label>
-      <textarea
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        rows={rows}
-        placeholder={placeholder}
-        className="border-border bg-background text-foreground focus:border-accent/60 w-full resize-y rounded-[var(--radius)] border px-3 py-2 font-mono text-sm outline-none"
-      />
-      {hint && <p className="text-muted mt-1 text-meta">{hint}</p>}
-    </div>
-  );
-}
 
 /** The saved state, so "unsaved changes" is a fact rather than a guess. */
 function snapshot(
@@ -440,6 +411,24 @@ export function SettingsTab({
           onChange={(v) => patchContract({ commands: { ...contract.commands, release: v } })}
         />
       </Section>
+
+      {/*
+        Comandi che girano una volta sola, subito sotto quelli che girano
+        sempre: sono la stessa materia vista dall'altro lato, e la domanda
+        che porta qui ("dove metto questo comando?") ha le due risposte
+        una accanto all'altra.
+
+        Fuori dal guard `isDocker` perché vale per ogni runtime, e con un
+        salvataggio proprio come i bind: questa coda cambia da sola mentre
+        un deploy gira, e non è una cosa che un campo di form possa essere.
+      */}
+      <OneTimeCommandsSection
+        projectId={project.id}
+        runtimeType={runtimeType}
+        queued={project.oneTimeCommands ?? []}
+        isDeploying={project.status === "deploying"}
+        onChanged={() => onProjectChange({ ...project })}
+      />
 
       {/*
         The switch sits in the header, outside the trigger: a section can be
