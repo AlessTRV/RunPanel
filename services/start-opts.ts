@@ -2,6 +2,7 @@ import type { DeployContract } from "@/lib/deploy-contract";
 import type { ProjectsTable } from "@/lib/db/schema";
 import type { StartOpts } from "./process-drivers/types";
 import { writeEnvFile } from "./env-file";
+import { mountStringSchema } from "@/lib/validation";
 
 /**
  * The arguments a project's process is started with, in one place.
@@ -35,19 +36,54 @@ export function buildStartOpts(ctx: {
 }): StartOpts {
   const { project, contract, envVars } = ctx;
 
-  const mounts = [...contract.docker.mounts];
+  /*
+    PORT and NODE_ENV belong to every start, not only to a deploy.
+
+    They used to be set on the in-memory map inside the deploy pipeline and
+    were never persisted, so a restart — which rebuilds the environment from
+    the `env_vars` rows — brought a container back with no PORT at all, and
+    left `${PORT}` resolving to nothing in a compose file's interpolation. The
+    pm2 driver sets both itself, which is why only the container runtimes ever
+    showed it. Here they are set once, on the path both callers share.
+
+    A copy rather than a mutation: the caller's map is the same object the
+    release command and the one-time commands are handed, and editing it from
+    in here would be a side effect nobody reading those call sites can see.
+  */
+  const env = { ...envVars };
+  if (ctx.port > 0) env.PORT = String(ctx.port);
+  if (!env.NODE_ENV) env.NODE_ENV = "production";
+
+  /*
+    Re-checked here, where the strings become `docker run -v` arguments.
+
+    `mountStringSchema` was written for exactly this and then never wired to
+    anything — its own comment claimed it ran at the route, and no route imported
+    it. The mount editor validates the row form it saves, but a contract can also
+    arrive from a restored backup or from a hand-edited column, and those never
+    passed any check at all. A mapping that fails is dropped and named rather
+    than handed to the daemon.
+  */
+  const mounts: string[] = [];
+  for (const mount of contract.docker.mounts) {
+    if (mountStringSchema.safeParse(mount).success) {
+      mounts.push(mount);
+      continue;
+    }
+    ctx.onLog?.(`Mount ignorato, non è una mappatura valida: ${mount}`);
+  }
 
   // Only the container runtime gets the file as a mount. A native process reads
   // one written into its own directory at deploy time, which is still there.
   if (contract.envFile.enabled && project.runtime_type === "docker") {
-    const hostPath = writeEnvFile(project.slug, envVars);
+    const hostPath = writeEnvFile(project.slug, env);
     mounts.push(`${hostPath}:${contract.envFile.path}:ro`);
     ctx.onLog?.(`Wrote env file for mounting at ${contract.envFile.path}`);
   }
 
   return {
     cwd: ctx.cwd,
-    env: envVars,
+    env,
     port: ctx.port,
     loopbackPort: ctx.loopbackPort,
     deploymentId: ctx.deploymentId,

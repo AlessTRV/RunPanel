@@ -78,10 +78,29 @@ export function runCommand(command: string, opts: RunCommandOpts): Promise<void>
       }
     });
 
+    /*
+      A timeout has to say so.
+
+      `spawn` enforces `timeout` by sending SIGTERM, and a killed process closes
+      with a null code — so this used to report a build that ran out of time as
+      `exited with code null`, which sends the reader looking for a crash that
+      never happened. `killed` is how Node distinguishes the two.
+    */
     proc.on("close", (code) => {
       if (lastLine.trim()) onLog(lastLine);
-      if (code === 0) resolve();
-      else reject(new Error(`Command "${command}" exited with code ${code}`));
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      if (proc.killed && code === null) {
+        reject(
+          new Error(
+            `Command "${command}" interrotto dopo ${Math.round(timeout / 1000)}s (timeout del build)`
+          )
+        );
+        return;
+      }
+      reject(new Error(`Command "${command}" exited with code ${code}`));
     });
 
     proc.on("error", (err) => {

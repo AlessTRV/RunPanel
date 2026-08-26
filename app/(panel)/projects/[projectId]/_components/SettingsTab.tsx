@@ -25,6 +25,59 @@ import { parseContractJson, type DeployContract } from "@/lib/deploy-contract";
 import type { RuntimeType } from "@/lib/validation";
 import type { Project } from "./types";
 
+type RawContract = Record<string, unknown>;
+
+function isPlainObject(value: unknown): value is RawContract {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * What this form should actually send: what was stored, plus only what changed.
+ *
+ * The form holds a contract from `parseContractJson`, which is `.parse()` — so
+ * every field carrying a `.default()` is materialised whether or not anybody
+ * chose it. Sending that object back wrote all of them into `builder_config`,
+ * and since the panel's half WINS the merge, one press of Salva on an untouched
+ * screen permanently pinned `packageManager: auto`, `timeoutSec: 900`, the whole
+ * healthcheck block and the rest over whatever the repository's `runpanel.json`
+ * or the detected preset had been contributing. The column is deliberately
+ * sparse — see the comment on the PATCH route — and this is what keeps it sparse.
+ *
+ * Compared against the contract as it was LOADED, not against the schema's
+ * defaults, so a value the operator genuinely typed is written even when it
+ * happens to equal a default.
+ */
+function contractPatch(stored: string, loaded: DeployContract, current: DeployContract): RawContract {
+  let raw: RawContract = {};
+  try {
+    const parsed: unknown = stored ? JSON.parse(stored) : {};
+    if (isPlainObject(parsed)) raw = parsed;
+  } catch {
+    /* an unreadable column is replaced by what the form knows */
+  }
+
+  const walk = (base: RawContract, before: RawContract, after: RawContract): RawContract => {
+    const out: RawContract = { ...base };
+
+    for (const [key, next] of Object.entries(after)) {
+      const previous = before[key];
+
+      if (isPlainObject(previous) && isPlainObject(next)) {
+        const nested = walk(isPlainObject(out[key]) ? out[key] : {}, previous, next);
+        if (Object.keys(nested).length > 0) out[key] = nested;
+        continue;
+      }
+
+      // Unchanged means nobody chose it, and a default nobody chose has no
+      // business shadowing a repository that did choose.
+      if (JSON.stringify(previous) !== JSON.stringify(next)) out[key] = next;
+    }
+
+    return out;
+  };
+
+  return walk(raw, loaded as unknown as RawContract, current as unknown as RawContract);
+}
 /** The saved state, so "unsaved changes" is a fact rather than a guess. */
 function snapshot(
   appName: string,
@@ -216,7 +269,7 @@ export function SettingsTab({
           // Sent because applying a preset can change it. Unchanged otherwise,
           // and the route treats an identical value as no change.
           runtimeType,
-          builderConfig: contract,
+          builderConfig: contractPatch(storedContract, parseContractJson(storedContract), contract),
         }),
       });
       const data = await res.json();

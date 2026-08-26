@@ -575,6 +575,17 @@ async function runDeploy(
     await updateDeployment({
       start_cmd: buildResult.startCmd,
       artifact_dir: buildResult.artifactDir,
+      /*
+        Written down next to the other two facts about what actually ran.
+
+        `projects.builder_config` holds only the panel's half; this is that
+        merged over the repository's `runpanel.json` and the detected preset,
+        which until now existed nowhere but this function's local variable. A
+        restart re-derived it from the sparse column and quietly lost the
+        memory limit, the network mode and the env-file mount the repository
+        had contributed. See migration 017.
+      */
+      resolved_contract: JSON.stringify(contract),
     });
 
     // Stop the old process only after the build succeeded — unless the build
@@ -700,7 +711,11 @@ async function runDeploy(
 
     await db
       .updateTable("projects")
-      .set({ status: "running", port, updated_at: nowIso() })
+      // `port` is 0 for a container runtime with none configured, and 0 is not
+      // a port — `updateProjectSchema` demands `min(1)`, so writing it made
+      // every later save of the settings form answer 400. Null is what
+      // "no port" already means on this column.
+      .set({ status: "running", port: port > 0 ? port : null, updated_at: nowIso() })
       .where("id", "=", project.id)
       .execute();
 

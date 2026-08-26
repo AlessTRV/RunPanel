@@ -36,7 +36,7 @@ export async function restartFromLastDeployment(
 
   const lastDeploy = await db
     .selectFrom("deployments")
-    .select(["start_cmd", "artifact_dir"])
+    .select(["start_cmd", "artifact_dir", "resolved_contract"])
     .where("project_id", "=", projectId)
     .where("status", "in", ["running", "superseded"])
     .where("start_cmd", "is not", null)
@@ -59,7 +59,22 @@ export async function restartFromLastDeployment(
     envVars[row.key] = decrypt(row.value);
   }
 
-  const contract = parseContractJson(project.builder_config);
+  /*
+    The contract this project was actually deployed with, not the panel's half
+    of it.
+
+    `builder_config` deliberately stores only what the operator set, so that a
+    repository's `runpanel.json` can still contribute — which means reading it
+    alone here dropped every value that came from the repository or the
+    detected preset. A restart moved the app off `network: host`, took away its
+    memory limit and unmounted its env file, silently, and the deploy that
+    followed put them all back. Deploys record the merged result now; NULL is a
+    row written before they did, and falling back is better than refusing to
+    restart an app that is running fine.
+  */
+  const contract = lastDeploy.resolved_contract
+    ? parseContractJson(lastDeploy.resolved_contract)
+    : parseContractJson(project.builder_config);
 
   // The same connection strings a deploy injects, for the same reason. Without
   // this a restart handed the app whatever `DATABASE_URL` happened to be stored

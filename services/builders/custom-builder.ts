@@ -13,6 +13,8 @@ export const customBuilder: IBuilder = {
 
   async build(ctx: BuildContext): Promise<BuildResult> {
     const { projectDir, buildCmd, startCmd, installCmd, envVars, onLog } = ctx;
+    // See node-builder: the contract's build timeout never reached this call.
+    const timeout = ctx.buildTimeout;
 
     if (!startCmd) {
       return {
@@ -36,7 +38,7 @@ export const customBuilder: IBuilder = {
         const cmds = installCmd.split("\n").map(c => c.trim()).filter(Boolean);
         const joined = cmds.join(" && ");
         onLog(cmds.map(c => `> ${c}`).join("\n"));
-        await runCommand(joined, { cwd: projectDir, env: envVars, onLog });
+        await runCommand(joined, { cwd: projectDir, env: envVars, timeout, onLog });
         onLog("Install completed.");
       }
 
@@ -47,7 +49,7 @@ export const customBuilder: IBuilder = {
         const cmds = buildCmd.split("\n").map(c => c.trim()).filter(Boolean);
         const joined = cmds.join(" && ");
         onLog(cmds.map(c => `> ${c}`).join("\n"));
-        await runCommand(joined, { cwd: projectDir, env: envVars, onLog });
+        await runCommand(joined, { cwd: projectDir, env: envVars, timeout, onLog });
         onLog("Build completed.");
       }
 

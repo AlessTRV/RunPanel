@@ -72,7 +72,7 @@ export interface ProjectsTable {
   source_url: string | null;
   source_branch: string;
   runtime_type: RuntimeType;
-  /** JSON — see `BuilderConfig` in lib/types.ts */
+  /** JSON — see `deployContractSchema` in lib/deploy-contract.ts */
   builder_config: string;
   port: number | null;
   status: ProjectStatus;
@@ -150,6 +150,12 @@ export interface DeploymentsTable {
   error_message: string | null;
   start_cmd: string | null;
   artifact_dir: string | null;
+  /**
+   * JSON — the contract this deploy actually ran with, preset and the repo's
+   * `runpanel.json` already merged in. NULL for a row written before the
+   * column existed; see migration 017 for why the restart needs it.
+   */
+  resolved_contract: string | null;
 }
 
 /**
@@ -218,7 +224,6 @@ export interface ServicesTable {
   type: ServiceType;
   version: string;
   status: ServiceStatus;
-  container_id: string | null;
   port: number;
   /** AES-256-GCM ciphertext of a JSON credentials object */
   credentials: string;

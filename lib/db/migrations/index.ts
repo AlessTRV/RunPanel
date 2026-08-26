@@ -15,6 +15,8 @@ import * as serviceMounts from "./013-service-mounts";
 import * as projectMountApply from "./014-project-mount-apply";
 import * as projectRepoPath from "./015-project-repo-path";
 import * as oneTimeCommands from "./016-one-time-commands";
+import * as deploymentContract from "./017-deployment-contract";
+import * as dropContainerId from "./018-drop-container-id";
 
 /**
  * Migrations are registered statically rather than read from disk with
@@ -40,6 +42,8 @@ export const migrations: Record<string, Migration> = {
   "014-project-mount-apply": projectMountApply,
   "015-project-repo-path": projectRepoPath,
   "016-one-time-commands": oneTimeCommands,
+  "017-deployment-contract": deploymentContract,
+  "018-drop-container-id": dropContainerId,
 };
 
 export class StaticMigrationProvider implements MigrationProvider {

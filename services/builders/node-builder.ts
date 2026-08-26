@@ -13,6 +13,11 @@ export const nodeBuilder: IBuilder = {
 
   async build(ctx: BuildContext): Promise<BuildResult> {
     const { projectDir, buildCmd, startCmd, installCmd, packageManager, envVars, onLog } = ctx;
+    // `contract.build.timeoutSec` reached every builder and only the container
+    // ones read it, so a native build was capped at `runCommand`'s 300s default
+    // however high the contract went — including the 1800s the Next preset asks
+    // for, which is the exact build slow enough to need it.
+    const timeout = ctx.buildTimeout;
     // A rejection from `onPhase` lands in the catch below and comes back as a
     // build failure rather than as an exception. That is fine: its message
     // already names the command, and the row's lifecycle was settled before it
@@ -29,10 +34,10 @@ export const nodeBuilder: IBuilder = {
         const cmds = installCmd.split("\n").map(c => c.trim()).filter(Boolean);
         const joined = cmds.join(" && ");
         onLog(cmds.map(c => `> ${c}`).join("\n"));
-        await runCommand(joined, { cwd: projectDir, env: envVars, onLog });
+        await runCommand(joined, { cwd: projectDir, env: envVars, timeout, onLog });
       } else {
         onLog(`> ${pm.install}`);
-        await runCommand(pm.install, { cwd: projectDir, env: envVars, onLog });
+        await runCommand(pm.install, { cwd: projectDir, env: envVars, timeout, onLog });
       }
       onLog("Dependencies installed.");
 
@@ -46,12 +51,12 @@ export const nodeBuilder: IBuilder = {
         const cmds = buildCmd.split("\n").map(c => c.trim()).filter(Boolean);
         const joined = cmds.join(" && ");
         onLog(cmds.map(c => `> ${c}`).join("\n"));
-        await runCommand(joined, { cwd: projectDir, env: envVars, onLog });
+        await runCommand(joined, { cwd: projectDir, env: envVars, timeout, onLog });
         onLog("Build completed.");
       } else if (hasBuildScript) {
         const cmd = `${pm.cmd} run build`;
         onLog(`> ${cmd}`);
-        await runCommand(cmd, { cwd: projectDir, env: envVars, onLog });
+        await runCommand(cmd, { cwd: projectDir, env: envVars, timeout, onLog });
         onLog("Build completed.");
       }
 
