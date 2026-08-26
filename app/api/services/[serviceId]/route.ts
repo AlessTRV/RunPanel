@@ -287,7 +287,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       access_mode: nextAccess.access_mode,
       access_allow: nextAccess.access_allow,
       access_port: nextAccess.access_port,
-      ...(recreated ? { container_id: recreated.containerId, status: recreated.status } : {}),
+      ...(recreated ? { status: recreated.status } : {}),
       updated_at: nowIso(),
     })
     .where("id", "=", serviceId)

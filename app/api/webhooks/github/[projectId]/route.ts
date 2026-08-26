@@ -13,7 +13,7 @@ import { generateId } from "@/lib/utils";
 import { consumeRateLimit } from "@/lib/rate-limit";
 import { verifyWebhookSignature } from "@/services/git-manager";
 import { enqueueDeploy } from "@/services/deploy-queue";
-import type { GitHubPushPayload } from "@/lib/types";
+import type { GitHubPushPayload } from "@/lib/github";
 
 type Params = { params: Promise<{ projectId: string }> };
 

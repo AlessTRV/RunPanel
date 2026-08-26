@@ -133,7 +133,10 @@ export async function POST(request: NextRequest) {
   };
 
   try {
-    const containerId = await provisionService(config, projectSlug, accessRow);
+    // The container id it returns is deliberately not stored: `container_name` is
+    // what every reader uses, and the id column went stale in place — see
+    // migration 018.
+    await provisionService(config, projectSlug, accessRow);
     provisioned = true;
     const connString = getConnectionString(config);
     const now = nowIso();
@@ -146,7 +149,6 @@ export async function POST(request: NextRequest) {
         type,
         version,
         status: "running",
-        container_id: containerId,
         port,
         credentials: encrypt(JSON.stringify({ ...credentials, connectionString: connString })),
         container_name: containerName,

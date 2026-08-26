@@ -118,3 +118,18 @@ export function parseRepoSlug(sourceUrl: string | null | undefined): RepoSlug | 
 
   return REPO_SLUG_PATTERN.test(full) ? { owner, repo, full } : null;
 }
+
+/**
+ * The slice of a GitHub push payload the webhook actually reads.
+ *
+ * Moved here from `lib/types.ts`, which was deleted: the other five types in
+ * that file were unreferenced and had drifted from the real schema — one of
+ * them still described a column removed in migration 002 — while a comment on
+ * `projects.builder_config` pointed readers at it as the authority. The shape
+ * of `builder_config` is `deployContractSchema` in lib/deploy-contract.ts.
+ */
+export interface GitHubPushPayload {
+  ref?: string;
+  head_commit?: { id: string; message: string } | null;
+  sender?: { login: string };
+}

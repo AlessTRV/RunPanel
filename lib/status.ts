@@ -55,10 +55,6 @@ export function statusMeta(status: string): StatusMeta {
   return STATUS_META[status as KnownStatus] ?? STATUS_META.stopped;
 }
 
-export function statusTone(status: string): StatusTone {
-  return statusMeta(status).tone;
-}
-
 
 export const TONE_DOT: Record<StatusTone, string> = {
   success: "bg-success",
