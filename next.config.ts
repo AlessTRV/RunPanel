@@ -79,6 +79,26 @@ const distDir = process.env.RUNPANEL_DIST_DIR || ".next";
 const nextConfig: NextConfig = {
   distDir,
 
+  /**
+   * Lower the peak memory of a webpack build, for a small cost in build time.
+   *
+   * Not a micro-optimisation. The panel builds itself on the machine it runs
+   * on, beside the projects it is hosting, and Node derives its heap limit from
+   * that machine's RAM when nothing says otherwise — about 2 GB on a 4 GB
+   * server. A build sharing such a box with a running panel and three running
+   * projects spends its time in garbage collection until V8 gives up:
+   *
+   *     FATAL ERROR: Ineffective mark-compacts near heap limit
+   *
+   * That is a failed self-update, and this file arrives on the machine inside
+   * the update itself, so the flag takes effect on the very build that would
+   * otherwise die. Documented as low-risk in
+   * next/dist/docs/01-app/02-guides/memory-usage.md.
+   */
+  experimental: {
+    webpackMemoryOptimizations: true,
+  },
+
   // Native / driver packages that must stay outside the bundle.
   serverExternalPackages: ["better-sqlite3", "pg"],
 

@@ -1,4 +1,5 @@
 import fs from "fs";
+import os from "os";
 import path from "path";
 import { sql } from "kysely";
 import { config } from "@/lib/config";
@@ -82,6 +83,31 @@ const REQUIRED_FREE_BYTES = 2 * 1024 * 1024 * 1024;
 
 /** Pre-update copies of the store to keep. Three updates back is generous. */
 const KEEP_STORE_DUMPS = 3;
+
+/**
+ * The heap ceiling for the panel's own build, written down instead of inherited.
+ *
+ * Node picks a limit from the machine's RAM when nothing says otherwise —
+ * roughly 2 GB on a 4 GB server. That number is wrong twice over. V8 lets the
+ * heap grow towards whatever ceiling it is given, so a high one simply means
+ * more garbage kept around; and this build runs on the box the panel serves
+ * from, next to the projects it hosts, where that memory is not free. The build
+ * then spends its time in garbage collection and dies at the ceiling with
+ * `Ineffective mark-compacts near heap limit` — a failed update, on a build
+ * that needs about 600 MB when measured on its own.
+ *
+ * A lower ceiling makes V8 collect earlier, and the floor here is well clear of
+ * what the build actually needs. An operator who has already set
+ * `--max-old-space-size` had a reason: theirs wins, untouched.
+ */
+function buildHeapEnv(): Record<string, string> {
+  const inherited = process.env.NODE_OPTIONS ?? "";
+  if (inherited.includes("--max-old-space-size")) return {};
+
+  const share = Math.floor((os.totalmem() * 0.4) / (1024 * 1024));
+  const megabytes = Math.min(4096, Math.max(1024, share));
+  return { NODE_OPTIONS: `${inherited} --max-old-space-size=${megabytes}`.trim() };
+}
 
 const STAGING_DIR = ".next-update";
 const PREVIOUS_DIR = ".next-old";
@@ -378,13 +404,16 @@ async function execute(base: Runner, opts: StartOptions): Promise<void> {
     const buildCommand = `${pm.manager.cmd} run build`;
     say(`> ${buildCommand}   (in ${STAGING_DIR})`);
 
+    const heap = buildHeapEnv();
+    if (heap.NODE_OPTIONS) say(`NODE_OPTIONS=${heap.NODE_OPTIONS}`);
+
     try {
       await runCommand(buildCommand, {
         cwd: root,
         // Through the package manager rather than calling next directly, so the
         // `prebuild` script still runs: it regenerates lib/icons.generated.ts,
         // and an icon added by this very update would otherwise be missing.
-        env: { RUNPANEL_DIST_DIR: STAGING_DIR },
+        env: { RUNPANEL_DIST_DIR: STAGING_DIR, ...heap },
         timeout: BUILD_TIMEOUT_MS,
         onLog: say,
       });
