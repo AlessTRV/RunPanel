@@ -20,6 +20,26 @@ export interface PackageManager {
   cmd: string;
   /** The whole install command, because npm and the rest do not agree on it. */
   install: string;
+  /**
+   * The same install, refusing to re-resolve anything the lockfile already
+   * decided. Only the panel's own update uses it.
+   *
+   * A plain `bun install` is not a reproduction of the committed tree: when it
+   * decides the lockfile is stale it re-resolves every caret range and rewrites
+   * the lockfile in place. That is how the panel came to be running HeroUI
+   * 3.2.4 while both lockfiles said 3.0.3 — and 3.2 had moved the clickable
+   * part of `Switch` into a subcomponent, so every toggle in the panel rendered
+   * correctly and did nothing. A dependency upgrade nobody asked for, applied
+   * silently, on the machine, during an update about something else.
+   *
+   * npm is deliberately left alone. Its frozen install is `npm ci`, which
+   * begins by deleting `node_modules` — and this install runs *inside the
+   * running panel*, which resolves `better-sqlite3` and `pg` out of that
+   * directory to serve the very page showing the update's progress. `npm
+   * install` already honours a lockfile that is in sync, and
+   * `tests/suites/dependencies-unit.mjs` is what keeps it in sync.
+   */
+  frozenInstall: string;
 }
 
 /**
@@ -29,18 +49,18 @@ export interface PackageManager {
  */
 export function detectPackageManager(projectDir: string): PackageManager {
   if (fs.existsSync(path.join(projectDir, "pnpm-lock.yaml"))) {
-    return { cmd: "pnpm", install: "pnpm install" };
+    return { cmd: "pnpm", install: "pnpm install", frozenInstall: "pnpm install --frozen-lockfile" };
   }
   if (fs.existsSync(path.join(projectDir, "yarn.lock"))) {
-    return { cmd: "yarn", install: "yarn install" };
+    return { cmd: "yarn", install: "yarn install", frozenInstall: "yarn install --frozen-lockfile" };
   }
   if (
     fs.existsSync(path.join(projectDir, "bun.lock")) ||
     fs.existsSync(path.join(projectDir, "bun.lockb"))
   ) {
-    return { cmd: "bun", install: "bun install" };
+    return { cmd: "bun", install: "bun install", frozenInstall: "bun install --frozen-lockfile" };
   }
-  return { cmd: "npm", install: "npm install" };
+  return { cmd: "npm", install: "npm install", frozenInstall: "npm install" };
 }
 
 /**
@@ -65,7 +85,7 @@ export function resolvePackageManager(
   if (search(detected.cmd)) return { manager: detected, detected: detected.cmd, fellBack: false };
 
   return {
-    manager: { cmd: "npm", install: "npm install" },
+    manager: { cmd: "npm", install: "npm install", frozenInstall: "npm install" },
     detected: detected.cmd,
     fellBack: true,
   };

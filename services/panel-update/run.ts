@@ -382,9 +382,9 @@ async function execute(base: Runner, opts: StartOptions): Promise<void> {
     state.packageManager = pm.manager.cmd;
     writeState(dataDir, state);
 
-    say(`> ${pm.manager.install}`);
+    say(`> ${pm.manager.frozenInstall}`);
     try {
-      await runCommand(pm.manager.install, {
+      await runCommand(pm.manager.frozenInstall, {
         cwd: root,
         timeout: INSTALL_TIMEOUT_MS,
         onLog: say,
@@ -546,8 +546,8 @@ async function rollbackSource(runner: Runner, why: string): Promise<void> {
       the old build is the one genuinely inconsistent state this can produce.
     */
     const pm = resolvePackageManager(checkout.root, whichSync);
-    say(`> ${pm.manager.install}`);
-    await runCommand(pm.manager.install, {
+    say(`> ${pm.manager.frozenInstall}`);
+    await runCommand(pm.manager.frozenInstall, {
       cwd: checkout.root,
       timeout: INSTALL_TIMEOUT_MS,
       onLog: say,
