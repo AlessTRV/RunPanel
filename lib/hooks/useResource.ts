@@ -6,13 +6,24 @@ interface Options {
   /** Milliseconds between refreshes. 0 disables polling entirely. */
   intervalMs?: number;
   enabled?: boolean;
+  /**
+   * Where a manual `refresh()` should go, when asking for an answer computed
+   * now is a different request from the cheap one the poll makes.
+   *
+   * `/api/diagnostics` is the case this exists for: polls take the 30s cache,
+   * `?fresh=1` re-runs the checks.
+   */
+  refreshUrl?: string;
 }
 
 interface Result<T> {
   data: T | null;
   error: string | null;
   loading: boolean;
-  refresh: () => void;
+  /** Resolves once the refresh has landed, so a caller can await it. */
+  refresh: () => Promise<void>;
+  /** True while a manual refresh is in flight — the button's pending state. */
+  refreshing: boolean;
 }
 
 /**
@@ -33,26 +44,48 @@ interface Result<T> {
  * seconds, so the whole page re-rendered while nothing had changed — and every
  * `memo()` on a row component was dead weight, since its prop was never the
  * same object twice.
+ *
+ * That last one is why a manual refresh is not just another poll here. Both
+ * guards are silent by design — a tick that arrives mid-request is dropped, a
+ * response identical to the last one is not published — and silence is the
+ * right answer for something nobody asked for. Behind a button it is the wrong
+ * one: the diagnostics page's "Ricontrolla" could be swallowed by a poll that
+ * happened to be in flight, and when it did get through it published nothing,
+ * because it had asked the same cache the same question. So `refresh()` is
+ * never dropped for a poll, it can go somewhere else than the poll does
+ * (`refreshUrl`), and it reports itself through `refreshing` — a control the
+ * operator pressed has to visibly do something, even when the answer is that
+ * nothing changed.
  */
 export function useResource<T>(url: string | null, options: Options = {}): Result<T> {
-  const { intervalMs = 0, enabled = true } = options;
+  const { intervalMs = 0, enabled = true, refreshUrl } = options;
 
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(Boolean(url) && enabled);
+  const [refreshing, setRefreshing] = useState(false);
 
   const inFlight = useRef(false);
+  /** Tracked apart from the poll's, so neither can swallow the other. */
+  const manualInFlight = useRef(false);
   const generation = useRef(0);
   /** Serialised last payload. Null until the first response arrives. */
   const published = useRef<string | null>(null);
 
   const load = useCallback(
-    (signal?: AbortSignal) => {
-      if (!url || inFlight.current) return Promise.resolve();
-      inFlight.current = true;
+    (signal?: AbortSignal, manual = false) => {
+      if (!url) return Promise.resolve();
+
+      // A poll never stacks on a poll. A manual refresh is not held to that:
+      // it used to be dropped by whichever background tick happened to be
+      // running, which is the one moment an operator is watching for a result.
+      // `refresh` below is what keeps a press from stacking on itself.
+      if (!manual && inFlight.current) return Promise.resolve();
+      if (!manual) inFlight.current = true;
+
       const mine = ++generation.current;
 
-      return fetch(url, { signal })
+      return fetch(manual ? (refreshUrl ?? url) : url, { signal })
         .then(async (res) => {
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
           return (await res.json()) as T;
@@ -82,10 +115,10 @@ export function useResource<T>(url: string | null, options: Options = {}): Resul
           setLoading(false);
         })
         .finally(() => {
-          inFlight.current = false;
+          if (!manual) inFlight.current = false;
         });
     },
-    [url]
+    [url, refreshUrl]
   );
 
   useEffect(() => {
@@ -133,9 +166,29 @@ export function useResource<T>(url: string | null, options: Options = {}): Resul
     };
   }, [url, enabled, intervalMs, load]);
 
+  /**
+   * The press.
+   *
+   * It owns the pending state rather than `load` doing it, and that is not
+   * bookkeeping: `load` runs from the polling effect, and a setState reached
+   * synchronously from there is a cascading render — the lint rule that says so
+   * is right. The press is also where "not twice at once" belongs, since it is
+   * the only caller a human can repeat by hand.
+   *
+   * No abort signal: a refresh belongs to the press, not to the effect, and
+   * cancelling it because the cadence changed underneath would put the button
+   * back to doing nothing at random.
+   */
   const refresh = useCallback(() => {
-    void load();
-  }, [load]);
+    if (!url || manualInFlight.current) return Promise.resolve();
+    manualInFlight.current = true;
+    setRefreshing(true);
 
-  return { data, error, loading, refresh };
+    return load(undefined, true).finally(() => {
+      manualInFlight.current = false;
+      setRefreshing(false);
+    });
+  }, [url, load]);
+
+  return { data, error, loading, refresh, refreshing };
 }

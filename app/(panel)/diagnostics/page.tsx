@@ -10,18 +10,25 @@ import { SkeletonBlock } from "@/components/ui/Skeletons";
 import { StatTile } from "@/components/ui/StatTile";
 import { useResource } from "@/lib/hooks/useResource";
 import { usePollInterval } from "@/lib/hooks/usePollingInterval";
+import { formatRelative } from "@/lib/format";
 
 interface DiagnosticsData {
   checks: Check[];
   tone: "ok" | "warn" | "danger";
   problems: number;
+  /** When the reading being shown was taken, not when it was asked for. */
+  checkedAt: string;
 }
 
 export default function DiagnosticsPage() {
   const poll30000 = usePollInterval(30_000);
 
-  const { data, loading, refresh } = useResource<DiagnosticsData>("/api/diagnostics", {
+  const { data, loading, refresh, refreshing } = useResource<DiagnosticsData>("/api/diagnostics", {
     intervalMs: poll30000,
+    // Polling takes the 30s cache — the checks shell out to docker, pm2 and
+    // systemctl, and this page is not the only one asking. "Ricontrolla" means
+    // run them again, so it asks a different question.
+    refreshUrl: "/api/diagnostics?fresh=1",
   });
 
   if (loading && !data) {
@@ -46,7 +53,7 @@ export default function DiagnosticsPage() {
         title="Diagnostica"
         description="Che cosa funziona su questa macchina, e che cosa succederebbe se si riavviasse adesso."
         actions={
-          <Button size="sm" variant="secondary" onPress={refresh}>
+          <Button size="sm" variant="secondary" isPending={refreshing} onPress={refresh}>
             <Icon icon="solar:refresh-linear" width={16} aria-hidden />
             Ricontrolla
           </Button>
@@ -58,7 +65,13 @@ export default function DiagnosticsPage() {
           label="Controlli"
           icon="solar:list-check-linear"
           value={String(checks.length)}
-          hint="eseguiti adesso"
+          /*
+            This said "eseguiti adesso", which was untrue for up to thirty
+            seconds and unfalsifiable from the screen. It is also the only way
+            to tell a re-check that found nothing changed from one that never
+            ran — which is what "Ricontrolla" looked like for its whole life.
+          */
+          hint={formatRelative(data?.checkedAt)}
         />
         <StatTile
           label="Da sistemare"
