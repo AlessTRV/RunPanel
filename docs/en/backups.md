@@ -21,12 +21,9 @@ the ones that exist when the backup runs.
 
 ## How they are taken
 
-Every dump runs **inside the container it belongs to**, which is the only way to
-guarantee the client and the server are the same version: a `pg_dump` a major
-behind produces a file `pg_restore` refuses, and produces it without complaining.
-RunPanel's own SQLite store is captured with `VACUUM INTO` and then verified with
-`PRAGMA integrity_check`, never copied — a copy taken under WAL silently omits
-the most recent writes.
+Every dump runs **inside the container it belongs to**, so the client and the
+server are always the same version. RunPanel's own SQLite store is captured with
+`VACUUM INTO` and then verified with `PRAGMA integrity_check`, never copied.
 
 ## Where they go
 
@@ -34,7 +31,7 @@ the most recent writes.
 - **S3-compatible** — AWS S3, Cloudflare R2, MinIO, Backblaze B2. SigV4 is signed
   in-house, no SDK. The endpoint accepts `https://` anywhere and `http://` only
   towards a private address: an archive holds every environment variable in the
-  panel, and towards the internet TLS is what protects it.
+  panel.
 
 The archive is a plain zip with a `manifest.json` and a `checksums.txt` in
 `sha256sum -c` format, so it can be verified and unpacked without RunPanel. Env
@@ -50,6 +47,6 @@ including the key itself is a separate, explicit choice.
 | Restore | guided, with an automatic pre-restore backup that aborts the restore if it fails |
 
 The restore shows what the archive holds and lets you choose entry by entry. The
-panel's own store is the one thing not restored live: a file this process has
-open cannot be swapped underneath it, so the restored database is staged and put
-into service at the next boot, with the previous one kept beside it.
+panel's own store is the one thing not restored live: the restored database is
+staged and put into service at the next boot, with the previous one kept beside
+it.

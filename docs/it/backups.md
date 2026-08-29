@@ -21,12 +21,9 @@ significare quelli che esistono quando il backup parte.
 
 ## Come vengono presi
 
-Ogni dump gira **dentro il container a cui appartiene**, che è l'unico modo di
-garantire che client e server siano della stessa versione: un `pg_dump` indietro
-di una major produce un file che `pg_restore` rifiuta, e lo produce senza
-lamentarsi. Lo store SQLite di RunPanel viene catturato con `VACUUM INTO` e poi
-verificato con `PRAGMA integrity_check`, mai copiato — una copia presa sotto WAL
-omette in silenzio le scritture più recenti.
+Ogni dump gira **dentro il container a cui appartiene**, così client e server
+sono sempre della stessa versione. Lo store SQLite di RunPanel viene catturato
+con `VACUUM INTO` e poi verificato con `PRAGMA integrity_check`, mai copiato.
 
 ## Dove finiscono
 
@@ -34,7 +31,7 @@ omette in silenzio le scritture più recenti.
 - **S3-compatibile** — AWS S3, Cloudflare R2, MinIO, Backblaze B2. La firma è
   SigV4 calcolata in casa, senza SDK. L'endpoint accetta `https://` ovunque e
   `http://` solo verso un indirizzo privato: un archivio contiene ogni variabile
-  d'ambiente del pannello, e verso internet è il TLS a proteggerlo.
+  d'ambiente del pannello.
 
 L'archivio è un normale zip con un `manifest.json` e un `checksums.txt` in
 formato `sha256sum -c`, così si può verificare e spacchettare senza RunPanel. Le
@@ -51,7 +48,6 @@ parte, ed esplicita.
 | Ripristino | guidato, con un backup automatico pre-ripristino che interrompe il ripristino se fallisce |
 
 Il ripristino mostra il contenuto dell'archivio e ti fa scegliere voce per voce.
-Lo store del pannello è l'unica cosa che non viene ripristinata a caldo: un file
-che questo processo tiene aperto non può essere sostituito sotto di lui, quindi
-il database ripristinato viene messo da parte e entra in servizio al riavvio
+Lo store del pannello è l'unica cosa che non viene ripristinata a caldo: il
+database ripristinato viene messo da parte ed entra in servizio al riavvio
 successivo, con il precedente conservato accanto.

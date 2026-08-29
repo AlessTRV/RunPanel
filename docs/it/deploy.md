@@ -31,7 +31,7 @@ Ognuno porta con sé un runtime e i comandi che gli servono.
   e puoi sceglierlo a mano per un repository la cui forma non si vede da fuori.
 - In **Impostazioni → Build e avvio** puoi selezionare un preset e premere
   **Applica i comandi**: i tre campi vengono riempiti con i suoi, insieme al
-  runtime, che con quei comandi viaggia sempre in coppia. Niente viene scritto
+  runtime. Niente viene scritto
   finché non salvi.
 
 La precedenza, dal basso: il preset rilevato, poi il `runpanel.json` del
@@ -66,18 +66,15 @@ Un repository può dichiarare come vuole essere distribuito:
 }
 ```
 
-Dove entrambi indicano un valore vince l'impostazione del pannello: l'operatore
-vede la macchina di destinazione, il repository no.
+Dove entrambi indicano un valore vince l'impostazione del pannello.
 
 Alcuni campi sono **solo del pannello** e vengono ignorati se arrivano da un
 repository: `docker.mounts`, `docker.capAdd`, `docker.network`,
 `docker.extraHosts`, `docker.context`, `docker.dockerfile`, `docker.target`,
-`envFile.path`, `healthcheck.path` e `healthcheck.port`. Il resto del contratto descrive come
-costruire e avviare l'app, che è affare del repository; questi descrivono cosa
-può raggiungere fuori dal proprio container, che è affare tuo. Scegliere un
-runtime Docker è una scelta di isolamento, e un `runpanel.json` non deve poter
-consegnare a sé stesso l'host. Quando ci prova, il log del deploy nomina i campi
-che ha scartato.
+`envFile.path`, `healthcheck.path` e `healthcheck.port`. Descrivono cosa il
+progetto può raggiungere fuori dal proprio container, e un `runpanel.json` non
+deve poter consegnare a sé stesso l'host. Quando ci prova, il log del deploy
+nomina i campi che ha scartato.
 
 Per la stessa ragione i [comandi una tantum](automation.md#comandi-una-tantum) non fanno parte
 del contratto: stanno in una tabella loro, dove un `runpanel.json` non arriva.
@@ -90,8 +87,7 @@ attivo — scritte anche in un file che l'app può leggere da sola.
 
 Le variabili con prefisso `NEXT_PUBLIC_`, `VITE_`, `PUBLIC_` o `REACT_APP_`
 vengono passate anche al **build**, non solo al runtime. I frontend le incorporano
-nel bundle client, quindi fornirle solo a runtime spedisce il valore sbagliato —
-o fa fallire un Dockerfile che le pretende.
+nel bundle client, quindi fornirle solo a runtime spedisce il valore sbagliato.
 
 ## Com'è fatto un deploy
 
@@ -105,8 +101,7 @@ o fa fallire un Dockerfile che le pretende.
    usa-e-getta o nella cartella del repository. Se fallisce, la nuova versione
    non parte: è il posto giusto per le migrazioni.
 6. **Avvio** — PM2 o Docker, con la policy di riavvio e i limiti del contratto.
-7. **Health check** — RunPanel sonda l'app finché non risponde. Senza, un'app che
-   parte e muore un secondo dopo risulterebbe distribuita con successo.
+7. **Health check** — RunPanel sonda l'app finché non risponde.
 
 Il **Re-Build** è la variante che pulisce prima: rimuove `node_modules`, `.next`,
 `venv` e simili secondo il runtime, e poi rifà tutto dal codice già presente.

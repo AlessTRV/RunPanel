@@ -13,15 +13,14 @@ in the history with the reason.
 
 With a GitHub account connected the webhook **registers itself**: flipping the
 switch creates it on the repository with the URL, the secret, the
-`application/json` content type and the `push` event alone already set. None of
-the four is a decision — they all follow from the project — and getting one
-wrong by hand failed silently. Turning auto-deploy off deactivates the hook
-rather than deleting it, so its delivery history on GitHub survives.
+`application/json` content type and the `push` event alone already set. Turning
+auto-deploy off deactivates the hook rather than deleting it, so its delivery
+history on GitHub survives.
 
 The section also says what is wrong: no token, an unrecognised repository, a
 panel address GitHub cannot reach, a misconfigured hook, a refused last
-delivery. **Send ping** asks GitHub for a real delivery — across DNS, the
-firewall, TLS and the signature, which are the parts that actually break.
+delivery. **Send ping** asks GitHub for a real delivery, across DNS, the
+firewall, TLS and the signature.
 
 So the panel knows which address to write into GitHub, set **Public address**
 under Account → Preferences. Left empty it is derived from the request, which
@@ -35,11 +34,10 @@ holds as long as you open the panel on the same address GitHub reaches it by.
 
 ## Polling, for a panel nothing can reach
 
-A webhook needs GitHub to open a connection *to* this machine, and for a great
-many self-hosted installations that cannot happen: behind NAT with no port
-forwarded, on a Tailscale or WireGuard network, on a laptop. There is nothing to
-configure better there — the delivery fails before it arrives, and nothing shows
-up in the panel's logs, because the problem is the direction of the connection.
+A webhook needs GitHub to open a connection *to* this machine, and behind NAT, on
+a Tailscale or WireGuard network, on a laptop, it cannot: the delivery fails
+before it arrives and nothing shows up in the logs, because the problem is the
+direction of the connection.
 
 So the panel can **ask** instead of being told. In the project's settings, under
 *Deploy automatico → Come parte il deploy*:
@@ -68,26 +66,22 @@ repositories the token cannot administer, or a panel with no account connected.
 
 The button next to **Deploy** opens the repository's history: pick the branch,
 pick the commit, and the project is rebuilt from there. It is for when the commit
-that just went out is the one that broke the app, and the alternative is a revert
-on GitHub and another push — a fix that needs the repository to cooperate at the
-moment production is down.
+that just went out is the one that broke the app.
 
 The choice **holds**. The project stops at that commit: every deploy rebuilds it,
 the header says so with a badge, and **auto-deploy is suspended** rather than
 carrying the project forward on the next push. Deliveries that arrive meanwhile
-stay in the history as ignored, with the reason — a webhook that does not deploy
-has to say why. **Back to the latest commit** releases the hold and deploys the
-branch head again.
+stay in the history as ignored, with the reason. **Back to the latest commit**
+releases the hold and deploys the branch head again.
 
 Choosing a different branch here changes the project's branch: from then on it is
 the one the webhook and the poller follow. The commit list comes from the GitHub
 API, so it wants a connected account; without one, or for a commit older than the
 last hundred, there is a field to paste a SHA into.
 
-One warning the panel repeats before going ahead, because it is the only way this
-feature breaks an app invisibly: **database migrations do not roll back**. If the
-restored version expects an older schema than the one that is there, it may not
-start.
+The panel repeats this before going ahead: **database migrations do not roll
+back**. If the restored version expects an older schema than the one that is
+there, it may not start.
 
 ## One-time commands
 
@@ -109,16 +103,15 @@ queue is not empty the panel says so next to the Deploy button.
 | On success | Health check passed | container | host |
 
 The two steps around the install do not exist under Docker and Compose: there,
-install and build are a single `docker build`, and there is no moment between them
-to pin anything to. Changing a project's runtime does not delete a command queued
-on one of them — it stays, flagged, and the deploy log says why it did not run.
+install and build are a single `docker build`. Changing a project's runtime does
+not delete a command queued on one of them — it stays, flagged, and the deploy
+log says why it did not run.
 
 Where a command runs is decided by the step, not by an option: under Docker the
 steps after the build use a throwaway container from the freshly built image —
-same network, same mounts, same environment, exactly like the release command —
-while the two before the build necessarily run on the host, because that image
-does not exist yet. Under Compose everything runs on the host: there is no single
-image to make a container from, and reaching one service means writing it out
+same network, same mounts, same environment, like the release command — while the
+two before the build run on the host. Under Compose everything runs on the host,
+and reaching one service means writing it out
 (`docker compose run --rm api sh -c '…'`).
 
 **If one fails, the deploy fails** and the command **stays queued**: fix the cause
@@ -129,21 +122,16 @@ history, with its step, duration and commit; you can empty that by hand, and it
 collects itself after 90 days.
 
 One warning about *On success*: a command failing there marks the deploy failed
-**even though the app is alive and healthy**. It is the same state a failed health
-check produces, and it is deliberate — but it is the one step where "failed" does
-not mean "not serving".
+**even though the app is alive and healthy**: it is the one step where "failed"
+does not mean "not serving".
 
 **They are not part of the deploy contract, and that is not an oversight.** The
 contract is merged with the repository's `runpanel.json`, so a field there would be
 arbitrary shell on the host that anyone able to push could run. They live in a
 table of their own, where nothing is merged and the only writer is an
-authenticated route: a repository cannot reach them, and there is no exception list
-to keep in step. It is not a new capability either — `commands.install` and `build`
-already run on the host for native runtimes — but it is one only whoever can sign
-in to the panel has. Do not put passwords in them: the command ends up in the
+authenticated route: a repository cannot reach them. Do not put passwords in them: the command ends up in the
 deploy log.
 
 Execution is **at least once**, not exactly once: if the panel restarts while a
-command is running, that command goes back in the queue and will run again. The
-panel would rather repeat a migration than record one as done without knowing, and
-it flags interrupted rows instead of hiding them.
+command is running, that command goes back in the queue and will run again, and
+the interrupted row is flagged.

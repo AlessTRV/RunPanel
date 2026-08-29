@@ -29,8 +29,8 @@ runtime and the commands that go with it.
 - At creation the panel detects one by looking at the repository's files, and you
   can pick one by hand for a repository whose shape cannot be seen from outside.
 - Under **Settings → Build and start** you can select a preset and press **Apply
-  commands**: the three fields are filled with its own, along with the runtime,
-  which always travels with them. Nothing is written until you save.
+  commands**: the three fields are filled with its own, along with the runtime.
+  Nothing is written until you save.
 
 Precedence, lowest first: the detected preset, then the repository's
 `runpanel.json`, then whatever you set in the panel.
@@ -64,17 +64,14 @@ A repository can declare how it wants to be deployed:
 }
 ```
 
-Panel settings win where both specify a value — the operator can see the target
-machine, the repository cannot.
+Panel settings win where both specify a value.
 
 Some fields are **panel-only** and are ignored when they come from a repository:
 `docker.mounts`, `docker.capAdd`, `docker.network`, `docker.extraHosts`,
 `docker.context`, `docker.dockerfile`, `docker.target`, `healthcheck.path`,
 `healthcheck.port` and
-`envFile.path`. The rest of the contract describes how to build and run the app,
-which is the repository's business; these describe what it may reach outside its
-own container, which is yours. Choosing a Docker runtime is a choice for
-isolation, and a `runpanel.json` must not be able to hand itself the host. When
+`envFile.path`. They describe what the project may reach outside its own
+container, and a `runpanel.json` must not be able to hand itself the host. When
 one tries, the deploy log names the fields it dropped.
 
 ## Environment variables
@@ -85,8 +82,7 @@ enabled — also written to a file the app can read itself.
 
 Variables prefixed `NEXT_PUBLIC_`, `VITE_`, `PUBLIC_` or `REACT_APP_` are passed
 to the **build** as well as the runtime. Frontends inline those into the client
-bundle, so supplying them only at runtime ships the wrong value — or fails a
-Dockerfile that asserts on them.
+bundle, so supplying them only at runtime ships the wrong value.
 
 ## What a deploy actually does
 
@@ -101,8 +97,7 @@ Dockerfile that asserts on them.
    the right place for migrations.
 6. **Start** — PM2 or Docker, with the restart policy and limits from the
    contract.
-7. **Health check** — RunPanel probes the app until it answers. Without it, an
-   app that starts and dies a second later would count as deployed successfully.
+7. **Health check** — RunPanel probes the app until it answers.
 
 **Re-Build** is the variant that cleans first: it removes `node_modules`,
 `.next`, `venv` and the like per runtime, then rebuilds from the code already

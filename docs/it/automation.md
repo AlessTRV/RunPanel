@@ -13,16 +13,13 @@ rifiutate, restano nello storico con il motivo.
 
 Con un account GitHub collegato il webhook **si registra da solo**: attivare
 l'interruttore lo crea sul repository con l'URL, il segreto, il content type
-`application/json` e il solo evento `push` già impostati. Nessuno dei quattro è
-una scelta — seguono tutti dal progetto — e sbagliarne uno a mano falliva in
-silenzio. Spegnere l'auto-deploy lo disattiva senza cancellarlo, così lo storico
-delle consegne su GitHub resta.
+`application/json` e il solo evento `push` già impostati. Spegnere l'auto-deploy
+lo disattiva senza cancellarlo, così lo storico delle consegne su GitHub resta.
 
 La sezione mostra anche cosa non va: token assente, repository non riconosciuto,
 indirizzo del pannello che GitHub non può raggiungere, webhook disallineato,
 ultima consegna rifiutata. Il pulsante **Invia ping** chiede a GitHub una
-consegna vera — passa da DNS, firewall, TLS e firma, cioè le parti che si
-rompono davvero.
+consegna vera, che passa da DNS, firewall, TLS e firma.
 
 Perché il pannello sappia quale indirizzo scrivere su GitHub, imposta
 **Indirizzo pubblico** in Account → Preferenze. Lasciato vuoto viene dedotto
@@ -39,11 +36,9 @@ cui lo raggiunge GitHub.
 ## Controllo periodico, quando il pannello non è raggiungibile
 
 Un webhook ha bisogno che GitHub apra una connessione **verso** questa macchina,
-e per moltissime installazioni self-hosted questo non può succedere: dietro NAT
-senza porte aperte, su una rete Tailscale o WireGuard, su un portatile. Lì non
-c'è niente da configurare meglio — la consegna fallisce prima di arrivare, e nei
-log del pannello non resta nulla, perché il problema è la direzione della
-connessione.
+e dietro NAT, su Tailscale o WireGuard, su un portatile, non può: la consegna
+fallisce prima di arrivare e nei log non resta nulla, perché il problema è la
+direzione della connessione.
 
 Quindi il pannello può anche **chiedere** invece di farsi avvisare. Nelle
 impostazioni del progetto, *Deploy automatico → Come parte il deploy*:
@@ -72,27 +67,23 @@ repository che il token non amministra o per un pannello senza account collegato
 ## Tornare a un commit preciso
 
 Il pulsante accanto a **Deploy** apre la cronologia del repository: si sceglie il
-branch, si sceglie il commit, e il progetto viene ricostruito da lì. Serve per
-quando il commit appena distribuito è quello che ha rotto l'app, e l'alternativa
-sarebbe un revert su GitHub e un altro push — una correzione che ha bisogno del
-repository proprio mentre la produzione è ferma.
+branch, si sceglie il commit, e il progetto viene ricostruito da lì. Serve quando
+il commit appena distribuito è quello che ha rotto l'app.
 
 La scelta **resta**. Il progetto si ferma su quel commit: ogni deploy ricostruisce
 quello, l'header lo dice con un'etichetta, e l'**auto-deploy viene sospeso** invece
 di riportare il progetto in avanti al primo push. Le consegne che arrivano nel
-frattempo restano nello storico come ignorate, con il motivo — un webhook che non
-distribuisce deve dire perché. **Torna all'ultimo commit** scioglie il blocco e
-distribuisce di nuovo la testa del branch.
+frattempo restano nello storico come ignorate, con il motivo. **Torna all'ultimo
+commit** scioglie il blocco e distribuisce di nuovo la testa del branch.
 
 Scegliere un branch diverso qui cambia il branch del progetto: da lì in avanti è
 quello che webhook e controllo periodico seguono. L'elenco dei commit arriva
 dall'API di GitHub, quindi vuole un account collegato; senza, o per un commit più
 vecchio degli ultimi cento, c'è un campo dove incollare lo SHA.
 
-Un avvertimento che il pannello ripete prima di procedere, perché è l'unico modo
-in cui questa funzione rompe un'app senza che si veda: **le migrazioni del
-database non tornano indietro**. Se la versione ripristinata si aspetta uno schema
-più vecchio di quello che c'è, può non partire.
+Il pannello lo ripete prima di procedere: **le migrazioni del database non
+tornano indietro**. Se la versione ripristinata si aspetta uno schema più vecchio
+di quello che c'è, può non partire.
 
 ## Comandi una tantum
 
@@ -115,16 +106,15 @@ pulsante Deploy.
 | A deploy riuscito | Health check passato | container | host |
 
 I due passi attorno all'install non esistono con Docker e Compose: lì install e
-build sono un unico `docker build`, e non c'è un momento fra i due a cui agganciare
-niente. Se cambi il runtime di un progetto che ne aveva uno in coda, il comando non
-sparisce: resta lì segnalato, e il log del deploy dice perché non è partito.
+build sono un unico `docker build`. Se cambi il runtime di un progetto che ne
+aveva uno in coda, il comando non sparisce: resta lì segnalato, e il log del
+deploy dice perché non è partito.
 
 Dove girano è deciso dal passo, non da un'opzione: sotto Docker i passi dopo il
-build usano un container usa-e-getta creato dall'immagine appena costruita — stessa
-rete, stessi mount, stesso ambiente, esattamente come il release command — mentre i
-due prima del build girano per forza sull'host, perché quell'immagine non esiste
-ancora. Con Compose girano sempre sull'host: non c'è una sola immagine da cui
-creare un container, e per entrare in un servizio serve scriverlo a mano
+build usano un container usa-e-getta creato dall'immagine appena costruita —
+stessa rete, stessi mount, stesso ambiente, come il release command — mentre i due
+prima del build girano sull'host. Con Compose girano sempre sull'host, e per
+entrare in un servizio serve scriverlo a mano
 (`docker compose run --rm api sh -c '…'`).
 
 **Se uno fallisce, il deploy fallisce** e il comando **resta in coda**: sistemi la
@@ -135,20 +125,15 @@ riesce esce dalla coda e finisce nella cronologia, con passo, durata e commit; s
 svuota a mano, e da sola dopo 90 giorni.
 
 Un avvertimento su *A deploy riuscito*: se un comando lì fallisce, il deploy viene
-registrato come fallito **anche se l'app è viva e sana**. È lo stesso stato in cui
-finisce un health check fallito, ed è voluto — ma è l'unico passo in cui "fallito"
-non vuol dire "non sta servendo".
+registrato come fallito **anche se l'app è viva e sana**: è l'unico passo in cui
+"fallito" non vuol dire "non sta servendo".
 
 **Non stanno nel contratto di deploy, e non è una svista.** Il contratto si fonde
 con il `runpanel.json` del repository, quindi un campo lì dentro sarebbe shell
 arbitraria sull'host che chiunque possa pushare riesce a far girare. Stanno in una
-tabella loro, dove niente si fonde e l'unico che scrive è una rotta autenticata: un
-repository non li può toccare, e non c'è nessuna lista di eccezioni da tenere
-aggiornata. Non è comunque un permesso nuovo — `commands.install` e `build` girano
-già sull'host per i runtime nativi — ma è un permesso che ha solo chi entra nel
-pannello. Non metterci password: il comando finisce nel log del deploy.
+tabella loro, dove niente si fonde e l'unico che scrive è una rotta autenticata:
+un repository non li può toccare. Non metterci password: il comando finisce nel log del deploy.
 
 L'esecuzione è **almeno una volta**, non esattamente una volta: se il pannello si
-riavvia mentre un comando sta girando, il comando torna in coda e ripartirà. Il
-pannello preferisce ripetere una migrazione piuttosto che darla per fatta senza
-saperlo, e segnala le righe interrotte invece di nasconderle.
+riavvia mentre un comando sta girando, il comando torna in coda e ripartirà, e la
+riga interrotta viene segnalata.

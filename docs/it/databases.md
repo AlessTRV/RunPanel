@@ -27,11 +27,10 @@ al posto tuo, in tre modalità: il **client del motore** già autenticato
 il **log** del container in diretta. Il log è in sola lettura e non viene
 salvato da nessuna parte: esiste finché lo guardi.
 
-Non è un emulatore di terminale ed è una scelta: `docker exec` con lo standard
-input in pipe non può allocare un TTY, quindi si manda una riga alla volta. È
-anche il motivo per cui i flag contano — senza `--table` MySQL risponde in
-colonne separate da tabulazioni invece che con una tabella, e senza `--force`
-il primo errore di sintassi chiuderebbe la sessione.
+Non è un emulatore di terminale: `docker exec` con lo standard input in pipe non
+può allocare un TTY, quindi si manda una riga alla volta. Per questo i flag
+contano — senza `--table` MySQL risponde in colonne separate da tabulazioni, e
+senza `--force` il primo errore di sintassi chiuderebbe la sessione.
 
 Prima della prima sessione c'è un avviso, e va accettato: da lì si cancellano
 dati in modo irreversibile, e il pannello non tiene una copia.
@@ -44,13 +43,10 @@ accendibile, spegnibile e in sola lettura. Vale per i servizi e per i progetti
 con runtime Docker, con la stessa interfaccia.
 
 **La prima volta il pannello semina**, ed è la parte che conta. Un bind non è una
-sincronizzazione, è una **sostituzione**: Docker non copia niente e non fonde
-niente, prende la cartella dell'host e la fa diventare quel percorso dentro il
-container. Quello che c'era prima non viene cancellato, viene coperto. Quindi
-senza semina aggiungeresti un bind e vedresti una cartella vuota — e il servizio
-pure. Il pannello copia fuori il contenuto attuale prima di montare; da lì in poi
-non c'è niente da tenere allineato, perché è la stessa cartella: modifichi da una
-parte e cambia dall'altra, sottocartelle comprese, senza riavviare.
+sincronizzazione ma una **sostituzione**: la cartella dell'host copre quel
+percorso dentro il container, quindi senza semina vedresti una cartella vuota — e
+il servizio pure. Il pannello copia fuori il contenuto attuale prima di montare;
+da lì in poi è la stessa cartella, sottocartelle comprese, senza riavviare.
 
 La semina va a due velocità. Una cartella qualunque è una copia. La **directory
 dati del motore** è l'unico caso in cui sbagliare non si vede: `cp` senza `-a`
@@ -71,11 +67,10 @@ Un progetto sotto PM2 non ha un container, quindi non ha bind: ha una cartella.
 Dalle impostazioni la si sposta su un altro disco, con tutto dentro —
 `node_modules` e build compresi, così riparte senza ricostruire.
 
-Al vecchio posto resta un **collegamento**, e non è un dettaglio: dodici punti
-del pannello costruiscono `data/repos/<slug>` a partire dal solo slug, e i
-percorsi assoluti già salvati in `deployments.artifact_dir` e nel comando di
-avvio puntano lì dentro. Il collegamento li fa risolvere tutti senza toccarne
-nessuno. La copia di partenza non viene cancellata: resta finché non lo dici tu.
+Al vecchio posto resta un **collegamento**: molti punti del pannello costruiscono
+`data/repos/<slug>` dal solo slug, e i percorsi assoluti già salvati puntano lì
+dentro. Il collegamento li fa risolvere tutti senza toccarne nessuno. La copia di
+partenza non viene cancellata: resta finché non lo dici tu.
 
 ## Il collegamento a un progetto
 

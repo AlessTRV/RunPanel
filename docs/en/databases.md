@@ -27,10 +27,10 @@ already authenticated (`psql`, `mysql`, `redis-cli`, `mongosh`), a **shell**
 inside the container, and the container's **log**, live. The log is read-only
 and stored nowhere: it exists for as long as you are looking at it.
 
-It is not a terminal emulator, and that is a choice: `docker exec` with stdin on
-a pipe cannot allocate a TTY, so it sends one line at a time. It is also why the
-flags matter — without `--table` MySQL answers in tab-separated columns instead
-of a grid, and without `--force` the first syntax error would end the session.
+It is not a terminal emulator: `docker exec` with stdin on a pipe cannot allocate
+a TTY, so it sends one line at a time. That is why the flags matter — without
+`--table` MySQL answers in tab-separated columns, and without `--force` the first
+syntax error would end the session.
 
 There is a warning before the first session, and it has to be accepted: from
 there you can delete data irreversibly, and the panel keeps no copy.
@@ -43,13 +43,11 @@ one switchable and optionally read-only. It works for services and for
 Docker-runtime projects, through the same interface.
 
 **The first time, the panel seeds**, and that is the part that matters. A bind
-mount is not a synchronisation, it is a **substitution**: Docker copies nothing
-and merges nothing — it takes the host directory and makes it *be* that path
-inside the container. Whatever was there is not deleted, it is covered. So
-without seeding you would add a bind and see an empty folder, and so would the
-service. The panel copies the current content out before mounting; after that
-there is nothing to keep in step, because it is the same directory — change one
-side and the other changes, sub-folders included, with no restart.
+mount is not a synchronisation but a **substitution**: the host directory covers
+that path inside the container, so without seeding you would see an empty folder,
+and so would the service. The panel copies the current content out before
+mounting; after that it is the same directory, sub-folders included, no
+restart.
 
 Seeding runs at two speeds. An ordinary folder is a copy. The engine's **data
 directory** is the one case where getting it wrong is invisible: `cp` without
@@ -71,11 +69,10 @@ A project under PM2 has no container, so it has no binds: it has a directory.
 From its settings it moves to another disk with everything in it —
 `node_modules` and build output included, so it restarts without rebuilding.
 
-A **symlink** stays at the old location, and that is not a detail: twelve places
-in the panel build `data/repos/<slug>` from a slug alone, and the absolute paths
-already stored in `deployments.artifact_dir` and in the start command point
-inside it. The link keeps every one of them resolving without touching any of
-them. The original copy is not deleted: it stays until you say so.
+A **symlink** stays at the old location: many places in the panel build
+`data/repos/<slug>` from a slug alone, and the absolute paths already stored
+point inside it. The link keeps every one of them resolving without touching any
+of them. The original copy is not deleted: it stays until you say so.
 
 ## Linking one to a project
 

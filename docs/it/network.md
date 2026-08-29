@@ -22,28 +22,23 @@ Accendendo **Chi può collegarsi**, su un servizio o su un progetto, cambia cos�
 Le regole sono singoli indirizzi o intervalli CIDR, IPv4 o IPv6. Il pannello
 legge le interfacce della macchina e le propone come caselle da spuntare,
 etichettate: la LAN, gli intervalli VPN (la `100.64.0.0/10` di Tailscale è
-riconosciuta, visto che la sua interfaccia dichiara una `/32` inutile), e gli
-switch virtuali. Chi viene respinto compare nella pagina con un pulsante
-**Consenti**, perché altrimenti una connessione rifiutata e un database fermo si
-somigliano troppo visti dall'altra parte.
+riconosciuta), e gli switch virtuali. Chi viene respinto compare nella pagina con
+un pulsante **Consenti**.
 
 Due cose da sapere prima di accenderlo:
 
-- **Fallisce in chiusura.** La porta è tenuta aperta dal processo del pannello.
-  Se il pannello non gira, la porta è chiusa. Per un controllo di sicurezza è la
-  direzione giusta in cui rompersi, ma è un cambiamento: prima il database di
-  un'app restava raggiungibile anche a pannello spento.
+- **Fallisce in chiusura.** La porta è tenuta aperta dal processo del pannello:
+  se il pannello non gira, la porta è chiusa. Prima il database di un'app restava
+  raggiungibile anche a pannello spento.
 - **Un'app sulla rete del progetto non è toccata.** Raggiunge il proprio database
   per nome del container su `runpanel-net-<slug>`, che non passa mai dal gate. Ci
-  passa invece il traffico che arriva da `host.docker.internal`, ed è il motivo
-  per cui fra i suggerimenti ci sono anche le sottoreti virtuali.
+  passa invece il traffico che arriva da `host.docker.internal`.
 
-Non viene offerto dove non potrebbe essere onesto: un progetto **Compose**
-pubblica le porte da un file che è tuo e RunPanel non lo riscrive, e un container
-su `network: host` non ha una porta pubblicata da spostare. In entrambi i casi lo
-dice, invece di mostrare un interruttore che non farebbe niente.
+Non viene offerto per un progetto **Compose**, che pubblica le porte da un file
+che RunPanel non riscrive, né per un container su `network: host`, che non ha una
+porta pubblicata da spostare. In entrambi i casi lo dice.
 
 Per un processo nativo il pannello passa anche `HOST`/`HOSTNAME` e, per le CLI di
 cui conosce la sintassi, il flag di bind. Un'app che ignora tutto questo resta su
-tutte le interfacce alla porta spostata — quindi il pannello lo verifica, e lo
-scrive nella pagina invece di mostrare una restrizione che non è tale.
+tutte le interfacce alla porta spostata, quindi il pannello lo verifica e lo
+scrive nella pagina.

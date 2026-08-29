@@ -51,8 +51,7 @@ npm run test:quick # skip the Docker suites
 
 The runner reports what the machine can do and skips the rest rather than
 failing: suites needing a Docker daemon, and the native-runtime suite needing a
-real PM2 (`npm i -g pm2`). Both are listed as `SKIP` in the summary, so a green
-run never hides untested ground.
+real PM2 (`npm i -g pm2`). Both are listed as `SKIP` in the summary.
 
 Each suite gets a server of its own on a temporary data directory. Some are
 *standalone*: they load the module under test directly, with no server and no

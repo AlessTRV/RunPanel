@@ -51,8 +51,7 @@ npm run test:quick # salta le suite che richiedono Docker
 
 Il runner dichiara cosa la macchina è in grado di fare e salta il resto invece
 di fallire: le suite che richiedono un daemon Docker, e quella sul runtime nativo
-che richiede un PM2 vero (`npm i -g pm2`). Entrambe compaiono come `SKIP` nel
-riepilogo, così una corsa verde non nasconde mai terreno non testato.
+che richiede un PM2 vero (`npm i -g pm2`). Entrambe compaiono come `SKIP` nel riepilogo.
 
 Ogni suite riceve un server tutto suo su una directory dati temporanea. Alcune
 sono *standalone*: caricano direttamente il modulo da testare, senza server né
