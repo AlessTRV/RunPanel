@@ -2,7 +2,9 @@
 
 import { usePathname } from "next/navigation";
 import Link from "next/link";
+import Image from "next/image";
 import { Icon } from "@iconify/react";
+import logo from "./logo.png";
 import { cn } from "@/lib/utils";
 import { NAV_GROUPS, isActiveNav, navItemsIn, type NavItem } from "@/lib/nav";
 import { usePanelUpdate } from "@/lib/hooks/usePanelUpdate";
@@ -90,9 +92,10 @@ export function AppSidebar({ version }: { version: string }) {
       />
 
       <div className="border-border relative flex h-14 items-center gap-2.5 border-b px-4">
-        <span className="bg-foreground text-background text-meta flex size-6 items-center justify-center rounded-md font-bold shadow-[var(--selected-shadow)]">
-          R
-        </span>
+        {/* `width`/`height` override the 1254px intrinsic size of the import:
+            without them the srcset is generated for the full-resolution file
+            and the browser downloads a megabyte to paint a 24px mark. */}
+        <Image src={logo} alt="" aria-hidden width={24} height={24} className="size-6" priority />
         <span className="text-foreground text-sm font-semibold tracking-tight">RunPanel</span>
       </div>
 
