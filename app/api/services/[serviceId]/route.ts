@@ -19,6 +19,7 @@ import { reachesByContainerName, serviceEnvKey, suggestEnvKey } from "@/lib/serv
 import { parseContractJson } from "@/lib/deploy-contract";
 import { AccessRow, readAccess, reportGate, syncGate } from "@/services/access";
 import { allocateLoopbackPort, closeGate } from "@/services/access-gate";
+import { folderExists } from "@/services/folders";
 import { ServicesTable } from "@/lib/db/schema";
 
 type Params = { params: Promise<{ serviceId: string }> };
@@ -153,11 +154,19 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     return NextResponse.json({ error: "Servizio non trovato" }, { status: 404 });
   }
 
-  const { projectId, injectEnv, envKey, access } = parsed.data;
+  const { projectId, injectEnv, envKey, access, folderId } = parsed.data;
   const detaching = projectId === null && service.project_id !== null;
   const attaching = typeof projectId === "string" && projectId !== service.project_id;
 
   const nextProjectId = projectId === undefined ? service.project_id : projectId;
+
+  // A folder is where a service sits on the Overview while it has no project;
+  // once linked it shows under the project, so the folder goes with the link.
+  // Checked before anything is written or any container is touched.
+  if (folderId !== undefined && !(await folderExists(db, folderId))) {
+    return NextResponse.json({ error: "Cartella non trovata" }, { status: 404 });
+  }
+  const nextFolderId = nextProjectId ? null : folderId === undefined ? service.folder_id : folderId;
   const nextInject = detaching
     ? 0
     : injectEnv === undefined
@@ -287,6 +296,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       access_mode: nextAccess.access_mode,
       access_allow: nextAccess.access_allow,
       access_port: nextAccess.access_port,
+      folder_id: nextFolderId,
       ...(recreated ? { status: recreated.status } : {}),
       updated_at: nowIso(),
     })

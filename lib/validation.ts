@@ -141,6 +141,22 @@ export const createProjectSchema = z.object({
   name: z.string().min(1).max(100),
 });
 
+/**
+ * A folder id where a project or service should be filed, or `null` for the
+ * root. Existence is checked in the route, where the store is.
+ */
+export const folderIdSchema = z.string().min(1).max(32).nullable();
+
+export const folderNameSchema = z.string().trim().min(1).max(60);
+
+export const createFolderSchema = z.object({
+  name: folderNameSchema,
+});
+
+export const updateFolderSchema = z.object({
+  name: folderNameSchema,
+});
+
 export const updateProjectSchema = z.object({
   name: z.string().min(1).max(100).optional(),
   appName: z.string().max(100).optional().nullable(),
@@ -172,6 +188,8 @@ export const updateProjectSchema = z.object({
   builderConfig: z.unknown().optional(),
   /** See `accessSchema`. Changing it restarts the app: the port has to move. */
   access: accessSchema.optional(),
+  /** Where the Overview files it. See `folderIdSchema`. */
+  folderId: folderIdSchema.optional(),
 });
 
 /**
@@ -641,6 +659,11 @@ export const updateServiceSchema = z.object({
   injectEnv: z.boolean().optional(),
   envKey: envKeySchema.nullable().optional(),
   access: accessSchema.optional(),
+  /**
+   * Where the Overview files it while it belongs to no project. Ignored — and
+   * cleared — when the same request links it to one.
+   */
+  folderId: folderIdSchema.optional(),
 });
 
 // --- Backups ---

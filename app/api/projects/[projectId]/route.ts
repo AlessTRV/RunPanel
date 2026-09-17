@@ -15,6 +15,7 @@ import { allocateLoopbackPort, closeGate } from "@/services/access-gate";
 import { restartFromLastDeployment } from "@/services/project-restart";
 import { getPreset } from "@/services/deploy-presets";
 import { queuedForProject } from "@/services/one-time-commands";
+import { folderExists } from "@/services/folders";
 import { processManager } from "@/services/process-manager";
 import { removeService } from "@/services/service-provisioner";
 import { removeProjectNetwork } from "@/services/docker-network";
@@ -116,11 +117,18 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     return NextResponse.json({ error: "Progetto non trovato" }, { status: 404 });
   }
 
-  const { name, appName, sourceType, sourceUrl, sourceBranch, runtimeType, port, autoDeploy, deployTrigger, builderConfig, presetId, access } =
+  const { name, appName, sourceType, sourceUrl, sourceBranch, runtimeType, port, autoDeploy, deployTrigger, builderConfig, presetId, access, folderId } =
     parsed.data;
+
+  // Checked before anything is written, so a move to a folder that is not
+  // there changes nothing else in the same request either.
+  if (folderId !== undefined && !(await folderExists(db, folderId))) {
+    return NextResponse.json({ error: "Cartella non trovata" }, { status: 404 });
+  }
 
   const updates: Partial<ProjectsTable> = {};
   if (name !== undefined) updates.name = name;
+  if (folderId !== undefined) updates.folder_id = folderId;
   if (appName !== undefined) updates.app_name = appName || null;
   if (sourceType !== undefined) updates.source_type = sourceType;
   if (sourceUrl !== undefined) updates.source_url = sourceUrl;

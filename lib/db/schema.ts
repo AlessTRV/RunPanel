@@ -133,6 +133,21 @@ export interface ProjectsTable {
   access_mode: AccessMode | null;
   access_allow: string | null;
   access_port: number | null;
+  /** Where the Overview files this project. NULL is the root. See migration 019. */
+  folder_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * A grouping on the Overview, and nothing more: it owns no rows, two nullable
+ * columns point at it, and deleting one sends its contents back to the root.
+ * Flat — there is no parent.
+ */
+export interface FoldersTable {
+  id: string;
+  /** Unique ignoring case; compared through `lower(name)` in the routes. */
+  name: string;
   created_at: string;
   updated_at: string;
 }
@@ -276,6 +291,12 @@ export interface ServicesTable {
   mounts: string | null;
   /** JSON — see `MountJournal`. NULL when no list has ever been applied. */
   mount_apply: string | null;
+  /**
+   * Where the Overview files this service when it belongs to no project. A
+   * linked service shows under its project, so linking clears this rather than
+   * leaving a value nothing reads. See migration 019.
+   */
+  folder_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -442,6 +463,7 @@ export interface Database {
   sessions: SessionsTable;
   rate_limits: RateLimitsTable;
   projects: ProjectsTable;
+  folders: FoldersTable;
   deployments: DeploymentsTable;
   env_vars: EnvVarsTable;
   one_time_commands: OneTimeCommandsTable;
