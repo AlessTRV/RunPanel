@@ -126,7 +126,7 @@ reverse proxy stanno in [Configurazione](docs/it/configuration.md).
 
 | Pagina | A cosa serve |
 |---|---|
-| **Panoramica** | stato di tutto, in una schermata |
+| **Panoramica** | stato di tutto, in una schermata: cartelle per raggruppare progetti e servizi, più i servizi senza progetto |
 | **Progetti** | deploy, log in diretta, storico, variabili, file, terminale, impostazioni |
 | **Servizi** | database gestiti, i loro database interni, collegamenti ai progetti |
 | **Monitor** | CPU, memoria, carico, uptime dell'host e dei container |

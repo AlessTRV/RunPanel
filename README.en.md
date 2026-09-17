@@ -125,7 +125,7 @@ reverse proxy needs are in [Configuration](docs/en/configuration.md).
 
 | Page | What it is for |
 |---|---|
-| **Overview** | the state of everything, on one screen |
+| **Overview** | the state of everything, on one screen: folders to group projects and services, plus the services that belong to no project |
 | **Projects** | deploys, live logs, history, variables, files, terminal, settings |
 | **Services** | managed databases, the databases inside them, project links |
 | **Monitor** | CPU, memory, load, uptime of the host and the containers |
