@@ -18,9 +18,9 @@ import { queuedForProject } from "@/services/one-time-commands";
 import { folderExists } from "@/services/folders";
 import { processManager } from "@/services/process-manager";
 import { removeService } from "@/services/service-provisioner";
-import { removeProjectNetwork } from "@/services/docker-network";
+import { disconnectFromNetwork, removeProjectNetwork } from "@/services/docker-network";
 import { removeProjectImages } from "@/services/docker/images";
-import { removeProjectVolumes } from "@/services/docker/volumes";
+import { containerMounts, listOwnedVolumes, removeProjectVolumes, removeVolumes } from "@/services/docker/volumes";
 import { removePm2Artifacts } from "@/services/process-drivers/pm2-driver";
 import { forgetRun } from "@/services/process-drivers/run-log";
 import { removeEnvFile } from "@/services/env-file";
@@ -349,9 +349,29 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   });
 }
 
-export async function DELETE(_request: NextRequest, { params }: Params) {
+/**
+ * Delete a project.
+ *
+ * What happens to its services is the caller's call, made explicit in the
+ * query string. `?services=keep` — the default — detaches them: they live on as
+ * standalone services, container and data untouched, filed in the folder the
+ * project was in. `?services=delete` takes them down with the project, volumes
+ * included. Previously there was only the second, and the dialog could warn
+ * about it but not offer anything else — so removing a project you no longer
+ * needed meant losing a database you still did.
+ */
+export async function DELETE(request: NextRequest, { params }: Params) {
   const denied = await requireAuth();
   if (denied) return denied;
+
+  const servicesParam = request.nextUrl.searchParams.get("services") ?? "keep";
+  if (servicesParam !== "keep" && servicesParam !== "delete") {
+    return NextResponse.json(
+      { error: "Il parametro services può essere solo keep o delete" },
+      { status: 400 }
+    );
+  }
+  const deleteServices = servicesParam === "delete";
 
   const { projectId } = await params;
   const db = await getDb();
@@ -389,25 +409,64 @@ export async function DELETE(_request: NextRequest, { params }: Params) {
   // the old code knew about — each deploy produces its own immutable tag.
   await removeProjectImages(slug);
 
-  // Stop and remove every service container linked to this project. The volumes
-  // are not passed here: `removeProjectVolumes` below takes them all by label,
-  // which is both scoped and complete.
   const services = await db
     .selectFrom("services")
-    .select("container_name")
+    .select(["id", "container_name"])
     .where("project_id", "=", projectId)
     .execute();
 
-  for (const svc of services) {
-    try {
-      await removeService(svc.container_name);
-    } catch { /* ignore */ }
-  }
+  let volumesRemoved: string[] = [];
+  let servicesKept = 0;
 
-  // Deleting the project deletes its databases' storage too. Previously the
-  // containers went and the named volumes stayed on disk forever, invisible and
-  // ready to silently reattach to a future service with the same name.
-  const volumesRemoved = await removeProjectVolumes(slug);
+  if (deleteServices) {
+    // Stop and remove every service container linked to this project. The
+    // volumes are not passed here: `removeProjectVolumes` below takes them all
+    // by label, which is both scoped and complete.
+    for (const svc of services) {
+      try {
+        await removeService(svc.container_name);
+      } catch { /* ignore */ }
+    }
+
+    // Deleting the services deletes their storage too. Previously the
+    // containers went and the named volumes stayed on disk forever, invisible
+    // and ready to silently reattach to a future service with the same name.
+    volumesRemoved = await removeProjectVolumes(slug);
+  } else {
+    // Detach, the same way the services PATCH does it: off the project's
+    // network, injection off (there is no app left to inject into), and into
+    // the project's folder so it stays where it was on the Overview. Written
+    // before the project row goes, because `services.project_id` cascades on
+    // delete and would otherwise take these rows with it. The volumes stay
+    // labelled with this project's slug; `removeService` finds them through
+    // the container's mounts when the standalone service is deleted later.
+    const inUse = new Set<string>();
+    for (const svc of services) {
+      for (const mount of await containerMounts(svc.container_name)) {
+        if (mount.name) inUse.add(mount.name);
+      }
+      await disconnectFromNetwork(svc.container_name, slug);
+    }
+    if (services.length > 0) {
+      await db
+        .updateTable("services")
+        .set({ project_id: null, inject_env: 0, folder_id: project.folder_id, updated_at: nowIso() })
+        .where("project_id", "=", projectId)
+        .execute();
+    }
+    servicesKept = services.length;
+
+    // A volume of this project that no surviving service mounts belongs to a
+    // service deleted "without data", kept for one recreated under the same
+    // name in this project. That name includes the slug, so with the project
+    // gone nothing can ever be recreated onto it: it would sit on the host
+    // forever, labelled with a project no screen shows. Removed here, and only
+    // here — the kept services' volumes are exactly the ones excluded.
+    const orphaned = (await listOwnedVolumes({ project: slug }))
+      .map((v) => v.name)
+      .filter((name) => !inUse.has(name));
+    volumesRemoved = await removeVolumes(orphaned);
+  }
 
   // Delete project source.
   //
@@ -434,5 +493,5 @@ export async function DELETE(_request: NextRequest, { params }: Params) {
   // is enough — no hand-rolled ordering to get wrong.
   await db.deleteFrom("projects").where("id", "=", projectId).execute();
 
-  return NextResponse.json({ success: true, volumesRemoved });
+  return NextResponse.json({ success: true, volumesRemoved, servicesKept });
 }

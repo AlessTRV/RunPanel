@@ -96,6 +96,13 @@ bridge, your own `psql` — goes through the port published on the host.
 A service can also be **standalone**, with no project: then it injects nothing
 and is simply a database you manage from the panel.
 
+**Deleting the project does not delete its services.** They stay on as
+standalone services, container and data included, in the folder the project was
+in. The deletion panel lists them: each can be deleted on its own, choosing
+whether to keep its volume, and one checkbox — off by default — takes them all
+down with the project, volumes included. The app alone goes with "Remove app",
+which leaves project and services where they are.
+
 ## Databases inside a service
 
 One database server holds several. The service page lists them by reading the

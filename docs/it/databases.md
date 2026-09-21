@@ -95,6 +95,13 @@ su bridge, il tuo `psql` — passa dalla porta pubblicata sull'host.
 Un servizio può anche essere **autonomo**, senza progetto: allora non inietta
 niente e resta un database che gestisci dal pannello.
 
+**Eliminare il progetto non elimina i suoi servizi.** Restano come servizi
+autonomi, container e dati compresi, nella cartella in cui stava il progetto. Il
+pannello di eliminazione li elenca: ognuno si elimina da solo, scegliendo se
+tenere il volume, e una spunta — spenta di default — li porta via tutti insieme
+al progetto, volumi inclusi. L'app da sola si rimuove con «Rimuovi app», che
+lascia progetto e servizi al loro posto.
+
 ## I database dentro un servizio
 
 Un server di database ne ospita più d'uno. La pagina del servizio li elenca

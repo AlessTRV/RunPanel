@@ -17,6 +17,7 @@ import { Code, FieldHint } from "@/components/ui/Hint";
 import { CommandField } from "@/components/ui/CommandField";
 import { EnvFilePathHint, HealthcheckHint, PortHint } from "@/components/DeployHints";
 import { AccessSection } from "@/components/AccessSection";
+import { LinkedServiceDelete, type LinkedServiceRow } from "./LinkedServiceDelete";
 import { MountsSection } from "./MountsSection";
 import { OneTimeCommandsSection } from "./OneTimeCommandsSection";
 import { RepoPathSection } from "./RepoPathSection";
@@ -144,6 +145,16 @@ export function SettingsTab({
   const { data: presetData } = useResource<{ presets: Preset[] }>("/api/presets");
   const presets = presetData?.presets ?? [];
   const preset = presets.find((entry) => entry.id === presetId) ?? null;
+
+  // The services that would be affected by deleting the project, listed where
+  // that decision is made. Their fate is opt-in: kept by default, taken down
+  // with the project only when the box below is ticked.
+  const { data: servicesData, refresh: refreshServices } = useResource<LinkedServiceRow[]>("/api/services");
+  const linkedServices = useMemo(
+    () => (Array.isArray(servicesData) ? servicesData : []).filter((s) => s.project_id === project.id),
+    [servicesData, project.id]
+  );
+  const [deleteServices, setDeleteServices] = useState(false);
 
   // What the server last confirmed. Compared against the live values, so the
   // save bar appears on the first edit and leaves again if it is undone.
@@ -759,18 +770,35 @@ export function SettingsTab({
         }}
       />
 
+      {/*
+        Deleting the project used to take its databases with it, volumes
+        included, and the dialog could only warn about it. Now the services are
+        listed here, each deletable on its own, and going with the project is
+        the opt-in box — off by default, because "I no longer need this app" and
+        "I no longer need this data" are different sentences.
+      */}
       <DangerZone
         title="Elimina il progetto"
-        description="Con i suoi servizi e i loro dati"
+        description={
+          linkedServices.length > 0
+            ? "I servizi collegati restano, se non li includi"
+            : "Processi, file, immagini e cronologia dei deploy"
+        }
         actionLabel="Elimina progetto"
         confirm={{
           title: `Eliminare ${project.name}?`,
-          confirmLabel: "Elimina tutto",
-          description:
-            "Verranno rimossi i processi, i container, le immagini e i volumi dei servizi collegati. I dati dei database non sono recuperabili.",
+          confirmLabel: deleteServices ? "Elimina tutto" : "Elimina progetto",
+          description: deleteServices
+            ? "Processi, container, immagini e cronologia verranno eliminati, insieme ai servizi collegati e ai loro volumi. I dati dei database non sono recuperabili."
+            : linkedServices.length > 0
+              ? "Processi, file, immagini e cronologia verranno eliminati. I servizi collegati restano come servizi autonomi, con i loro dati."
+              : "Processi, file, immagini e cronologia dei deploy verranno eliminati.",
         }}
         onConfirm={async () => {
-          const res = await fetch(`/api/projects/${project.id}`, { method: "DELETE" });
+          const res = await fetch(
+            `/api/projects/${project.id}${deleteServices ? "?services=delete" : ""}`,
+            { method: "DELETE" }
+          );
           if (res.ok) {
             toast.success("Progetto eliminato");
             router.push("/home");
@@ -778,7 +806,34 @@ export function SettingsTab({
             toast.error(MSG.deleteFailed);
           }
         }}
-      />
+      >
+        {linkedServices.length > 0 && (
+          <div className="space-y-3">
+            <ul className="space-y-1.5">
+              {linkedServices.map((service) => (
+                <LinkedServiceDelete key={service.id} service={service} onDeleted={refreshServices} />
+              ))}
+            </ul>
+            <label className="flex cursor-pointer items-start gap-2.5">
+              <input
+                type="checkbox"
+                checked={deleteServices}
+                onChange={(e) => setDeleteServices(e.target.checked)}
+                className="accent-danger mt-0.5 size-4"
+              />
+              <span className="text-muted text-xs leading-relaxed">
+                Elimina anche{" "}
+                {linkedServices.length === 1
+                  ? "il servizio collegato"
+                  : `i ${linkedServices.length} servizi collegati`}{" "}
+                e i loro dati. <strong className="text-foreground">Non è recuperabile.</strong>{" "}
+                Senza la spunta restano come servizi autonomi, container e volumi compresi, nella
+                cartella del progetto.
+              </span>
+            </label>
+          </div>
+        )}
+      </DangerZone>
     </div>
   );
 }

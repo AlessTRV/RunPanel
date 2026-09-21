@@ -11,6 +11,7 @@ import { docker, dockerTry } from "./docker/cli";
 import { labelArgs, serviceContainerName } from "./docker/labels";
 import type { ServiceMount } from "@/lib/mount";
 import {
+  containerMounts,
   ensureVolume,
   isHostPath,
   listOwnedVolumes,
@@ -331,20 +332,32 @@ export function serviceVolumeNames(service: ServiceIdentity): string[] {
  *
  * Without `service` there is no way to know which volumes are this one's, so
  * nothing is removed. Guessing is what the old implementation did.
+ *
+ * Which volumes are this one's is asked of Docker first, while the container
+ * is still there to be inspected. Re-deriving the names from the identity is
+ * only the fallback for a container that is already gone: a service whose
+ * project was deleted keeps volumes named after that project, and rebuilding
+ * the name with no slug would miss them and leave the data behind — which is
+ * exactly the orphan this option exists to prevent.
  */
 export async function removeService(
   containerName: string,
   opts: { removeData?: boolean; service?: ServiceIdentity } = {}
 ): Promise<{ volumesRemoved: string[] }> {
+  const mounted = opts.removeData
+    ? (await containerMounts(containerName)).map((m) => m.name).filter(Boolean)
+    : [];
+
   await dockerTry(["rm", "-f", containerName], { timeout: 30_000 });
 
   if (!opts.removeData || !opts.service) return { volumesRemoved: [] };
 
-  // Intersected with what RunPanel actually owns: the names above are derived
-  // from a user-supplied service name, and `docker volume rm` on a name this
-  // panel never created is not ours to run.
+  // Intersected with what RunPanel actually owns: the derived names come from a
+  // user-supplied service name, a mount may be an operator's own volume, and
+  // `docker volume rm` on a name this panel never created is not ours to run.
   const owned = new Set((await listOwnedVolumes()).map((v) => v.name));
-  const mine = serviceVolumeNames(opts.service).filter((name) => owned.has(name));
+  const candidates = new Set([...mounted, ...serviceVolumeNames(opts.service)]);
+  const mine = [...candidates].filter((name) => owned.has(name));
 
   return { volumesRemoved: await removeVolumes(mine) };
 }
