@@ -129,6 +129,16 @@ export function useResource<T>(url: string | null, options: Options = {}): Resul
     // the empty state instead of the skeleton while its first request ran.
     if (published.current === null) setLoading(true);
 
+    // Whatever the previous run of this effect had in flight was aborted by
+    // its cleanup, but the guard is only lowered in that request's `finally`,
+    // which runs a microtask later — after this effect has already asked and
+    // been told "one is running". So a resource with no interval loaded
+    // nothing the moment the effect ran twice: on a `url` that became known
+    // after mount, and on every mount in development, where StrictMode runs
+    // effects twice on purpose. The aborted request is dead; say so before
+    // asking again.
+    inFlight.current = false;
+
     const controller = new AbortController();
     load(controller.signal);
 
