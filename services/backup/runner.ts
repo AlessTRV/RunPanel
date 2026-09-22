@@ -23,7 +23,7 @@ import {
   exportProjectConfig,
   exportProjectRepo,
   exportProjectVolume,
-  listProjectVolumes,
+  projectVolumes,
   shouldIncludeRepo,
 } from "./project-export";
 import { applyRetention } from "./retention";
@@ -35,6 +35,7 @@ import type {
   RunContext,
   StagedFile,
 } from "./types";
+import type { ProjectVolume } from "./volume-ops";
 
 /**
  * One backup, start to finish.
@@ -217,7 +218,7 @@ async function execute({ runId, request, startedAt, emit, log }: ExecuteArgs): P
       emit("Docker non è raggiungibile: i dump dei container non sono possibili");
     }
 
-    const jobs = await resolveJobs(request.targets, request.includeSecretKey ?? false);
+    const jobs = await resolveJobs(request.targets, request.includeSecretKey ?? false, emit);
     emit(`${jobs.length} elementi da salvare`);
 
     const outcomes: JobOutcome[] = [];
@@ -363,7 +364,11 @@ async function execute({ runId, request, startedAt, emit, log }: ExecuteArgs): P
 
 // --- Turning selectors into work --------------------------------------------
 
-async function resolveJobs(targets: BackupTarget[], includeSecret: boolean): Promise<BackupJob[]> {
+async function resolveJobs(
+  targets: BackupTarget[],
+  includeSecret: boolean,
+  log: (line: string) => void
+): Promise<BackupJob[]> {
   const db = await getDb();
   const jobs: BackupJob[] = [];
   const seen = new Set<string>();
@@ -413,9 +418,34 @@ async function resolveJobs(targets: BackupTarget[], includeSecret: boolean): Pro
       push({ kind: "project-repo", project }, `repo:${project.id}`);
     }
     if (include.includes("volumes")) {
-      const volumes = await listProjectVolumes(project.slug).catch(() => []);
+      let volumes: ProjectVolume[];
+      try {
+        volumes = await projectVolumes(project.slug);
+      } catch (err) {
+        // Recorded rather than swallowed: an empty list here used to look
+        // exactly like a project that has no data, and the run said nothing.
+        push(
+          {
+            kind: "missing",
+            targetKind: "project-volume",
+            refId: project.id,
+            refName: `${project.slug} — volumi`,
+            reason: `Impossibile elencare i volumi: ${err instanceof Error ? err.message : String(err)}`,
+          },
+          `volumes-unlisted:${project.id}`
+        );
+        return;
+      }
+
+      log(
+        volumes.length > 0
+          ? `${project.slug}: ${volumes.length} volum${volumes.length === 1 ? "e" : "i"} — ${volumes
+              .map((volume) => (volume.origin === "compose" ? `${volume.name} (Compose)` : volume.name))
+              .join(", ")}`
+          : `${project.slug}: nessun volume trovato`
+      );
       for (const volume of volumes) {
-        push({ kind: "project-volume", project, volume }, `volume:${volume}`);
+        push({ kind: "project-volume", project, volume: volume.name }, `volume:${volume.name}`);
       }
     }
   };

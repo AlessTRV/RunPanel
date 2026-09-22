@@ -8,9 +8,11 @@ import { config } from "@/lib/config";
 import { getDb } from "@/lib/db";
 import type { ProjectsTable } from "@/lib/db/schema";
 import { formatBytes } from "@/lib/format";
-import { dockerToFile, dockerTry } from "../docker/cli";
-import { listOwnedVolumes } from "../docker/volumes";
+import { docker, dockerFromFile, dockerToFile, dockerTry } from "../docker/cli";
+import { composeProjectName } from "../docker/compose";
+import { LABEL_PROJECT, ownedFilters } from "../docker/labels";
 import type { RunContext, StagedFile } from "./types";
+import { discoverVolumes, type DockerCli, type ProjectOwner, type ProjectVolume } from "./volume-ops";
 
 /**
  * A project's configuration, its repository and its volumes.
@@ -263,10 +265,34 @@ export async function exportProjectRepo(
   };
 }
 
-/** Only volumes RunPanel labelled as this project's. Never an arbitrary name. */
+/** The real daemon, behind the interface `volume-ops.ts` is written against. */
+export const backupDocker: DockerCli = {
+  run: (args, opts) => docker(args, { timeout: opts?.timeout ?? 30_000 }),
+  toFile: (args, destination, opts) => dockerToFile(args, destination, opts),
+  fromFile: async (args, source, opts) => {
+    await dockerFromFile(args, source, opts);
+  },
+};
+
+export function projectOwner(slug: string): ProjectOwner {
+  return {
+    slug,
+    composeProject: composeProjectName(slug),
+    runpanelFilters: ownedFilters({ project: slug }),
+    projectLabel: LABEL_PROJECT,
+  };
+}
+
+/**
+ * The volumes that are this project's: labelled by RunPanel, or created by its
+ * Compose stack. Never an arbitrary name, and never one matched by prefix.
+ */
+export async function projectVolumes(slug: string): Promise<ProjectVolume[]> {
+  return discoverVolumes(backupDocker, projectOwner(slug));
+}
+
 export async function listProjectVolumes(slug: string): Promise<string[]> {
-  const volumes = await listOwnedVolumes({ project: slug });
-  return volumes.map((volume) => volume.name);
+  return (await projectVolumes(slug)).map((volume) => volume.name);
 }
 
 /**
@@ -297,8 +323,8 @@ export async function exportProjectVolume(
   volume: string,
   ctx: RunContext
 ): Promise<{ file: StagedFile; meta: Record<string, unknown> }> {
-  const owned = await listProjectVolumes(project.slug);
-  if (!owned.includes(volume)) {
+  const found = (await projectVolumes(project.slug)).find((entry) => entry.name === volume);
+  if (!found) {
     throw new Error(`Il volume "${volume}" non risulta di questo progetto`);
   }
 
@@ -334,6 +360,11 @@ export async function exportProjectVolume(
     },
     meta: {
       volume,
+      origin: found.origin,
+      // What a restore onto a fresh host needs to know: this volume is made by
+      // `compose up`, so the stack has to be deployed before it can be filled.
+      composeProject: found.origin === "compose" ? composeProjectName(project.slug) : null,
+      composeVolume: found.composeVolume,
       helperImage: image,
       format: "tar-gzip",
       uncompressedBytes: result.rawBytes,

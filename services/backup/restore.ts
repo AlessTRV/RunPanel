@@ -15,8 +15,15 @@ import { containerMounts } from "../docker/volumes";
 import { extractArchiveEntry, isSafeEntryPath, listArchiveEntries } from "./archive-read";
 import { buildDestination } from "./destinations";
 import { assertBackupId, restoreLog } from "./paths";
+import { backupDocker, projectOwner, projectVolumes } from "./project-export";
 import { startBackup } from "./runner";
 import type { BackupTarget } from "./types";
+import { holdVolumeForRestore, startContainers, writeVolume } from "./volume-ops";
+
+interface Stopped {
+  projects: { slug: string; runtime: string }[];
+  containers: string[];
+}
 
 /**
  * Putting a backup back.
@@ -110,8 +117,12 @@ async function execute(restoreId: string, request: RestoreRequest): Promise<void
   const staging = restoreStaging(restoreId);
   fs.mkdirSync(staging, { recursive: true });
 
-  /** Projects this restore stopped, and has to start again whatever happens. */
-  const stopped: { slug: string; runtime: string }[] = [];
+  /**
+   * What this restore stopped, and has to start again whatever happens: the
+   * projects through their drivers, and by id the containers that still had a
+   * volume open after that.
+   */
+  const stopped: Stopped = { projects: [], containers: [] };
   let failure: string | null = null;
 
   try {
@@ -159,7 +170,7 @@ async function execute(restoreId: string, request: RestoreRequest): Promise<void
     // exists, it is merely stopped, so this needs none of the deploy contract —
     // no working directory, no environment, no port. Rebuilding that here would
     // be a second, quietly diverging copy of the deploy pipeline.
-    for (const project of stopped) {
+    for (const project of stopped.projects) {
       try {
         emit(`Riavvio ${project.slug}…`);
         await processManager.restart(project.slug, project.runtime);
@@ -167,6 +178,7 @@ async function execute(restoreId: string, request: RestoreRequest): Promise<void
         emit(`Non sono riuscito a riavviare ${project.slug}: ${(err as Error).message}`);
       }
     }
+    await startContainers(backupDocker, stopped.containers, emit);
 
     fs.rmSync(staging, { recursive: true, force: true });
     log.flush();
@@ -346,7 +358,7 @@ async function restoreArtifact(
   archive: string,
   staging: string,
   emit: (line: string) => void,
-  stopped: { slug: string; runtime: string }[]
+  stopped: Stopped
 ): Promise<void> {
   emit(`→ ${artifact.refName}`);
 
@@ -623,7 +635,7 @@ async function restoreVolume(
   archive: string,
   staging: string,
   emit: (line: string) => void,
-  stopped: { slug: string; runtime: string }[]
+  stopped: Stopped
 ): Promise<void> {
   const db = await getDb();
   const project = await db
@@ -637,10 +649,14 @@ async function restoreVolume(
   const volume = String(artifact.meta.volume ?? "");
   if (!volume) throw new Error("L'elemento non dice a quale volume appartiene");
 
-  const { listProjectVolumes } = await import("./project-export");
-  const owned = await listProjectVolumes(project.slug);
-  if (!owned.includes(volume)) {
-    throw new Error(`Il volume "${volume}" non risulta di ${project.slug}`);
+  const owned = (await projectVolumes(project.slug)).some((entry) => entry.name === volume);
+  if (!owned) {
+    throw new Error(
+      artifact.meta.composeProject
+        ? `Il volume "${volume}" non esiste: lo crea lo stack Compose di ${project.slug}. ` +
+            "Fai prima un deploy del progetto, poi ripeti il ripristino."
+        : `Il volume "${volume}" non risulta di ${project.slug}`
+    );
   }
 
   const file = await extract(archive, artifact.entryPath, staging);
@@ -648,25 +664,19 @@ async function restoreVolume(
   // Writing into a volume a running container has mounted is how you get a
   // half-updated dataset, so the project goes down first and comes back in the
   // caller's `finally`.
-  if (!stopped.some((entry) => entry.slug === project.slug)) {
+  if (!stopped.projects.some((entry) => entry.slug === project.slug)) {
     emit(`  fermo ${project.slug}…`);
     await processManager.stop(project.slug, project.runtime_type).catch(() => {});
-    stopped.push({ slug: project.slug, runtime: project.runtime_type });
+    stopped.projects.push({ slug: project.slug, runtime: project.runtime_type });
   }
 
-  await dockerFromFile(
-    [
-      "run", "--rm", "-i",
-      "-v", `${volume}:/to`,
-      "alpine",
-      "sh", "-c",
-      // The glob patterns cover dotfiles too; without the second one a restore
-      // leaves the previous contents' hidden files behind.
-      "rm -rf /to/* /to/..?* /to/.[!.]* 2>/dev/null; tar -xf - -C /to",
-    ],
-    file,
-    { decompress: true, onStderr: (line) => emit(`  ${line}`) }
-  );
+  // The driver's stop is best-effort — a Compose one needs the compose file in
+  // the checkout and swallows its own failure — so what it left running is
+  // found by the mount itself, and nothing is written while anything is.
+  const held = await holdVolumeForRestore(backupDocker, volume, projectOwner(project.slug), emit);
+  stopped.containers.push(...held.filter((id) => !stopped.containers.includes(id)));
+
+  await writeVolume(backupDocker, { volume, image: "alpine", archive: file, log: emit });
 
   emit(`  volume ${volume} ripristinato`);
 }
