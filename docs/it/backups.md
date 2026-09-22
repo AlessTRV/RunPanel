@@ -39,6 +39,9 @@ per un singolo progetto e per «tutti i progetti». I volumi sono di due tipi:
   esattamente quello. `runpanel-shop` non prende mai i volumi di
   `runpanel-shop2`, e un volume senza etichette non entra mai.
 
+Un volume dichiarato `external: true` nel compose file non lo crea lo stack e non
+ha l'etichetta di progetto: non entra nel backup, va salvato a parte.
+
 Il log del backup elenca i volumi trovati per ogni progetto. Se Docker non
 risponde, il progetto compare come elemento saltato con il motivo: una lista
 vuota non passa più in silenzio per «nessun dato».
@@ -57,13 +60,15 @@ succede durante la copia:
 
 Il fermo è tenuto al minimo: durante la pausa il volume viene scritto su disco
 **non compresso**, alla velocità del disco; la compressione avviene dopo, a
-container ripresi. Solo se lo spazio libero (oltre la riserva di 2 GB) non basta
-per quella copia più la sua versione compressa si comprime durante la pausa, che
-allora dura di più, e il log lo dice. Una pausa che supera i 10 minuti viene
-interrotta, i container ripresi, e il volume segnato come non salvato. I
-container montati in sola lettura non vengono fermati; un container di un altro
-progetto che scrive nello stesso volume non viene mai toccato, e la copia viene
-segnata come non garantita.
+container ripresi. Se lo spazio libero (oltre la riserva di 2 GB) non basta per
+quella copia più la sua versione compressa, si comprime durante la pausa con il
+livello di gzip più veloce, e il log lo dice; un volume che a quella velocità non
+ci starebbe nel limite viene rifiutato **prima** di fermare qualcosa, con il
+motivo. Una pausa che supera i 10 minuti viene interrotta, i container ripresi, e
+il volume segnato come non salvato; lo stesso se la copia non compressa cresce
+oltre lo spazio disponibile. I container montati in sola lettura non vengono
+fermati; un container di un altro progetto che scrive nello stesso volume non
+viene mai toccato, e la copia viene segnata come non garantita.
 
 Gli id dei container in pausa vengono annotati su disco
 (`data/backups/paused-containers.json`) finché la pausa dura: se il pannello
@@ -74,9 +79,12 @@ un backup non genera notifiche di crash.
 **Comando pre-backup.** Per i progetti Compose si può aggiungere un comando da
 eseguire, una volta per backup, in un servizio dello stack prima di copiare i
 volumi (`sh -c`, con un timeout): per esempio un `.backup` di SQLite o un
-`pg_dump` dentro il volume. Se fallisce e la copia è in pausa, il backup prosegue
-lo stesso; se la copia è a caldo il volume non viene salvato, perché senza né
-comando né pausa niente la renderebbe coerente.
+`pg_dump` dentro il volume. Il limite di tempo vale anche dentro il container
+(con `timeout`, se l'immagine ce l'ha), così un comando scaduto non resta a
+scrivere a metà mentre i container sono in pausa. Se fallisce e la copia è in
+pausa, il backup prosegue lo stesso; se la copia è a caldo e qualcuno sta
+scrivendo, il volume non viene salvato, perché senza né comando né pausa niente
+la renderebbe coerente.
 
 Il log dice cosa è successo, volume per volume:
 

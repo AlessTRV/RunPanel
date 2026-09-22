@@ -158,7 +158,8 @@ export async function run({ repoRoot }) {
         ],
       });
       log.length = 0;
-      const held = await ops.holdVolumeForRestore(docker.cli, "runpanel-memebot_memebot-data", owner, say);
+      const held = [];
+      await ops.holdVolumeForRestore(docker.cli, "runpanel-memebot_memebot-data", owner, say, held);
       r.check("what the stop left running is stopped here", held.includes("c1") && held.includes("c2"), held.join(","));
       r.check("an already stopped container is left alone", !held.includes("c3"));
       r.check("the paused one is unpaused before it is stopped", docker.verbs().indexOf("unpause") < docker.verbs().lastIndexOf("stop"));
@@ -205,7 +206,7 @@ export async function run({ repoRoot }) {
       });
       let refused = null;
       try {
-        await ops.holdVolumeForRestore(docker.cli, "runpanel-memebot_memebot-data", owner, say);
+        await ops.holdVolumeForRestore(docker.cli, "runpanel-memebot_memebot-data", owner, say, []);
       } catch (err) {
         refused = err;
       }
@@ -228,7 +229,7 @@ export async function run({ repoRoot }) {
       });
       let refused = null;
       try {
-        await ops.holdVolumeForRestore(docker.cli, "runpanel-memebot_memebot-data", owner, say);
+        await ops.holdVolumeForRestore(docker.cli, "runpanel-memebot_memebot-data", owner, say, []);
       } catch (err) {
         refused = err;
       }
@@ -244,7 +245,7 @@ export async function run({ repoRoot }) {
         events,
         journal: {
           record: (ids) => events.push(["record", [...ids]]),
-          settle: (ids) => events.push(["settle", [...ids]]),
+          release: (ids) => events.push(["release", [...ids]]),
         },
       };
     };
@@ -266,6 +267,7 @@ export async function run({ repoRoot }) {
           reserveBytes: 2 * 1024 ** 3,
           pauseLimitMs: 60_000,
           journal: spy.journal,
+          retryDelayMs: 1,
           log: say,
           ...overrides.request,
         },
@@ -304,7 +306,7 @@ export async function run({ repoRoot }) {
       );
       r.check(
         "the journal is written before the pause and cleared after",
-        JSON.stringify(spy.events) === JSON.stringify([["record", ["c1"]], ["settle", []]]),
+        JSON.stringify(spy.events) === JSON.stringify([["record", ["c1"]], ["release", ["c1"]]]),
         JSON.stringify(spy.events)
       );
       r.check(
@@ -354,7 +356,11 @@ export async function run({ repoRoot }) {
         ["c1", "c2"].every((id) => docker.container(id).state === "running"),
         docker.state.containers.map((c) => `${c.name}:${c.state}`).join(", ")
       );
-      r.check("the journal is cleared", JSON.stringify(spy.events.at(-1)) === JSON.stringify(["settle", []]));
+      r.check(
+        "and both are released from the journal",
+        JSON.stringify(spy.events.at(-1)) === JSON.stringify(["release", ["c1", "c2"]]),
+        JSON.stringify(spy.events)
+      );
     }
 
     {
@@ -465,10 +471,192 @@ export async function run({ repoRoot }) {
       await ops.exportVolume(docker.cli, request);
       r.check(
         "a container that could not be resumed stays in the journal",
-        JSON.stringify(spy.events.at(-1)) === JSON.stringify(["settle", ["c1"]]),
+        JSON.stringify(spy.events.at(-1)) === JSON.stringify(["release", []]),
         JSON.stringify(spy.events)
       );
       r.check("and the log says so", log.some((line) => line.startsWith("  ERRORE") && line.includes("memebot-record")));
+    }
+
+    {
+      // The client gave up on `docker pause`, the daemon carried it out anyway.
+      const docker = simulatedDocker({
+        containers: [stackContainer("c1", "record", rw)],
+        hooks: {
+          run: du,
+          pause: (args, state) => {
+            state.containers[0].state = "paused";
+            throw new Error("context deadline exceeded");
+          },
+        },
+      });
+      const { request, spy } = exportRequest(docker);
+      const result = await ops.exportVolume(docker.cli, request);
+      r.check(
+        "a pause that timed out on the client but happened is still undone",
+        docker.container("c1").state === "running",
+        docker.container("c1").state
+      );
+      r.check("and released from the journal", JSON.stringify(spy.events.at(-1)) === JSON.stringify(["release", ["c1"]]));
+      r.check("the copy is not claimed consistent", result.consistency.result === "live", JSON.stringify(result.consistency));
+    }
+
+    {
+      // Cancelled before the copy: nothing is frozen.
+      const docker = simulatedDocker({ containers: [stackContainer("c1", "record", rw)], hooks: { run: du } });
+      const controller = new AbortController();
+      controller.abort();
+      const { request } = exportRequest(docker, { request: { signal: controller.signal } });
+      let failed = null;
+      try {
+        await ops.exportVolume(docker.cli, request);
+      } catch (err) {
+        failed = err;
+      }
+      r.check("a cancelled backup pauses nothing", failed !== null && !docker.verbs().includes("pause"), String(failed));
+    }
+
+    {
+      // No room for the raw copy, and far too big to compress within the limit.
+      const docker = simulatedDocker({
+        containers: [stackContainer("c1", "record", rw)],
+        hooks: { run: () => `${40 * 1024 * 1024}\t/from` },
+      });
+      const { request } = exportRequest(docker, {
+        request: { freeBytes: () => 3 * 1024 ** 3, reserveBytes: 2 * 1024 ** 3, pauseLimitMs: 10 * 60_000 },
+      });
+      let failed = null;
+      try {
+        await ops.exportVolume(docker.cli, request);
+      } catch (err) {
+        failed = err;
+      }
+      r.check("a volume that cannot be compressed within the limit is refused", /non è stato salvato/.test(String(failed?.message)), String(failed?.message));
+      r.check("before anything is frozen", !docker.verbs().includes("pause"));
+    }
+
+    {
+      // The size cannot be told: compress while paused, with the fast level.
+      const docker = simulatedDocker({ containers: [stackContainer("c1", "record", rw)] });
+      log.length = 0;
+      const { request } = exportRequest(docker);
+      await ops.exportVolume(docker.cli, request);
+      const copy = docker.calls.find((call) => call.args.includes("tar"));
+      r.check(
+        "without an estimate the copy is compressed while paused",
+        copy?.compress === true && copy?.users.find((u) => u.name === "memebot-record")?.state === "paused"
+      );
+      r.check("with the fastest gzip level", docker.calls.find((call) => call.args.includes("tar"))?.fast === true);
+    }
+
+    {
+      // The raw copy grows past the room left: stopped before it eats the reserve.
+      const docker = simulatedDocker({
+        containers: [stackContainer("c1", "record", rw)],
+        hooks: {
+          run: du,
+          toFile: (_args, _state, opts, destination) => {
+            fs.writeFileSync(destination, Buffer.alloc(12 * 1024 * 1024));
+            return new Promise((_, reject) => {
+              if (opts.signal.aborted) reject(new Error("killed"));
+              opts.signal.addEventListener("abort", () => reject(new Error("killed")));
+            });
+          },
+        },
+      });
+      const { request } = exportRequest(docker, {
+        request: { freeBytes: () => 2 * 1024 ** 3 + 10 * 1024 ** 2, reserveBytes: 2 * 1024 ** 3 },
+      });
+      let failed = null;
+      try {
+        await ops.exportVolume(docker.cli, request);
+      } catch (err) {
+        failed = err;
+      }
+      r.check("a raw copy larger than its room is cut short", /superato lo spazio/.test(String(failed?.message)), String(failed?.message));
+      r.check("and the writer is resumed", docker.container("c1").state === "running");
+    }
+
+    {
+      // A writer that starts while the volume is being measured is paused too.
+      const docker = simulatedDocker({
+        containers: [stackContainer("c1", "record", rw), stackContainer("c2", "label", rw, "exited")],
+        hooks: {
+          run: (args, state) => {
+            if (!args.includes("du -sk /from; for p in \"$@\"; do du -sk \"/from/$p\" 2>/dev/null || echo \"- /from/$p\"; done")) return undefined;
+            state.containers[1].state = "running";
+            return du();
+          },
+        },
+      });
+      const { request } = exportRequest(docker);
+      await ops.exportVolume(docker.cli, request);
+      const copy = docker.calls.find((call) => call.args.includes("tar"));
+      r.check(
+        "a writer started during the measurement is paused as well",
+        copy?.users.find((u) => u.name === "memebot-label")?.state === "paused",
+        JSON.stringify(copy?.users)
+      );
+    }
+
+    {
+      // Read-only at one path, read-write at another: a writer.
+      const docker = simulatedDocker({
+        containers: [stackContainer("c1", "record", [{ name: VOLUME, rw: false }, { name: VOLUME, rw: true }])],
+      });
+      const [user] = await ops.volumeUsers(docker.cli, VOLUME, owner);
+      r.check("a volume mounted twice, once read-write, counts as written", user?.rw === true, JSON.stringify(user));
+    }
+
+    {
+      // Live copy, a failed command, and a stack that is running: refused.
+      const failed = { service: "record", container: null, ok: false, ms: 1, error: "not running" };
+      const running = simulatedDocker({ containers: [stackContainer("c1", "record", rw)] });
+      let refused = null;
+      try {
+        await ops.exportVolume(running.cli, exportRequest(running, { request: { consistency: "live", preBackup: failed } }).request);
+      } catch (err) {
+        refused = err;
+      }
+      r.check("a live copy whose command failed is refused while something writes", refused !== null && !running.calls.some((c) => c.args.includes("tar")));
+
+      const idle = simulatedDocker({ containers: [stackContainer("c1", "record", rw, "exited")] });
+      const result = await ops.exportVolume(idle.cli, exportRequest(idle, { request: { consistency: "live", preBackup: failed } }).request);
+      r.check("but goes ahead when nothing is writing", result.consistency.result === "idle", JSON.stringify(result.consistency));
+    }
+
+    {
+      const docker = simulatedDocker({ containers: [stackContainer("c1", "record", rw)], hooks: { run: du } });
+      await ops.exportVolume(docker.cli, exportRequest(docker).request);
+      const helpers = docker.calls.filter(({ args }) => args[0] === "run");
+      r.check(
+        "no throwaway container writes its output into Docker's own logs",
+        helpers.length > 0 && helpers.every(({ args }) => args.join(" ").includes("--log-driver none")),
+        helpers.map(({ args }) => args.slice(0, 4).join(" ")).join(" | ")
+      );
+    }
+
+    {
+      // A stop that fails halfway still leaves the ones already stopped on the list.
+      const docker = simulatedDocker({
+        containers: [
+          stackContainer("c1", "record", [{ name: VOLUME, rw: true }]),
+          stackContainer("c2", "label", [{ name: VOLUME, rw: true }]),
+        ],
+        hooks: {
+          stop: (args, state) => {
+            if (args.includes("c2")) throw new Error("timeout");
+            state.containers[0].state = "exited";
+            return "";
+          },
+        },
+      });
+      const held = [];
+      try {
+        await ops.holdVolumeForRestore(docker.cli, VOLUME, owner, say, held);
+      } catch {
+        /* expected */
+      }
+      r.check("containers stopped before a failure are still handed back to be started", held.includes("c1"), held.join(","));
     }
 
     // --- the pre-backup command ------------------------------------------------------
@@ -488,7 +676,21 @@ export async function run({ repoRoot }) {
       const hook = { service: "record", command: "python -m memebot snapshot", timeoutSec: 60 };
       const outcome = await ops.runPreBackup(docker.cli, owner, hook, say);
       const exec = docker.calls.find(({ args }) => args[0] === "exec");
-      r.check("the command runs in the stack's service", exec?.args.join(" ") === "exec c1 sh -c python -m memebot snapshot", exec?.args.join(" "));
+      r.check(
+        "the command runs in the stack's service",
+        exec?.args[0] === "exec" && exec?.args[1] === "c1" && exec?.args.at(-1) === "python -m memebot snapshot",
+        exec?.args.join(" ")
+      );
+      r.check(
+        "handed to the shell as $0, not spliced into its script",
+        exec?.args.length === 6 && !exec?.args[4].includes("memebot"),
+        JSON.stringify(exec?.args)
+      );
+      r.check(
+        "and bounded inside the container too, when it has `timeout`",
+        exec?.args[4].includes("timeout -s KILL 60 sh -c \"$0\""),
+        exec?.args[4]
+      );
       r.check("and reports success", outcome.ok === true && outcome.container === "memebot-record", JSON.stringify(outcome));
     }
 
@@ -516,17 +718,21 @@ export async function run({ repoRoot }) {
       const failed = { service: "record", container: null, ok: false, ms: 1, error: "locked" };
       r.check(
         "a failed command with the writers paused lets the copy go ahead",
-        ops.preBackupBlocks(failed, "pause") === null
+        ops.preBackupBlocks(failed, "pause", true) === null
       );
       r.check(
         "with a live copy it stops it, saying why",
-        String(ops.preBackupBlocks(failed, "live")).includes("locked")
+        String(ops.preBackupBlocks(failed, "live", true)).includes("locked")
       );
       r.check(
         "a command that worked never stops anything",
-        ops.preBackupBlocks({ ...failed, ok: true, error: undefined }, "live") === null
+        ops.preBackupBlocks({ ...failed, ok: true, error: undefined }, "live", true) === null
       );
-      r.check("nor does having none", ops.preBackupBlocks(null, "live") === null);
+      r.check("nor does having none", ops.preBackupBlocks(null, "live", true) === null);
+      r.check(
+        "nor a failed one when nothing is writing: the live copy is consistent anyway",
+        ops.preBackupBlocks(failed, "live", false) === null
+      );
     }
 
     // --- the settings, read tolerantly --------------------------------------------------

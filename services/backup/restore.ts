@@ -679,8 +679,7 @@ async function restoreVolume(
   // The driver's stop is best-effort — a Compose one needs the compose file in
   // the checkout and swallows its own failure — so what it left running is
   // found by the mount itself, and nothing is written while anything is.
-  const held = await holdVolumeForRestore(backupDocker, volume, projectOwner(project.slug), emit);
-  stopped.containers.push(...held.filter((id) => !stopped.containers.includes(id)));
+  await holdVolumeForRestore(backupDocker, volume, projectOwner(project.slug), emit, stopped.containers);
 
   // Read from the artifact, not from today's settings: what matters is what
   // this archive left out. Validated again, since it goes into a shell script.

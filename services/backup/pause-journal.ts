@@ -25,19 +25,38 @@ function journalPath(): string {
   return path.join(config.backupsDir, "paused-containers.json");
 }
 
+function read(): Entry | null {
+  try {
+    const entry = JSON.parse(fs.readFileSync(journalPath(), "utf8")) as Entry;
+    return Array.isArray(entry.ids) ? entry : null;
+  } catch {
+    return null;
+  }
+}
+
 function write(entry: Entry): void {
+  if (entry.ids.length === 0) {
+    fs.rmSync(journalPath(), { force: true });
+    return;
+  }
   fs.mkdirSync(path.dirname(journalPath()), { recursive: true });
   fs.writeFileSync(journalPath(), JSON.stringify(entry), { mode: 0o600 });
 }
 
+/**
+ * Additive on purpose. One volume of a run can leave a container it failed to
+ * resume; the next volume's pause must add to that entry, not replace it — or
+ * its own clean release would erase the one id somebody still has to unpause.
+ */
 export function pauseJournal(runId: string): PauseJournal {
   return {
     record(ids) {
-      write({ runId, ids, at: new Date().toISOString() });
+      const known = read()?.ids ?? [];
+      write({ runId, ids: [...new Set([...known, ...ids])], at: new Date().toISOString() });
     },
-    settle(stillPaused) {
-      if (stillPaused.length > 0) write({ runId, ids: stillPaused, at: new Date().toISOString() });
-      else fs.rmSync(journalPath(), { force: true });
+    release(ids) {
+      const known = read()?.ids ?? [];
+      write({ runId, ids: known.filter((id) => !ids.includes(id)), at: new Date().toISOString() });
     },
   };
 }
@@ -53,19 +72,23 @@ export function pauseJournal(runId: string): PauseJournal {
  * forget what it was supposed to resume.
  */
 export async function resumeAbandonedPauses(): Promise<number> {
-  let entry: Entry;
-  try {
-    entry = JSON.parse(fs.readFileSync(journalPath(), "utf8")) as Entry;
-  } catch {
-    return 0;
-  }
+  const entry = read();
+  if (!entry) return 0;
   if (!(await isDockerAvailable())) return 0;
 
   let resumed = 0;
-  for (const id of Array.isArray(entry.ids) ? entry.ids : []) {
+  const left: string[] = [];
+  for (const id of entry.ids) {
     if (typeof id !== "string" || !/^[a-f0-9]{12,64}$/.test(id)) continue;
-    if (await dockerTry(["unpause", id], { timeout: 30_000 })) resumed++;
+    if (await dockerTry(["unpause", id], { timeout: 30_000 })) {
+      resumed++;
+      continue;
+    }
+    // Kept only while it is still there and still frozen: anything else — gone,
+    // running, stopped — has nothing left for this file to do.
+    const state = await dockerTry(["inspect", "--format", "{{.State.Paused}}", id], { timeout: 15_000 });
+    if (state?.stdout.trim() === "true") left.push(id);
   }
-  fs.rmSync(journalPath(), { force: true });
+  write({ ...entry, ids: left });
   return resumed;
 }

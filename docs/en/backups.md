@@ -39,6 +39,10 @@ That holds for a single project and for "all projects". There are two kinds:
   never picks up the volumes of `runpanel-shop2`, and an unlabelled volume is
   never included.
 
+A volume declared `external: true` in the compose file is not created by the
+stack and carries no project label: it is not included, and has to be backed up
+on its own.
+
 The backup log lists the volumes found for each project. If Docker does not
 answer, the project shows up as a skipped entry with the reason: an empty list no
 longer passes silently for "no data".
@@ -57,13 +61,15 @@ during the copy:
 
 The downtime is kept as short as possible: while paused, the volume is written to
 disk **uncompressed**, at disk speed; compression happens afterwards, with the
-containers running again. Only when the free space (beyond the 2 GB reserve)
-cannot hold that copy plus its compressed version is it compressed during the
-pause, which then lasts longer, and the log says so. A pause longer than 10
-minutes is cut short, the containers resumed, and the volume marked as not saved.
-Containers that mount the volume read-only are left running; another project's
-container writing into the same volume is never touched, and the copy is marked
-as not guaranteed.
+containers running again. When the free space (beyond the 2 GB reserve) cannot
+hold that copy plus its compressed version, it is compressed during the pause at
+gzip's fastest level, and the log says so; a volume that at that speed would not
+fit in the limit is refused **before** anything is frozen, with the reason. A
+pause longer than 10 minutes is cut short, the containers resumed, and the volume
+marked as not saved; the same happens if the uncompressed copy grows past the
+space available. Containers that mount the volume read-only are left running;
+another project's container writing into the same volume is never touched, and
+the copy is marked as not guaranteed.
 
 The ids of paused containers are written to disk
 (`data/backups/paused-containers.json`) for as long as the pause lasts: if the
@@ -73,10 +79,12 @@ crash notifications.
 
 **Pre-backup command.** Compose projects can add a command to run, once per
 backup, in one service of the stack before its volumes are copied (`sh -c`, with
-a timeout): an SQLite `.backup` or a `pg_dump` into the volume, for instance. If
-it fails and the copy is paused, the backup goes ahead; if the copy is live, the
-volume is not saved, since with neither the command nor a pause nothing would
-make it consistent.
+a timeout): an SQLite `.backup` or a `pg_dump` into the volume, for instance. The
+time limit also applies inside the container (through `timeout`, when the image
+has it), so a command past its limit is not left writing halfway while the
+containers are paused. If it fails and the copy is paused, the backup goes ahead;
+if the copy is live and something is writing, the volume is not saved, since with
+neither the command nor a pause nothing would make it consistent.
 
 The log says what happened, volume by volume:
 

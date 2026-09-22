@@ -26,7 +26,13 @@ export interface DockerCli {
   toFile(
     args: string[],
     destination: string,
-    opts: { compress: boolean; signal?: AbortSignal; onStderr?: (line: string) => void }
+    opts: {
+      compress: boolean;
+      /** The fastest gzip level, for a copy something is waiting on. */
+      fast?: boolean;
+      signal?: AbortSignal;
+      onStderr?: (line: string) => void;
+    }
   ): Promise<{ bytes: number; rawBytes: number; sha256: string }>;
   /** Feed a file to stdin — the restore direction. */
   fromFile(
@@ -212,9 +218,10 @@ export async function volumeUsers(
 
   const users: VolumeUser[] = [];
   for (const container of containers) {
-    const mount = container.mounts.find((entry) => entry.name === volume);
-    if (!mount) continue;
-    users.push({ ...container, rw: mount.rw, owned: isOwned(container, owner) });
+    const mounts = container.mounts.filter((entry) => entry.name === volume);
+    if (mounts.length === 0) continue;
+    // Mounted twice, read-only at one path and read-write at another, is a writer.
+    users.push({ ...container, rw: mounts.some((entry) => entry.rw), owned: isOwned(container, owner) });
   }
   return users;
 }
@@ -262,6 +269,24 @@ export interface PreBackupOutcome {
 }
 
 /**
+ * `docker exec` for the pre-backup command, with the time limit enforced
+ * inside the container as well.
+ *
+ * Killing the `docker exec` client does not stop what it started: the command
+ * would go on writing its dump while the writers are paused, and be frozen
+ * halfway through it — a half-written file inside the snapshot. So it runs
+ * under `timeout` when the image has one (busybox and coreutils both do), and
+ * the client's own limit is only the fallback. The command reaches the shell as
+ * `$0`, never spliced into the script.
+ */
+export function preBackupExecArgs(containerId: string, hook: PreBackupCommand): string[] {
+  const script =
+    `if command -v timeout >/dev/null 2>&1; then exec timeout -s KILL ${hook.timeoutSec} sh -c "$0"; ` +
+    `else exec sh -c "$0"; fi`;
+  return ["exec", containerId, "sh", "-c", script, hook.command];
+}
+
+/**
  * The project's own way of making its data safe to copy — an SQLite
  * `.backup`, a `pg_dump` into the volume, a flush — run in one service of its
  * stack. It never throws: whether a failure is fatal depends on whether the
@@ -291,8 +316,9 @@ export async function runPreBackup(
     container = target.name;
 
     log(`  comando pre-backup in ${target.name}…`);
-    const result = await cli.run(["exec", target.id, "sh", "-c", hook.command], {
-      timeout: hook.timeoutSec * 1000,
+    const result = await cli.run(preBackupExecArgs(target.id, hook), {
+      // A little past the in-container limit, so that one is what fires.
+      timeout: (hook.timeoutSec + 15) * 1000,
     });
     for (const line of splitLines(`${result.stdout}\n${result.stderr}`).slice(-20)) log(`    ${line}`);
 
@@ -311,14 +337,16 @@ export async function runPreBackup(
  *
  * Only when nothing else would make it consistent: with the writers paused the
  * copy is still the state a power cut would have left, which is what SQLite and
- * Postgres recover from. With a live copy the command was the only guarantee,
- * and a copy that merely looks fine is the outcome this exists to prevent.
+ * Postgres recover from, and with nothing writing there is nothing to tear.
+ * With a live copy of a volume being written, the command was the only
+ * guarantee, and a copy that merely looks fine is what this exists to prevent.
  */
 export function preBackupBlocks(
   outcome: PreBackupOutcome | null,
-  consistency: VolumeConsistency
+  consistency: VolumeConsistency,
+  writing: boolean
 ): string | null {
-  if (!outcome || outcome.ok || consistency === "pause") return null;
+  if (!outcome || outcome.ok || consistency === "pause" || !writing) return null;
   return (
     `Il comando pre-backup è fallito (${outcome.error ?? "motivo sconosciuto"}) e il progetto chiede la ` +
     "copia a caldo: la copia sarebbe incoerente, il volume non è stato salvato"
@@ -332,10 +360,10 @@ export function preBackupBlocks(
  * mid-copy does not leave an application frozen: the next boot unpauses them.
  */
 export interface PauseJournal {
-  /** Before anything is paused, with everything about to be. */
+  /** Before anything is paused, with everything about to be. Adds to what is there. */
   record(ids: string[]): void;
-  /** Once the copy is over, with whatever could not be resumed. */
-  settle(stillPaused: string[]): void;
+  /** Once they are running again. Anything not released stays for the next boot. */
+  release(ids: string[]): void;
 }
 
 export interface ExportRequest {
@@ -356,6 +384,10 @@ export interface ExportRequest {
   /** A pause that lasts longer is ended, and the copy with it. */
   pauseLimitMs: number;
   journal: PauseJournal;
+  /** The project's pre-backup command, if it has one and it already ran. */
+  preBackup?: PreBackupOutcome | null;
+  /** Between attempts at resuming a container. Only a test has a reason to change it. */
+  retryDelayMs?: number;
   log: (line: string) => void;
   signal?: AbortSignal;
 }
@@ -394,6 +426,14 @@ export interface ExportResult {
 const SNAPSHOT_MARGIN = 2.1;
 
 /**
+ * For every throwaway container here. An attached `docker run` still hands
+ * its stdout to the log driver as well, so without this a volume streamed out
+ * as a tar was written a second time into `/var/lib/docker/containers`, as
+ * JSON, on the same disk the copy's space was reckoned against.
+ */
+const HELPER_FLAGS = ["--log-driver", "none"];
+
+/**
  * `./<path>` rather than `<path>`: busybox tar, like GNU tar, matches an
  * exclusion at every component boundary, so a bare `trades` would also drop
  * `reports/trades`. Anchored at the root it means exactly the one path, and
@@ -401,7 +441,7 @@ const SNAPSHOT_MARGIN = 2.1;
  */
 export function tarArgs(volume: string, image: string, excludes: readonly string[] = []): string[] {
   return [
-    "run", "--rm",
+    "run", "--rm", ...HELPER_FLAGS,
     // Read-only, so taking a backup can never write into the volume.
     "-v", `${volume}:/from:ro`,
     "-w", "/from",
@@ -439,7 +479,7 @@ async function measure(
   try {
     const script = 'du -sk /from; for p in "$@"; do du -sk "/from/$p" 2>/dev/null || echo "- /from/$p"; done';
     const result = await cli.run(
-      ["run", "--rm", "-v", `${volume}:/from:ro`, image, "sh", "-c", script, "sh", ...excludes],
+      ["run", "--rm", ...HELPER_FLAGS, "-v", `${volume}:/from:ro`, image, "sh", "-c", script, "sh", ...excludes],
       { timeout: 120_000 }
     );
 
@@ -499,6 +539,58 @@ async function gzipFile(source: string, destination: string): Promise<{ bytes: n
 }
 
 /**
+ * gzip's throughput assumed when a copy has to be compressed while its writers
+ * wait — level 1, and on the slow side of what one core does, so that a
+ * volume refused for being too large really is.
+ */
+const PAUSED_GZIP_BYTES_PER_SEC = 30 * 1024 * 1024;
+
+interface WriterPlan {
+  /** Read-write users that are running or restarting, whoever they belong to. */
+  running: VolumeUser[];
+  /** The project's own running writers: the ones a pause will freeze. */
+  pausable: VolumeUser[];
+  /** Writers a pause will not freeze, and why. */
+  notPaused: { name: string; reason: string }[];
+}
+
+function planWriters(users: VolumeUser[], consistency: VolumeConsistency): WriterPlan {
+  const writers = users.filter((user) => user.rw && ACTIVE_STATES.has(user.state));
+  // One already paused by somebody else is not writing, and is not ours to resume.
+  const running = writers.filter((writer) => writer.state !== "paused");
+  if (consistency === "live") return { running, pausable: [], notPaused: [] };
+
+  const notPaused: { name: string; reason: string }[] = [];
+  for (const writer of running) {
+    if (!writer.owned) notPaused.push({ name: writer.name, reason: "non è di questo progetto" });
+    else if (writer.state === "restarting") notPaused.push({ name: writer.name, reason: "si sta riavviando" });
+  }
+  return {
+    running,
+    pausable: running.filter((writer) => writer.owned && writer.state === "running"),
+    notPaused,
+  };
+}
+
+async function stateOf(cli: DockerCli, id: string, owner: ProjectOwner): Promise<string | null> {
+  const [info] = await inspectContainers(cli, [id], owner);
+  return info?.state ?? null;
+}
+
+/** `docker unpause`, a few times: a busy daemon is no reason to leave an application frozen. */
+async function resume(cli: DockerCli, id: string, attempts: number, delayMs: number): Promise<boolean> {
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      await cli.run(["unpause", id], { timeout: 30_000 });
+      return true;
+    } catch {
+      if (attempt < attempts) await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+  return false;
+}
+
+/**
  * A volume, copied so that the copy can be trusted.
  *
  * A tar taken while an application writes can hold a database file from one
@@ -518,34 +610,26 @@ async function gzipFile(source: string, destination: string): Promise<{ bytes: n
 export async function exportVolume(cli: DockerCli, request: ExportRequest): Promise<ExportResult> {
   const { volume, owner, log, excludes } = request;
   const tar = tarArgs(volume, request.image, excludes);
-
-  const users = await volumeUsers(cli, volume, owner);
-  const writers = users.filter((user) => user.rw && ACTIVE_STATES.has(user.state));
-  const notPaused: { name: string; reason: string }[] = [];
-
-  let pausable: VolumeUser[] = [];
-  if (request.consistency === "pause") {
-    for (const writer of writers) {
-      if (!writer.owned) notPaused.push({ name: writer.name, reason: "non è di questo progetto" });
-      else if (writer.state === "restarting") notPaused.push({ name: writer.name, reason: "si sta riavviando" });
-    }
-    // One already paused by somebody else is not writing, and is not ours to resume.
-    pausable = writers.filter((writer) => writer.owned && writer.state === "running");
-  }
+  const cancelled = () => {
+    if (request.signal?.aborted) throw new Error("Backup annullato");
+  };
+  cancelled();
 
   const report: ConsistencyReport = {
     mode: request.consistency,
     result: "idle",
     paused: [],
     pausedMs: null,
-    notPaused,
+    notPaused: [],
     method: "stream",
   };
+
+  let plan = planWriters(await volumeUsers(cli, volume, owner), request.consistency);
 
   // Measured only when it tells somebody something: a pause needs to know
   // whether an uncompressed copy fits, and exclusions deserve their sizes.
   const sizes =
-    pausable.length > 0 || excludes.length > 0
+    plan.pausable.length > 0 || excludes.length > 0
       ? await measure(cli, volume, request.image, excludes)
       : { total: null, excluded: [] };
   const estimate = estimateCopy(sizes.total, sizes.excluded);
@@ -560,18 +644,28 @@ export async function exportVolume(cli: DockerCli, request: ExportRequest): Prom
     log(`  esclusi: ${described.join(", ")}`);
   }
 
+  // Asked again right before acting on it: measuring can take a while, and a
+  // container started meanwhile would be writing into a copy nobody paused it for.
+  if (plan.pausable.length > 0) plan = planWriters(await volumeUsers(cli, volume, owner), request.consistency);
+  report.notPaused = plan.notPaused;
+
+  const blocked = preBackupBlocks(request.preBackup ?? null, request.consistency, plan.running.length > 0);
+  if (blocked) throw new Error(blocked);
+  if (request.preBackup && !request.preBackup.ok && plan.pausable.length > 0) {
+    log("  proseguo con la pausa dei container: la copia resta coerente, senza quello che il comando avrebbe preparato");
+  }
+
   // --- nothing to pause --------------------------------------------------------------
-  if (pausable.length === 0) {
-    const running = writers.filter((writer) => writer.state !== "paused");
-    if (request.consistency === "live" && running.length > 0) {
+  if (plan.pausable.length === 0) {
+    if (request.consistency === "live" && plan.running.length > 0) {
       report.result = "live";
       log(
-        `  ATTENZIONE: copia a caldo, come chiede il progetto, con ${running.map((w) => w.name).join(", ")} ` +
+        `  ATTENZIONE: copia a caldo, come chiede il progetto, con ${plan.running.map((w) => w.name).join(", ")} ` +
           "in scrittura: la copia può essere incoerente"
       );
-    } else if (notPaused.length > 0) {
+    } else if (plan.notPaused.length > 0) {
       report.result = "live";
-      for (const entry of notPaused) {
+      for (const entry of plan.notPaused) {
         log(`  ATTENZIONE: ${entry.name} scrive nel volume e ${entry.reason}: la copia può essere incoerente`);
       }
     } else {
@@ -586,27 +680,60 @@ export async function exportVolume(cli: DockerCli, request: ExportRequest): Prom
     return { ...result, estimatedBytes: estimate, consistency: report, excluded: sizes.excluded };
   }
 
-  // --- pausing -----------------------------------------------------------------------
+  // --- deciding how to copy while paused ---------------------------------------------
   const free = request.freeBytes();
   const room = free === null ? null : free - request.reserveBytes;
   const snapshot = estimate !== null && room !== null && estimate * SNAPSHOT_MARGIN < room;
   report.method = snapshot ? "snapshot" : "stream";
 
   if (!snapshot) {
+    // Compressing while they wait is the fallback, and it has to be able to
+    // finish inside the limit. A volume that plainly cannot is refused before
+    // anything is frozen: ten minutes of a stopped application that end in no
+    // copy at all is the worst of the three outcomes.
+    const budget = (request.pauseLimitMs / 1000) * PAUSED_GZIP_BYTES_PER_SEC;
+    if (estimate !== null && estimate > budget) {
+      throw new Error(
+        `Spazio insufficiente per la copia rapida (servono ~${megabytes(estimate * SNAPSHOT_MARGIN)} oltre la riserva, ` +
+          `disponibili ${megabytes(Math.max(room ?? 0, 0))}), e ~${megabytes(estimate)} non si comprimono entro ` +
+          `${Math.round(request.pauseLimitMs / 60_000)} minuti di pausa: il volume non è stato salvato e nessun ` +
+          "container è stato fermato. Libera spazio, escludi le cartelle che non servono, o usa la copia a caldo " +
+          "con un comando pre-backup."
+      );
+    }
     log(
       estimate === null || room === null
         ? "  non riesco a stimare lo spazio per la copia rapida: comprimo durante la pausa, che durerà di più"
-        : `  spazio insufficiente per la copia rapida (servono ~${megabytes(estimate)}, disponibili ` +
-            `${megabytes(Math.max(room, 0))} oltre la riserva): comprimo durante la pausa, che durerà di più`
+        : `  spazio insufficiente per la copia rapida (servono ~${megabytes(estimate * SNAPSHOT_MARGIN)}, ` +
+            `disponibili ${megabytes(Math.max(room, 0))} oltre la riserva): comprimo durante la pausa, che durerà di più`
     );
   }
 
-  // A timer of its own rather than `AbortSignal.timeout`, whose timer does not
+  cancelled();
+
+  // Timers of their own rather than `AbortSignal.timeout`, whose timer does not
   // hold the process open: with nothing else pending the limit would never fire.
   const limit = new AbortController();
   const limitTimer = setTimeout(() => limit.abort(), request.pauseLimitMs);
-  const signal = request.signal ? AbortSignal.any([request.signal, limit.signal]) : limit.signal;
+  // `du` counts allocated blocks, and a sparse file reads back larger than it
+  // sits: the uncompressed copy is watched, and stopped before it eats the
+  // reserve the running applications are still writing into.
+  const overflow = new AbortController();
+  const overflowTimer =
+    snapshot && room !== null
+      ? setInterval(() => {
+          try {
+            if (fs.statSync(request.scratch).size > room) overflow.abort();
+          } catch {
+            /* not created yet */
+          }
+        }, 500)
+      : null;
+  const signal = AbortSignal.any(
+    [limit.signal, overflow.signal, ...(request.signal ? [request.signal] : [])]
+  );
 
+  const pausable = plan.pausable;
   request.journal.record(pausable.map((writer) => writer.id));
   const paused: VolumeUser[] = [];
   const started = Date.now();
@@ -618,54 +745,76 @@ export async function exportVolume(cli: DockerCli, request: ExportRequest): Prom
         await cli.run(["pause", writer.id], { timeout: 30_000 });
         paused.push(writer);
       } catch (err) {
-        notPaused.push({ name: writer.name, reason: `la pausa non è riuscita (${messageOf(err)})` });
+        report.notPaused.push({ name: writer.name, reason: `la pausa non è riuscita (${messageOf(err)})` });
       }
     }
     report.paused = paused.map((writer) => writer.name);
     if (paused.length > 0) log(`  in pausa: ${report.paused.join(", ")}`);
-    for (const entry of notPaused) {
+    for (const entry of report.notPaused) {
       log(`  ATTENZIONE: ${entry.name} scrive nel volume e ${entry.reason}: la copia può essere incoerente`);
     }
 
     try {
-      copied = await cli.toFile(
-        tar,
-        snapshot ? request.scratch : request.destination,
-        { compress: !snapshot, signal, onStderr: (line) => log(`  ${line}`) }
-      );
+      copied = await cli.toFile(tar, snapshot ? request.scratch : request.destination, {
+        compress: !snapshot,
+        fast: !snapshot,
+        signal,
+        onStderr: (line) => log(`  ${line}`),
+      });
     } catch (err) {
-      if (limit.signal.aborted && !request.signal?.aborted) {
+      if (request.signal?.aborted) throw err;
+      if (limit.signal.aborted) {
         throw new Error(
           `La copia ha superato il limite di ${Math.round(request.pauseLimitMs / 60_000)} minuti di pausa ed è ` +
             "stata interrotta; i container sono stati ripresi. Escludi le cartelle che non servono, o usa un " +
             "comando pre-backup con la copia a caldo."
         );
       }
+      if (overflow.signal.aborted) {
+        throw new Error(
+          "La copia non compressa ha superato lo spazio libero oltre la riserva ed è stata interrotta; i " +
+            "container sono stati ripresi. Il volume occupa più di quanto stimato (file sparsi?): libera spazio " +
+            "o escludi le cartelle che non servono."
+        );
+      }
       throw err;
     }
   } finally {
     clearTimeout(limitTimer);
-    const stillPaused: string[] = [];
-    for (const writer of paused) {
-      try {
-        await cli.run(["unpause", writer.id], { timeout: 30_000 });
-      } catch (err) {
-        stillPaused.push(writer.id);
-        log(`  ERRORE: non riesco a riprendere ${writer.name}: ${messageOf(err)}`);
+    if (overflowTimer) clearInterval(overflowTimer);
+
+    /*
+      Every container a pause was attempted on, not only the ones it answered
+      for. A `docker pause` whose client timed out can still have been carried
+      out by the daemon, and a container left frozen that way would be in no
+      list at all — nothing would ever resume it.
+    */
+    const resumed: string[] = [];
+    const stillPaused: VolumeUser[] = [];
+    for (const writer of pausable) {
+      const wasPaused = paused.includes(writer);
+      if (await resume(cli, writer.id, wasPaused ? 3 : 1, request.retryDelayMs ?? 1000)) {
+        resumed.push(writer.id);
+      } else if (wasPaused || (await stateOf(cli, writer.id, owner)) === "paused") {
+        stillPaused.push(writer);
+        log(`  ERRORE: non riesco a riprendere ${writer.name}: RunPanel riproverà al prossimo avvio e al prossimo backup`);
+      } else {
+        // Its pause failed, and it is not paused: it never froze.
+        resumed.push(writer.id);
       }
     }
-    request.journal.settle(stillPaused);
+    request.journal.release(resumed);
     report.pausedMs = Date.now() - started;
     if (paused.length > 0) {
       log(
         stillPaused.length === 0
           ? `  ripresi dopo ${seconds(report.pausedMs)} di pausa`
-          : `  ${paused.length - stillPaused.length} ripresi su ${paused.length}: RunPanel riproverà al prossimo avvio`
+          : `  ${paused.length - stillPaused.length} ripresi su ${paused.length}`
       );
     }
   }
 
-  report.result = notPaused.length > 0 || paused.length === 0 ? "live" : "paused";
+  report.result = report.notPaused.length > 0 || paused.length === 0 ? "live" : "paused";
 
   if (!snapshot) {
     return { ...copied, estimatedBytes: estimate, consistency: report, excluded: sizes.excluded };
@@ -701,8 +850,13 @@ export async function holdVolumeForRestore(
   cli: DockerCli,
   volume: string,
   owner: ProjectOwner,
-  log: (line: string) => void
-): Promise<string[]> {
+  log: (line: string) => void,
+  /**
+   * Where each stopped container is written down the moment it is stopped, so
+   * the caller's `finally` starts it again even if a later one fails.
+   */
+  stopped: string[]
+): Promise<void> {
   const active = (await volumeUsers(cli, volume, owner)).filter((user) => ACTIVE_STATES.has(user.state));
 
   const foreign = active.filter((user) => !user.owned);
@@ -713,13 +867,14 @@ export async function holdVolumeForRestore(
     );
   }
 
-  const stopped: string[] = [];
   for (const user of active) {
     log(`  fermo ${user.name}, che usa ancora il volume…`);
     // `stop` on a frozen container waits out its whole timeout before the kill.
     if (user.state === "paused") await cli.run(["unpause", user.id], { timeout: 30_000 }).catch(() => {});
+    // Written down before the stop, not after: a stop that times out on the
+    // client can still have happened, and must still be undone.
+    if (!stopped.includes(user.id)) stopped.push(user.id);
     await cli.run(["stop", user.id], { timeout: 120_000 });
-    stopped.push(user.id);
   }
 
   const still = (await volumeUsers(cli, volume, owner)).filter((user) => ACTIVE_STATES.has(user.state));
@@ -728,7 +883,6 @@ export async function holdVolumeForRestore(
       `Non riesco a fermare ${still.map((user) => user.name).join(", ")}: il volume "${volume}" non è stato toccato`
     );
   }
-  return stopped;
 }
 
 /** Start again what `holdVolumeForRestore` stopped. Never throws: it runs in a `finally`. */
@@ -794,7 +948,7 @@ export async function writeVolume(
   const keep = request.keep ?? [];
   if (keep.length > 0) request.log(`  conservati come sono, perché esclusi dal backup: ${keep.join(", ")}`);
   await cli.fromFile(
-    ["run", "--rm", "-i", "-v", `${request.volume}:/to`, request.image, "sh", "-c", restoreScript(keep)],
+    ["run", "--rm", "-i", ...HELPER_FLAGS, "-v", `${request.volume}:/to`, request.image, "sh", "-c", restoreScript(keep)],
     request.archive,
     { decompress: true, onStderr: (line) => request.log(`  ${line}`) }
   );

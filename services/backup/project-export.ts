@@ -18,7 +18,6 @@ import type { RunContext, StagedFile } from "./types";
 import {
   discoverVolumes,
   exportVolume,
-  preBackupBlocks,
   runPreBackup,
   type DockerCli,
   type PreBackupOutcome,
@@ -280,7 +279,8 @@ export async function exportProjectRepo(
 /** The real daemon, behind the interface `volume-ops.ts` is written against. */
 export const backupDocker: DockerCli = {
   run: (args, opts) => docker(args, { timeout: opts?.timeout ?? 30_000 }),
-  toFile: (args, destination, opts) => dockerToFile(args, destination, opts),
+  toFile: (args, destination, { fast, ...opts }) =>
+    dockerToFile(args, destination, { ...opts, compressLevel: fast ? 1 : undefined }),
   fromFile: async (args, source, opts) => {
     await dockerFromFile(args, source, opts);
   },
@@ -376,11 +376,6 @@ export async function exportProjectVolume(
 
   const pending = preBackupOnce(project, ctx);
   const preBackup = pending ? await pending : null;
-  const blocked = preBackupBlocks(preBackup, settings.consistency);
-  if (blocked) throw new Error(blocked);
-  if (preBackup && !preBackup.ok) {
-    ctx.log("  proseguo con la pausa dei container: la copia resta coerente, senza quello che il comando avrebbe preparato");
-  }
 
   const result = await exportVolume(backupDocker, {
     volume,
@@ -394,6 +389,7 @@ export async function exportProjectVolume(
     reserveBytes: FREE_SPACE_RESERVE,
     pauseLimitMs: PAUSE_LIMIT_MS,
     journal: pauseJournal(ctx.runId),
+    preBackup,
     log: ctx.log,
     signal: ctx.signal,
   });

@@ -167,8 +167,8 @@ export function simulatedDocker({ volumes = [], containers = [], hooks = {} } = 
 
     async toFile(args, destination, opts) {
       const volume = volumeArg(args);
-      calls.push({ args, users: usersOf(volume), compress: opts.compress, destination });
-      if (hooks.toFile) await hooks.toFile(args, state, opts);
+      calls.push({ args, users: usersOf(volume), compress: opts.compress, fast: opts.fast, destination });
+      if (hooks.toFile) await hooks.toFile(args, state, opts, destination);
       const raw = Buffer.from(`tar of ${volume}\n`);
       const body = opts.compress ? zlib.gzipSync(raw) : raw;
       fs.writeFileSync(destination, body);
