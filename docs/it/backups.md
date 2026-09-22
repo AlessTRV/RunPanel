@@ -58,11 +58,12 @@ succede durante la copia:
 Il fermo è tenuto al minimo: durante la pausa il volume viene scritto su disco
 **non compresso**, alla velocità del disco; la compressione avviene dopo, a
 container ripresi. Solo se lo spazio libero (oltre la riserva di 2 GB) non basta
-per quella copia si comprime durante la pausa, che allora dura di più, e il log
-lo dice. Una pausa che supera i 10 minuti viene interrotta, i container ripresi,
-e il volume segnato come non salvato. I container montati in sola lettura non
-vengono fermati; un container di un altro progetto che scrive nello stesso
-volume non viene mai toccato, e la copia viene segnata come non garantita.
+per quella copia più la sua versione compressa si comprime durante la pausa, che
+allora dura di più, e il log lo dice. Una pausa che supera i 10 minuti viene
+interrotta, i container ripresi, e il volume segnato come non salvato. I
+container montati in sola lettura non vengono fermati; un container di un altro
+progetto che scrive nello stesso volume non viene mai toccato, e la copia viene
+segnata come non garantita.
 
 Gli id dei container in pausa vengono annotati su disco
 (`data/backups/paused-containers.json`) finché la pausa dura: se il pannello

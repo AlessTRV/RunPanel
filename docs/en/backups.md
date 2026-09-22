@@ -58,11 +58,12 @@ during the copy:
 The downtime is kept as short as possible: while paused, the volume is written to
 disk **uncompressed**, at disk speed; compression happens afterwards, with the
 containers running again. Only when the free space (beyond the 2 GB reserve)
-cannot hold that copy is it compressed during the pause, which then lasts longer,
-and the log says so. A pause longer than 10 minutes is cut short, the containers
-resumed, and the volume marked as not saved. Containers that mount the volume
-read-only are left running; another project's container writing into the same
-volume is never touched, and the copy is marked as not guaranteed.
+cannot hold that copy plus its compressed version is it compressed during the
+pause, which then lasts longer, and the log says so. A pause longer than 10
+minutes is cut short, the containers resumed, and the volume marked as not saved.
+Containers that mount the volume read-only are left running; another project's
+container writing into the same volume is never touched, and the copy is marked
+as not guaranteed.
 
 The ids of paused containers are written to disk
 (`data/backups/paused-containers.json`) for as long as the pause lasts: if the

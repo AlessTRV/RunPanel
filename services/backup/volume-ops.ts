@@ -385,8 +385,13 @@ export interface ExportResult {
   excluded: ExcludedPath[];
 }
 
-/** Headroom on top of the estimate, for what is written while the copy is being planned. */
-const SNAPSHOT_MARGIN = 1.1;
+/**
+ * Room the uncompressed copy needs, as a multiple of the estimate. While it is
+ * being compressed the raw copy and the compressed one both exist, and for data
+ * that does not compress — parquet, media — the second is as large as the
+ * first. The rest is headroom for what is written while the copy is planned.
+ */
+const SNAPSHOT_MARGIN = 2.1;
 
 /**
  * `./<path>` rather than `<path>`: busybox tar, like GNU tar, matches an

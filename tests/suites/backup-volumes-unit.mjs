@@ -396,6 +396,20 @@ export async function run({ repoRoot }) {
     }
 
     {
+      // Room for the raw copy but not for it and its compressed twin together.
+      const docker = simulatedDocker({ containers: [stackContainer("c1", "record", rw)], hooks: { run: du } });
+      const { request } = exportRequest(docker, {
+        request: { freeBytes: () => 2 * 1024 ** 3 + 3 * 1024 ** 2, reserveBytes: 2 * 1024 ** 3 },
+      });
+      const result = await ops.exportVolume(docker.cli, request);
+      r.check(
+        "the uncompressed copy needs room for its compressed version too",
+        result.consistency.method === "stream",
+        JSON.stringify(result.consistency)
+      );
+    }
+
+    {
       // Copy while live, as the project asked: no pause, and it is said.
       const docker = simulatedDocker({ containers: [stackContainer("c1", "record", rw)], hooks: { run: du } });
       log.length = 0;
