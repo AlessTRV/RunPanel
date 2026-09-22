@@ -121,6 +121,25 @@ export interface RunPanelEnv {
 
 let cached: RunPanelEnv | null = null;
 
+/**
+ * Where the data lives when `RUNPANEL_DATA_DIR` does not say.
+ *
+ * A function of its argument, called with `process.cwd()`, and that is not
+ * style. `next build` runs @vercel/nft over every server route, and nft
+ * evaluates path expressions it can resolve at build time — `process.cwd()`
+ * among them. Written inline as `path.join(process.cwd(), "data")`, it
+ * resolved to the data directory itself, which nft then traced whole into the
+ * seventy routes that import this module: every project checkout, build, log
+ * and backup on the host. On a server with seven projects that walk took the
+ * build past a 4 GB heap, and the self-update died with "JavaScript heap out
+ * of memory". A parameter is opaque to it; the runtime value is identical.
+ * `tests/suites/build-traces-unit.mjs` fails if the data directory is ever
+ * traced again.
+ */
+function defaultDataDir(cwd: string): string {
+  return path.join(cwd, "data");
+}
+
 function formatIssues(error: z.ZodError): string {
   return error.issues
     .map((issue) => {
@@ -142,7 +161,7 @@ export function getEnv(): RunPanelEnv {
   }
 
   const v = parsed.data;
-  const dataDir = path.resolve(v.RUNPANEL_DATA_DIR ?? path.join(process.cwd(), "data"));
+  const dataDir = path.resolve(v.RUNPANEL_DATA_DIR ?? defaultDataDir(process.cwd()));
 
   const db: DbConfig =
     v.RUNPANEL_DB_DRIVER === "postgres"
