@@ -4,6 +4,7 @@ import { BRANCH_NAME_RULE, COMMIT_SHA_RULE, isBranchName, isCommitSha } from "./
 import { parseMountString } from "./mount";
 import { ruleProblem } from "./ip-access";
 import { deployPhases } from "./deploy-phases";
+import { MAX_DISPLAY_NAME } from "./service-name";
 import {
   COMPOSE_SERVICE_PATTERN,
   EXCLUDE_PATH_RULE,
@@ -679,6 +680,18 @@ export const envKeySchema = z
  * unchanged — `projectId: null` is the explicit detach.
  */
 export const updateServiceSchema = z.object({
+  /**
+   * What the panel calls it. The technical name stays; the container follows
+   * this one at the next deploy of the project it belongs to. Empty or null
+   * goes back to showing the technical name.
+   */
+  displayName: z
+    .string()
+    .trim()
+    .max(MAX_DISPLAY_NAME, `Al massimo ${MAX_DISPLAY_NAME} caratteri`)
+    .refine((value) => !/[\u0000-\u001f\u007f]/.test(value), "Il nome non può contenere caratteri di controllo")
+    .nullable()
+    .optional(),
   projectId: z.string().min(1).max(32).nullable().optional(),
   injectEnv: z.boolean().optional(),
   /** Empty means no scheduled restart. Interpreted in the panel's `timezone`. */

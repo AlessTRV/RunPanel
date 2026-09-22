@@ -20,6 +20,7 @@ import * as dropContainerId from "./018-drop-container-id";
 import * as folders from "./019-folders";
 import * as scheduledRestart from "./020-scheduled-restart";
 import * as projectBackupSettings from "./021-project-backup-settings";
+import * as serviceDisplayName from "./022-service-display-name";
 
 /**
  * Migrations are registered statically rather than read from disk with
@@ -50,6 +51,7 @@ export const migrations: Record<string, Migration> = {
   "019-folders": folders,
   "020-scheduled-restart": scheduledRestart,
   "021-project-backup-settings": projectBackupSettings,
+  "022-service-display-name": serviceDisplayName,
 };
 
 export class StaticMigrationProvider implements MigrationProvider {

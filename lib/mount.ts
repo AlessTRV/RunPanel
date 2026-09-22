@@ -87,3 +87,29 @@ export function parseMountString(raw: string): { source: string; target: string;
 export function formatMountString(spec: { source: string; target: string; readOnly?: boolean }): string {
   return spec.readOnly ? `${spec.source}:${spec.target}:ro` : `${spec.source}:${spec.target}`;
 }
+
+/**
+ * A container's volumes, put back where they were.
+ *
+ * Each mapping still pointing at the template's named volume is swapped for the
+ * named volume the previous container really had at that path. Only named
+ * volumes, and only where the mapping is still the template's: a bind the
+ * operator configured is their choice and stays exactly as given.
+ *
+ * Why it matters: the template derives the volume name from the service name
+ * and the project slug, and both can have moved on since the container was
+ * created — a service moved to another project, or renamed, would otherwise be
+ * recreated on a new, empty volume while its data sat in the old one.
+ */
+export function keepVolumeSources<T extends { source: string; target: string }>(
+  mounts: T[],
+  sources: Record<string, string> | undefined
+): T[] {
+  if (!sources) return mounts;
+  return mounts.map((mount) => {
+    if (!mount.source || isHostPath(mount.source)) return mount;
+    const path = mount.target.replace(/:ro$/, "").replace(/\/+$/, "");
+    const existing = sources[path];
+    return existing && !isHostPath(existing) ? { ...mount, source: existing } : mount;
+  });
+}

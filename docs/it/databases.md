@@ -117,6 +117,31 @@ tenere il volume, e una spunta — spenta di default — li porta via tutti insi
 al progetto, volumi inclusi. L'app da sola si rimuove con «Rimuovi app», che
 lascia progetto e servizi al loro posto.
 
+## Rinominare un servizio
+
+Il pulsante **Rinomina** sulla pagina del servizio cambia il nome che il pannello
+mostra, subito e ovunque: liste, notifiche, backup. Come per lo slug di un
+progetto, il **nome tecnico** scelto alla creazione invece non cambia mai: è nel
+nome del volume dei dati (`runpanel-postgres-<slug>-<nome>`), e Docker non sa
+rinominare un volume. Un nome tecnico diverso farebbe ripartire il database su un
+volume nuovo e vuoto.
+
+Il **container** segue il nome nuovo al **prossimo deploy del progetto** a cui il
+servizio è collegato, deploy o rebuild. È il momento in cui l'app riparte
+comunque, ed è quello in cui riceve il nuovo host nella connection URL. Il
+database si riavvia per qualche secondo, sui volumi che aveva; il vecchio nome
+del container resta un alias sulla rete del progetto, così l'app ancora accesa
+dal deploy precedente, o rimasta accesa da un deploy fallito più avanti, continua
+a raggiungerlo. Il log del deploy dice cosa è stato rinominato e dove stanno i
+dati. Se il nome nuovo è già di un altro container, il rinomina viene saltato e
+il log lo spiega. La pagina del servizio mostra il nome che il container prenderà
+finché il deploy non arriva.
+
+Un servizio autonomo cambia solo il nome mostrato: non c'è un deploy che lo
+riavvii. Lo stesso principio vale per ogni ricreazione (cambio dell'accesso,
+delle cartelle condivise): il container riparte sul volume che ha davvero, letto
+da Docker, anche dopo uno spostamento in un altro progetto.
+
 ## I database dentro un servizio
 
 Un server di database ne ospita più d'uno. La pagina del servizio li elenca

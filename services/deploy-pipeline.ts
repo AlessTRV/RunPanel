@@ -36,6 +36,7 @@ import {
 import { checkLoopbackLeak, listenPort, readAccess, syncGate } from "./access";
 import { closeGate } from "./access-gate";
 import { injectLinkedServiceEnv } from "./service-injection";
+import { alignServiceNames } from "./service-rename";
 import { maskUrlPassword } from "@/lib/service-env";
 import { composeContext } from "./docker/compose";
 import { networkName } from "./docker/labels";
@@ -436,6 +437,12 @@ async function runDeploy(
       composePlan = await planComposeNetwork(composeCtx, envVars);
     }
     const injectionNetwork = composeCtx ? composeNetworkMode(composePlan) : contract.docker.network;
+
+    // Services the operator renamed take their new container name here, before
+    // the environment is built from `container_name` — so the app is started
+    // with the new host. See `services/service-rename.ts`; it never fails the
+    // deploy, and the old name keeps resolving as an alias.
+    await alignServiceNames(project, appendLog);
 
     const { applied, skipped, conflicts } = await injectLinkedServiceEnv(
       project,

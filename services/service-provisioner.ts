@@ -11,6 +11,8 @@ import { mongodbTemplate } from "./service-templates/mongodb";
 import { docker, dockerTry } from "./docker/cli";
 import { labelArgs, serviceContainerName } from "./docker/labels";
 import type { ServiceMount } from "@/lib/mount";
+import { parseAliases } from "@/lib/service-name";
+import { keepVolumeSources } from "@/lib/mount";
 import {
   containerMounts,
   ensureVolume,
@@ -89,16 +91,37 @@ export function internalPort(type: string, fallback: number): number {
  * at `run`, which is why changing the restriction has to come back through
  * here rather than through `docker start`.
  */
+export interface ProvisionOptions {
+  /**
+   * The container's name. Derived from the technical name when absent, which
+   * is only right the first time: afterwards the row's `container_name` is the
+   * answer — a service moved to another project, or renamed, keeps or takes a
+   * name the derivation would not give.
+   */
+  containerName?: string;
+  /**
+   * The named volume already mounted at each path, from the container being
+   * replaced. Asked of Docker rather than re-derived, so a recreate puts the
+   * database back on the volume that holds it — the derivation depends on the
+   * project slug, and a moved service would otherwise start on a fresh, empty
+   * one.
+   */
+  volumeSources?: Record<string, string>;
+  /** Names it answers to on the project network besides its own. */
+  aliases?: readonly string[];
+}
+
 export async function provisionService(
   config: ServiceConfig,
   projectSlug?: string,
-  access?: AccessRow
+  access?: AccessRow,
+  options: ProvisionOptions = {}
 ): Promise<string> {
   const template = getTemplate(config.type);
   if (!template) throw new Error(`Unknown service type: ${config.type}`);
 
   const dockerConfig = template.getDockerConfig(config);
-  const containerName = serviceContainerName(config.name, projectSlug);
+  const containerName = options.containerName ?? serviceContainerName(config.name, projectSlug);
   const ownership = { project: projectSlug, kind: "service" as const, service: config.name };
 
   if (projectSlug) {
@@ -108,7 +131,7 @@ export async function provisionService(
 
   await dockerTry(["rm", "-f", containerName], { timeout: 15_000 });
 
-  const mounts = resolveMounts(dockerConfig.volumes, config.mounts);
+  const mounts = keepVolumeSources(resolveMounts(dockerConfig.volumes, config.mounts), options.volumeSources);
 
   // Create the volumes explicitly so they carry ownership labels. Left to
   // `docker run -v`, they would be created unlabelled and become invisible to
@@ -158,13 +181,25 @@ export async function provisionService(
   if (projectSlug) {
     try {
       const { connectToNetwork } = await import("./docker-network");
-      await connectToNetwork(containerName, projectSlug);
+      await connectToNetwork(containerName, projectSlug, options.aliases ?? []);
     } catch {
       /* the container still works on the default bridge */
     }
   }
 
   return stdout.trim().slice(0, 12);
+}
+
+const trimSlash = (value: string) => value.replace(/\/+$/, "");
+
+
+/** The named volumes a container has mounted, by the path they are mounted at. */
+export async function currentVolumeSources(containerName: string): Promise<Record<string, string>> {
+  const sources: Record<string, string> = {};
+  for (const mount of await containerMounts(containerName)) {
+    if (mount.name) sources[trimSlash(mount.destination)] = mount.name;
+  }
+  return sources;
 }
 
 export interface VolumeMount {
@@ -270,7 +305,11 @@ export async function recreateService(
   overrides: { mounts?: ServiceMount[] } = {}
 ): Promise<{ containerId: string; status: ServicesTable["status"] }> {
   const config = serviceRunConfig(service, projectSlug, overrides);
-  const containerId = await provisionService(config, projectSlug, access);
+  const containerId = await provisionService(config, projectSlug, access, {
+    containerName: service.container_name,
+    volumeSources: await currentVolumeSources(service.container_name),
+    aliases: parseAliases(service.network_aliases),
+  });
 
   if (service.status === "running") return { containerId, status: "running" };
 

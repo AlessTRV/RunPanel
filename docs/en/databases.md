@@ -118,6 +118,30 @@ whether to keep its volume, and one checkbox — off by default — takes them a
 down with the project, volumes included. The app alone goes with "Remove app",
 which leaves project and services where they are.
 
+## Renaming a service
+
+The **Rename** button on the service page changes the name the panel shows, at
+once and everywhere: lists, notifications, backups. Like a project's slug, the
+**technical name** chosen at creation never changes: it is part of the data
+volume's name (`runpanel-postgres-<slug>-<name>`), and Docker cannot rename a
+volume. A different technical name would restart the database on a new, empty
+volume.
+
+The **container** takes the new name at the **next deploy of the project** the
+service is linked to, deploy or rebuild. That is when the app restarts anyway,
+and when it is handed the new host in its connection URL. The database restarts
+for a few seconds, on the volumes it had; the container's old name stays as an
+alias on the project network, so the app still running from the previous deploy,
+or left running by a deploy that fails further on, keeps reaching it. The deploy
+log says what was renamed and where the data is. If the new name already belongs
+to another container, the rename is skipped and the log explains why. Until the
+deploy comes, the service page shows the name the container will take.
+
+A standalone service only changes the name shown: no deploy restarts it. The same
+principle holds for every recreate (an access change, shared folders): the
+container comes back on the volume it really has, asked of Docker, even after
+being moved to another project.
+
 ## Databases inside a service
 
 One database server holds several. The service page lists them by reading the

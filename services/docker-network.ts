@@ -18,11 +18,22 @@ export async function ensureProjectNetwork(projectSlug: string): Promise<string>
   return name;
 }
 
-export async function connectToNetwork(containerName: string, projectSlug: string): Promise<void> {
+export async function connectToNetwork(
+  containerName: string,
+  projectSlug: string,
+  /** Other names it answers to on the network, e.g. the one it had before a rename. */
+  aliases: readonly string[] = []
+): Promise<void> {
   // Already-connected is a normal outcome, not an error worth surfacing.
-  await dockerTry(["network", "connect", networkName(projectSlug), containerName], {
-    timeout: 10_000,
-  });
+  await dockerTry(
+    [
+      "network", "connect",
+      ...aliases.flatMap((alias) => ["--alias", alias]),
+      networkName(projectSlug),
+      containerName,
+    ],
+    { timeout: 10_000 }
+  );
 }
 
 /**

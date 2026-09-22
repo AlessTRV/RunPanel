@@ -253,7 +253,15 @@ export interface EnvVarsTable {
 
 export interface ServicesTable {
   id: string;
+  /**
+   * The technical name, fixed for life: volumes, ownership labels and data
+   * cleanup are derived from it. What the panel shows is `display_name`.
+   */
   name: string;
+  /** What the panel shows; NULL means `name`. See lib/service-name.ts and migration 022. */
+  display_name: string | null;
+  /** JSON list of names the container still answers to on its network after a rename. */
+  network_aliases: string | null;
   type: ServiceType;
   version: string;
   status: ServiceStatus;

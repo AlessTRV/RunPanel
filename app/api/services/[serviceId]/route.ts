@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { serviceDisplayName, technicalServiceName } from "@/lib/service-name";
 import { requireAuth } from "@/lib/auth-guard";
 import { getDb, nowIso } from "@/lib/db";
 import { decrypt } from "@/lib/crypto";
@@ -9,7 +10,7 @@ import {
   removeService,
 } from "@/services/service-provisioner";
 import { currentMounts, parseApplyJournal, parseMounts } from "@/services/service-mounts";
-import { networkName } from "@/services/docker/labels";
+import { networkName, serviceContainerName } from "@/services/docker/labels";
 import {
   connectToNetwork,
   disconnectFromNetwork,
@@ -25,6 +26,16 @@ import { restartScheduleColumns } from "@/services/restart-scheduler";
 import { ServicesTable } from "@/lib/db/schema";
 
 type Params = { params: Promise<{ serviceId: string }> };
+
+function pendingContainerName(
+  service: { display_name: string | null; container_name: string },
+  projectSlug: string | null
+): string | null {
+  if (!service.display_name || !projectSlug) return null;
+  const technical = technicalServiceName(service.display_name);
+  const desired = technical ? serviceContainerName(technical, projectSlug) : null;
+  return desired && desired !== service.container_name ? desired : null;
+}
 
 export async function GET(request: NextRequest, { params }: Params) {
   const denied = await requireAuth();
@@ -78,6 +89,11 @@ export async function GET(request: NextRequest, { params }: Params) {
   return NextResponse.json({
     ...service,
     containerName: service.container_name,
+    displayName: serviceDisplayName(service),
+    // The container name the next deploy of its project will give it, when it
+    // differs from today's; null when nothing is waiting. A service outside a
+    // project is never renamed — no deploy restarts it.
+    pendingContainerName: pendingContainerName(service, project?.slug ?? null),
     internalPort: internalPort(service.type, service.port),
     // The key this link actually provides, not the type's default: the two
     // differ as soon as a project has two databases of the same kind.
@@ -153,7 +169,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     return NextResponse.json({ error: "Servizio non trovato" }, { status: 404 });
   }
 
-  const { projectId, injectEnv, envKey, access, folderId, restartCron } = parsed.data;
+  const { projectId, injectEnv, envKey, access, folderId, restartCron, displayName } = parsed.data;
   const detaching = projectId === null && service.project_id !== null;
   const attaching = typeof projectId === "string" && projectId !== service.project_id;
 
@@ -299,6 +315,9 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       access_allow: nextAccess.access_allow,
       access_port: nextAccess.access_port,
       folder_id: nextFolderId,
+      // Only the label. The container takes the new name at the next deploy of
+      // its project — see `services/service-rename.ts` — and its volume never does.
+      ...(displayName !== undefined ? { display_name: displayName || null } : {}),
       ...(recreated ? { status: recreated.status } : {}),
       updated_at: nowIso(),
     })
