@@ -5,6 +5,8 @@ import { listenPort, readAccess } from "@/lib/access-columns";
 import { processManager } from "./process-manager";
 import { buildStartOpts } from "./start-opts";
 import { injectLinkedServiceEnv } from "./service-injection";
+import { composeContext } from "./docker/compose";
+import { composeNetworkMode, planComposeNetwork } from "./compose-network";
 import { projectEvents } from "./events";
 import { checkLoopbackLeak, forgetLeak, syncGate } from "./access";
 
@@ -81,7 +83,17 @@ export async function restartFromLastDeployment(
   // on the project — a stale one, or none — while the identical app came back
   // correctly configured from a deploy. Every project restored after a reboot
   // goes through here, so the divergence surfaced as "it worked yesterday".
-  await injectLinkedServiceEnv(project, contract.docker.network, envVars);
+  //
+  // A compose stack decides its viewpoint from its own file — entirely on
+  // `network_mode: host` it reaches a service on localhost — so the file is
+  // read again here, the way the deploy read it, rather than trusting the
+  // contract's network mode, which compose never uses.
+  let injectionNetwork: string = contract.docker.network;
+  if (project.runtime_type === "compose") {
+    const ctx = composeContext(project.slug, lastDeploy.artifact_dir);
+    if (ctx) injectionNetwork = composeNetworkMode(await planComposeNetwork(ctx, envVars));
+  }
+  await injectLinkedServiceEnv(project, injectionNetwork, envVars);
 
   const port = project.port ?? 3000;
   const access = readAccess(project);

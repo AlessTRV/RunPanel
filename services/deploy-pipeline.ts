@@ -36,6 +36,15 @@ import {
 import { checkLoopbackLeak, listenPort, readAccess, syncGate } from "./access";
 import { closeGate } from "./access-gate";
 import { injectLinkedServiceEnv } from "./service-injection";
+import { maskUrlPassword } from "@/lib/service-env";
+import { composeContext } from "./docker/compose";
+import { networkName } from "./docker/labels";
+import {
+  applyComposeNetwork,
+  composeNetworkMode,
+  planComposeNetwork,
+  type ComposeNetworkPlan,
+} from "./compose-network";
 import { sweep } from "./docker/gc";
 import { BuildLogFile } from "./build-logs";
 import { projectEvents } from "./events";
@@ -415,17 +424,34 @@ async function runDeploy(
     // differ and what that cost. The rule itself lives in `lib/service-env.ts`
     // as a pure function, so the whole on/off × key-already-defined matrix is
     // testable without a daemon.
+    //
+    // A compose stack is put on the project network by an override file built
+    // from its resolved config (`services/compose-network.ts`). Planned before
+    // the injection because the plan is what says whether the stack reaches a
+    // service by container name or — entirely on `network_mode: host` — like a
+    // native process would.
+    let composePlan: ComposeNetworkPlan | null = null;
+    const composeCtx = project.runtime_type === "compose" ? composeContext(project.slug, projectDir) : null;
+    if (composeCtx) {
+      composePlan = await planComposeNetwork(composeCtx, envVars);
+    }
+    const injectionNetwork = composeCtx ? composeNetworkMode(composePlan) : contract.docker.network;
+
     const { applied, skipped, conflicts } = await injectLinkedServiceEnv(
       project,
-      contract.docker.network,
+      injectionNetwork,
       envVars
     );
 
     for (const injection of applied) {
+      // The host in the line, the password out of it: whether the app was
+      // handed a container name or `localhost` is the whole question when a
+      // database cannot be reached, and it used to be invisible here.
+      const shown = maskUrlPassword(injection.value);
       appendLog(
         injection.replaced
-          ? `Servizio "${injection.service}" → ${injection.key}: sostituisce il valore definito sul progetto.`
-          : `Servizio "${injection.service}" → ${injection.key}`
+          ? `Servizio "${injection.service}" → ${injection.key}: sostituisce il valore definito sul progetto con ${shown}`
+          : `Servizio "${injection.service}" → ${injection.key} = ${shown}`
       );
     }
     for (const name of skipped) {
@@ -438,6 +464,37 @@ async function runDeploy(
         `ATTENZIONE: ${conflict.services.join(", ")} vogliono tutti ${conflict.key}. ` +
           `Vale il primo (${conflict.services[0]}); cambia la variabile degli altri per usarli.`
       );
+    }
+
+    if (composeCtx) {
+      // A file that would not resolve without the injected variables — a
+      // `${DATABASE_URL:?}` — resolves now that they are in place.
+      if (composePlan?.error) composePlan = await planComposeNetwork(composeCtx, envVars);
+
+      const network = networkName(project.slug);
+      if (composePlan?.override) {
+        // Written before the build, which is what makes `config`, `build` and
+        // `up` all see it: the builder reads the same context the driver does.
+        await applyComposeNetwork(project.slug, composePlan);
+        appendLog(
+          `Rete del progetto: ${composePlan.override.attached.join(", ")} → ${network} ` +
+            `(override generato, il compose del repository non viene toccato).`
+        );
+        for (const name of composePlan.override.skipped) {
+          appendLog(`Rete del progetto: "${name}" usa network_mode e non può essere agganciato.`);
+        }
+      } else if (composePlan?.hostOnly) {
+        await applyComposeNetwork(project.slug, composePlan);
+        appendLog(
+          `ATTENZIONE: ogni servizio del compose usa network_mode: host, quindi nessuno viene agganciato a ${network}. ` +
+            `I servizi collegati sono raggiunti su localhost, come da un processo nativo.`
+        );
+      } else if (composePlan?.error) {
+        appendLog(
+          `ATTENZIONE: impossibile leggere il compose per agganciarlo a ${network} — ` +
+            `${composePlan.error.split("\n").find((line) => line.trim()) ?? "errore sconosciuto"}`
+        );
+      }
     }
 
     // Fail fast on anything knowable before a build that may run for minutes.

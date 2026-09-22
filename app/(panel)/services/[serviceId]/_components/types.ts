@@ -26,8 +26,11 @@ export interface Service {
   envKey: string;
   projectSlug: string | null;
   networkName: string | null;
-  /** Whether the linked app really reaches it by container name — see the API. */
-  reachedByContainerName: boolean;
+  /**
+   * What the linked app is handed: which viewpoint the deploy injects, and the
+   * host and port that go with it. Null for a standalone service.
+   */
+  injection: ServiceInjection | null;
   access: AccessValue;
   gate: GateValue;
   /** The bind list this service is declared to run with. */
@@ -36,6 +39,14 @@ export interface Service {
   mountApply: MountApply | null;
   /** What Docker says is really mounted — the declaration's counterpart. */
   containerMounts: { source: string; target: string }[];
+}
+
+export interface ServiceInjection {
+  from: "host" | "container";
+  host: string;
+  port: number;
+  /** The network the name resolves on; null when reached from the host. */
+  network: string | null;
 }
 
 export interface Credentials {

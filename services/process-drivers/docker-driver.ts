@@ -21,8 +21,17 @@ export const dockerDriver: IProcessDriver = {
     const network = opts.network ?? "project";
     const hostNetwork = network === "host";
 
+    // `create` + `start`, not `run -d`: the container has to be on the project
+    // network before its process starts. It used to be run on the default
+    // bridge and connected to the project network a moment later, and an app
+    // that resolved its database on startup lost the race — `could not
+    // translate host name "runpanel-svc-…"` on the first try, fine on the
+    // restart. The project network is what a linked service's container name
+    // resolves on, and `localhost` inside a container is the container itself,
+    // so every mode but `host` joins it — `bridge` included, which keeps the
+    // default bridge as well, exactly as before.
     const args = [
-      "run", "-d",
+      "create",
       "--name", name,
       // Containers used to start with no restart policy at all, so nothing came
       // back after a host reboot. Services already had this; apps did not.
@@ -36,6 +45,8 @@ export const dockerDriver: IProcessDriver = {
       // anything bound on the host.
       args.push("--network", "host");
     } else {
+      const { ensureProjectNetwork } = await import("../docker-network");
+      args.push("--network", await ensureProjectNetwork(slug));
       args.push("--add-host=host.docker.internal:host-gateway");
 
       // Publish whenever a port is configured. The previous condition was
@@ -68,17 +79,14 @@ export const dockerDriver: IProcessDriver = {
 
     await docker(args, { timeout: 180_000 });
 
-    // Join the project network too, keeping the default bridge for outbound
-    // traffic. Not applicable in host mode, where there is no bridge to join.
-    if (network === "project") {
-      try {
-        const { ensureProjectNetwork, connectToNetwork } = await import("../docker-network");
-        await ensureProjectNetwork(slug);
-        await connectToNetwork(name, slug);
-      } catch {
-        /* no project network needed */
-      }
+    // The default bridge too, before the process starts. Not applicable in
+    // host mode, where there is no bridge to join; already-connected is a
+    // normal outcome, not an error.
+    if (!hostNetwork) {
+      await dockerTry(["network", "connect", "bridge", name], { timeout: 10_000 });
     }
+
+    await docker(["start", name], { timeout: 60_000 });
   },
 
   async stop(slug: string): Promise<void> {

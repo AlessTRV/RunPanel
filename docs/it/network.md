@@ -30,9 +30,10 @@ Due cose da sapere prima di accenderlo:
 - **Fallisce in chiusura.** La porta è tenuta aperta dal processo del pannello:
   se il pannello non gira, la porta è chiusa. Prima il database di un'app restava
   raggiungibile anche a pannello spento.
-- **Un'app sulla rete del progetto non è toccata.** Raggiunge il proprio database
-  per nome del container su `runpanel-net-<slug>`, che non passa mai dal gate. Ci
-  passa invece il traffico che arriva da `host.docker.internal`.
+- **Un'app sulla rete del progetto non è toccata.** Ogni progetto Docker o
+  Compose raggiunge il proprio database per nome del container su
+  `runpanel-net-<slug>`, che non passa mai dal gate. Ci passa invece il traffico
+  che arriva da `host.docker.internal`.
 
 Non viene offerto per un progetto **Compose**, che pubblica le porte da un file
 che RunPanel non riscrive, né per un container su `network: host`, che non ha una

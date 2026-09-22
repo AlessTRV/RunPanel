@@ -87,10 +87,25 @@ tipo). Due collegamenti attivi nello stesso progetto non possono rispondere alla
 stessa chiave: il secondo viene rifiutato nominando il primo e proponendo un nome
 alternativo, invece di sovrascriverlo in silenzio.
 
-**L'host dipende da chi si collega**, e il pannello mostra la riga giusta per
-ognuno: un container sulla rete del progetto raggiunge il servizio per nome del
-container e sulla porta *interna*; tutto il resto — un processo PM2, un container
-su bridge, il tuo `psql` — passa dalla porta pubblicata sull'host.
+**L'host dipende dal runtime del progetto**, e il pannello lo decide da solo:
+
+- un progetto **Docker** o **Compose** riceve il nome del container e la porta
+  *interna* (`runpanel-svc-<slug>-<nome>:5432`), perché RunPanel aggancia l'app
+  alla rete `runpanel-net-<slug>` a ogni deploy. Un container Docker ci viene
+  messo all'avvio; uno stack Compose riceve un file di override generato accanto
+  ai dati del pannello — il compose del repository non viene toccato — che
+  aggiunge la rete a ogni servizio dello stack. Un servizio con `network_mode`
+  non può essere agganciato e il log del deploy lo dice;
+- un progetto **nativo** (Node.js, Python, Custom sotto PM2) riceve `localhost`
+  e la porta pubblicata, perché gira sull'host. Lo stesso vale per un container
+  su `network: host`.
+
+Dentro un container `localhost` è il container stesso, e `host.docker.internal`
+passa dal firewall dell'host, che può bloccarlo: è per questo che i progetti a
+container usano la rete e non la porta pubblicata. La pagina del servizio mostra
+la riga per ogni punto di vista e dice quale delle due viene iniettata; la scheda
+Variabili del progetto scrive, sotto la variabile, l'host che arriverà all'app;
+e il log del deploy stampa la URL iniettata con la password mascherata.
 
 Un servizio può anche essere **autonomo**, senza progetto: allora non inietta
 niente e resta un database che gestisci dal pannello.

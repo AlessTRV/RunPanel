@@ -56,6 +56,36 @@ export async function run({ base }) {
     r.check("the detail view resolves the key", detail.body.envKey === "DATABASE_URL", String(detail.body.envKey));
     r.check("and reports the switch", detail.body.injectEnv === true, String(detail.body.injectEnv));
 
+    // --- which host the app is handed ----------------------------------------
+    // A new project is a native one, so the link hands over localhost and the
+    // published port; switched to a container runtime the same link hands over
+    // the container name and the port inside, on the project network.
+    r.check("a native project is told to inject the host line", detail.body.injection?.from === "host", JSON.stringify(detail.body.injection));
+    r.check("with localhost and the published port", detail.body.injection?.host === "localhost" && detail.body.injection?.port === 55496, JSON.stringify(detail.body.injection));
+
+    const listed = (await api.call("/api/services")).body.find((row) => row.id === serviceId);
+    r.check("the list carries the same description", listed?.injection?.from === "host" && listed?.injection?.host === "localhost", JSON.stringify(listed?.injection));
+
+    await api.call(`/api/projects/${projectId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ runtimeType: "docker" }),
+    });
+    const asContainer = (await api.call(`/api/services/${serviceId}`)).body;
+    r.check("a docker project is told to inject the container line", asContainer.injection?.from === "container", JSON.stringify(asContainer.injection));
+    r.check("naming the service container", asContainer.injection?.host === created.body.container_name, JSON.stringify(asContainer.injection));
+    r.check("on the port inside the container, not the published one", asContainer.injection?.port === 5432, JSON.stringify(asContainer.injection));
+    r.check("and the network they share", asContainer.injection?.network === `runpanel-net-${project.body.slug}`, JSON.stringify(asContainer.injection));
+
+    await api.call(`/api/projects/${projectId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ runtimeType: "compose" }),
+    });
+    r.check("so is a compose project", (await api.call(`/api/services/${serviceId}`)).body.injection?.from === "container");
+    await api.call(`/api/projects/${projectId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ runtimeType: "node" }),
+    });
+
     // --- the switch ----------------------------------------------------------
     const off = await api.call(`/api/services/${serviceId}`, {
       method: "PATCH",

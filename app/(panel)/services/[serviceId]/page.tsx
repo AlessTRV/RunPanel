@@ -234,7 +234,7 @@ export default function ServiceDetailPage() {
   // che il deploy inietta per un progetto nativo.
   const from: From =
     fromChoice ??
-    (service.reachedByContainerName ? "network" : service.project_id ? "host" : "container");
+    (service.injection?.from === "container" ? "network" : service.project_id ? "host" : "container");
 
   /**
    * Visible in both columns on the wide layout, one at a time on the narrow

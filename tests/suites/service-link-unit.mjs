@@ -18,8 +18,16 @@ export const meta = { name: "service-link-unit", needsDocker: false, drivers: []
 
 export async function run({ repoRoot }) {
   const r = createReporter("service-link-unit");
-  const { resolveServiceEnv, serviceEnvKey, suggestEnvKey, connectionEnvKey, reachesByContainerName } =
-    await import(pathToFileURL(join(repoRoot, "lib", "service-env.ts")).href);
+  const {
+    resolveServiceEnv,
+    serviceEnvKey,
+    suggestEnvKey,
+    connectionEnvKey,
+    connectionOrigin,
+    serviceConnectionUrl,
+    containerPort,
+    maskUrlPassword,
+  } = await import(pathToFileURL(join(repoRoot, "lib", "service-env.ts")).href);
 
   const url = (svc) => `postgresql://user:pw@host:5432/${svc.name}`;
   const pg = (name, extra = {}) => ({ name, type: "postgresql", inject_env: 1, ...extra });
@@ -121,23 +129,96 @@ export async function run({ repoRoot }) {
   // --- which host the app actually reaches the service on -------------------
   {
     // Two places have to agree on this: the deploy builds the URL it injects
-    // from it, and the service page shows the operator which line to copy. They
-    // did not, and the difference was an app that could not resolve its
-    // database — `could not translate host name "runpanel-svc-…"`.
-    r.check("a container on the project network resolves by name", reachesByContainerName("docker", "project"));
+    // from it, and the service page shows the operator which line to copy.
+    // Inside a container `localhost` is the container itself, and
+    // `host.docker.internal` is a host-gateway address that a firewall on the
+    // host is free to drop — the one address that always works from a
+    // container is the service's name on the project network.
+    r.check("a docker app resolves by container name", connectionOrigin("docker", "project") === "container");
+    r.check("even when its contract asks for the default bridge", connectionOrigin("docker", "bridge") === "container");
+    r.check("a compose stack resolves by container name", connectionOrigin("compose", "project") === "container");
+    r.check("a container sharing the host stack uses the host", connectionOrigin("docker", "host") === "host");
+    r.check("and so does a compose stack on network_mode host", connectionOrigin("compose", "host") === "host");
 
     // No Docker DNS at all.
-    r.check("a PM2 process does not", !reachesByContainerName("node", "project"));
-    r.check("nor does a custom runtime", !reachesByContainerName("custom", "project"));
-    r.check("nor a static one", !reachesByContainerName("static", "project"));
+    r.check("a PM2 process uses the host", connectionOrigin("node", "project") === "host");
+    r.check("so does a custom runtime", connectionOrigin("custom", "project") === "host");
+    r.check("and a static one", connectionOrigin("static", "project") === "host");
+    r.check("with no contract at all a native runtime still uses the host", connectionOrigin("node") === "host");
+  }
 
-    // A container, but not on the network the service joined.
-    r.check("a container on the default bridge does not", !reachesByContainerName("docker", "bridge"));
-    r.check("nor one sharing the host stack", !reachesByContainerName("docker", "host"));
+  // --- the URL that lands in the app's environment ---------------------------
+  {
+    const creds = { user: "app", password: "s3cret", database: "shop" };
+    const svc = (type) => ({
+      type,
+      port: 5433, // published on the host, deliberately not the default
+      containerName: "runpanel-svc-tgshop-shop",
+      credentials: type === "redis" ? { password: "s3cret" } : creds,
+    });
+    const url = (type, runtime, network = "project") =>
+      serviceConnectionUrl(svc(type), { runtime_type: runtime, dockerNetwork: network });
 
-    // Compose publishes its own ports and the panel does not put its services
-    // on that stack's network.
-    r.check("nor a compose project", !reachesByContainerName("compose", "project"));
+    // Inside the network the published mapping does not exist: the service
+    // listens on the port its image exposes, whatever the host publishes.
+    const inside = {
+      postgresql: "postgresql://app:s3cret@runpanel-svc-tgshop-shop:5432/shop",
+      mysql: "mysql://app:s3cret@runpanel-svc-tgshop-shop:3306/shop",
+      redis: "redis://:s3cret@runpanel-svc-tgshop-shop:6379/0",
+      mongodb: "mongodb://app:s3cret@runpanel-svc-tgshop-shop:27017/shop",
+    };
+    const outside = {
+      postgresql: "postgresql://app:s3cret@localhost:5433/shop",
+      mysql: "mysql://app:s3cret@localhost:5433/shop",
+      redis: "redis://:s3cret@localhost:5433/0",
+      mongodb: "mongodb://app:s3cret@localhost:5433/shop",
+    };
+
+    for (const type of Object.keys(inside)) {
+      r.check(`${type}: a docker project gets the container name`, url(type, "docker") === inside[type], url(type, "docker"));
+      r.check(`${type}: a compose project gets the container name`, url(type, "compose") === inside[type], url(type, "compose"));
+      // Unchanged from before: a native project must keep the exact URL it
+      // has always received.
+      r.check(`${type}: a node project keeps localhost and the published port`, url(type, "node") === outside[type], url(type, "node"));
+      r.check(`${type}: so does a custom runtime`, url(type, "custom") === outside[type], url(type, "custom"));
+    }
+
+    r.check("a docker app on network: host is reached like a native one", url("postgresql", "docker", "host") === outside.postgresql);
+    r.check(
+      "the caller can force the viewpoint",
+      serviceConnectionUrl(svc("postgresql"), { runtime_type: "docker" }, { from: "host" }) === outside.postgresql
+    );
+    r.check("a service with no project is described from the host", serviceConnectionUrl(svc("postgresql"), null) === outside.postgresql);
+    r.check(
+      "an explicit internal port wins over the type's default",
+      serviceConnectionUrl({ ...svc("postgresql"), internalPort: 6543 }, { runtime_type: "docker" }).includes(":6543/")
+    );
+
+    // The port a service listens on inside its container, per type.
+    r.check("postgres listens on 5432", containerPort("postgresql") === 5432);
+    r.check("mysql on 3306", containerPort("mysql") === 3306);
+    r.check("redis on 6379", containerPort("redis") === 6379);
+    r.check("mongodb on 27017", containerPort("mongodb") === 27017);
+  }
+
+  // --- the deploy log shows the host, never the password ---------------------
+  {
+    r.check(
+      "a password is masked",
+      maskUrlPassword("postgresql://app:s3cret@runpanel-svc-x:5432/db") === "postgresql://app:***@runpanel-svc-x:5432/db",
+      maskUrlPassword("postgresql://app:s3cret@runpanel-svc-x:5432/db")
+    );
+    r.check(
+      "a redis URL with no user is masked too",
+      maskUrlPassword("redis://:s3cret@localhost:6379/0") === "redis://:***@localhost:6379/0",
+      maskUrlPassword("redis://:s3cret@localhost:6379/0")
+    );
+    r.check("a URL without credentials is left alone", maskUrlPassword("redis://localhost:6379/0") === "redis://localhost:6379/0");
+    r.check(
+      "a password containing @ is still fully hidden",
+      maskUrlPassword("mysql://u:p@ss@host:3306/d") === "mysql://u:***@host:3306/d",
+      maskUrlPassword("mysql://u:p@ss@host:3306/d")
+    );
   }
 
   // --- both ways in have to agree ------------------------------------------

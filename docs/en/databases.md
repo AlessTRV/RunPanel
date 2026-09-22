@@ -88,10 +88,25 @@ type). Two active links in one project cannot answer to the same key: the second
 is refused, naming the first and proposing an alternative, instead of silently
 overwriting it.
 
-**The host depends on who is connecting**, and the panel shows the right line for
-each: a container on the project network reaches the service by container name
-and on its *internal* port; everything else — a PM2 process, a container on
-bridge, your own `psql` — goes through the port published on the host.
+**The host depends on the project's runtime**, and the panel decides it alone:
+
+- a **Docker** or **Compose** project receives the container name and the
+  *internal* port (`runpanel-svc-<slug>-<name>:5432`), because RunPanel attaches
+  the app to the `runpanel-net-<slug>` network on every deploy. A Docker
+  container is put there at start; a Compose stack gets a generated override
+  file next to the panel's data — the repository's compose file is never
+  rewritten — adding the network to every service of the stack. A service on
+  `network_mode` cannot be attached, and the deploy log says so;
+- a **native** project (Node.js, Python, Custom under PM2) receives `localhost`
+  and the published port, because it runs on the host. So does a container on
+  `network: host`.
+
+Inside a container `localhost` is the container itself, and
+`host.docker.internal` goes through the host's firewall, which may drop it: that
+is why container projects use the network rather than the published port. The
+service page shows the line for each viewpoint and says which one is injected;
+the project's Variables tab prints, under the variable, the host the app will
+receive; and the deploy log prints the injected URL with the password masked.
 
 A service can also be **standalone**, with no project: then it injects nothing
 and is simply a database you manage from the panel.

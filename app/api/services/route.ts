@@ -13,6 +13,8 @@ import {
   serviceContainerName,
 } from "@/services/service-provisioner";
 import { AccessRow, syncGate } from "@/services/access";
+import { describeInjection } from "@/services/service-injection";
+import { parseContractJson } from "@/lib/deploy-contract";
 import { allocateLoopbackPort } from "@/services/access-gate";
 
 export async function GET() {
@@ -25,7 +27,32 @@ export async function GET() {
     .selectAll()
     .orderBy("created_at", "desc")
     .execute();
-  return NextResponse.json(services);
+
+  // What each link hands its project — host, port, network — resolved here
+  // from the project's runtime, so the project page can print the line the
+  // deploy will inject instead of guessing at it.
+  const projectIds = [...new Set(services.map((s) => s.project_id).filter((id): id is string => id !== null))];
+  const projects =
+    projectIds.length === 0
+      ? []
+      : await db
+          .selectFrom("projects")
+          .select(["id", "slug", "runtime_type", "builder_config"])
+          .where("id", "in", projectIds)
+          .execute();
+  const byId = new Map(
+    projects.map((p) => [
+      p.id,
+      { slug: p.slug, runtime_type: p.runtime_type, dockerNetwork: parseContractJson(p.builder_config).docker.network },
+    ])
+  );
+
+  return NextResponse.json(
+    services.map((service) => ({
+      ...service,
+      injection: describeInjection(service, service.project_id ? byId.get(service.project_id) : null),
+    }))
+  );
 }
 
 export async function POST(request: NextRequest) {

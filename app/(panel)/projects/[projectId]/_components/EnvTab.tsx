@@ -25,6 +25,7 @@ interface LinkedService {
   project_id: string | null;
   inject_env: number | null;
   env_key: string | null;
+  injection?: { from: "host" | "container"; host: string; port: number; network: string | null } | null;
 }
 
 /** Parse a .env file the same way a dotenv loader would, minus the exotica. */

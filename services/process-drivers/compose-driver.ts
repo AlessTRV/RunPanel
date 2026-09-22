@@ -31,6 +31,13 @@ function contextFor(slug: string) {
 export const composeDriver: IProcessDriver = {
   async start(slug: string, _startCmd: string, opts: StartOpts): Promise<void> {
     const ctx = contextFor(slug);
+    // The override declares the project network as external, so `up` refuses
+    // to start until it exists. A deploy has created it already; a restart
+    // after the network was garbage-collected has not.
+    if (ctx.overrideFile) {
+      const { ensureProjectNetwork } = await import("../docker-network");
+      await ensureProjectNetwork(slug);
+    }
     // `up` recreates only what changed, so the services it leaves alone keep
     // every line they printed under the previous deploy.
     markRunStart(slug);
@@ -44,6 +51,8 @@ export const composeDriver: IProcessDriver = {
   async remove(slug: string): Promise<void> {
     // Containers and networks go; named volumes stay, because they are the data.
     await composeDown(contextFor(slug));
+    const { removeComposeOverride } = await import("../compose-network");
+    removeComposeOverride(slug);
   },
 
   async restart(slug: string): Promise<void> {

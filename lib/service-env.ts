@@ -82,21 +82,114 @@ export interface InjectionConflict {
 }
 
 /**
- * Does this project reach its services by container name?
+ * Where a project's app calls its services from.
  *
- * Only from inside a container that shares the project's network. A native
- * process has no Docker DNS, and a container on `bridge` or `host` never joins
- * that network — for all of them the way in is the port published on the host.
+ * Two answers, and the runtime decides. A native process (PM2) sits on the
+ * host: it reaches a service on `localhost` at the port published there. A
+ * container does not — inside it `localhost` is the container itself, and
+ * `host.docker.internal` is a host-gateway address that a firewall on the host
+ * is free to drop, which is exactly what happened on a server whose ufw let
+ * nothing but the VPN interface into Docker. The one address that always works
+ * from a container is the service's own name on the project network, which is
+ * why every container runtime is put on that network and reaches the service
+ * that way. The only container that is not is one sharing the host's stack
+ * (`network: host`, or a compose stack entirely on `network_mode: host`):
+ * for it `localhost` is the host again.
  *
- * A function, and here, because the answer is needed in two places that must
- * agree: the deploy pipeline builds the URL it injects from it, and the service
- * page shows the operator which line to copy. They did not agree. The page
- * offered the container name to every linked service and called it «esattamente
- * la riga che RunPanel inietta»; for a project under PM2 the deploy injected
- * `localhost` and the suggested line failed to resolve at all.
+ * A function, and here, because the answer is needed in three places that
+ * must agree: the deploy pipeline builds the URL it injects from it, the
+ * service page shows the operator which line to copy, and the project page
+ * says which host the link will hand over. They did not agree, once.
  */
-export function reachesByContainerName(runtimeType: string, dockerNetwork: string): boolean {
-  return runtimeType === "docker" && dockerNetwork === "project";
+export type ConnectionOrigin = "host" | "container";
+
+export function connectionOrigin(runtimeType: string, dockerNetwork?: string | null): ConnectionOrigin {
+  if (runtimeType === "docker" || runtimeType === "compose") {
+    return dockerNetwork === "host" ? "host" : "container";
+  }
+  return "host";
+}
+
+/**
+ * The port a service listens on inside its container, by type.
+ *
+ * Not the port stored on the row — that is where it is published on the host,
+ * and it moves when the default is taken. Inside the project network the
+ * published mapping does not exist, so a Postgres published on 5433 is still
+ * reached on 5432. The provisioner reads the same number from the template;
+ * this copy is what lets the URL be built where the templates cannot be
+ * imported (the browser, a unit test).
+ */
+const CONTAINER_PORTS: Record<string, number> = {
+  postgresql: 5432,
+  mysql: 3306,
+  redis: 6379,
+  mongodb: 27017,
+};
+
+export function containerPort(type: string): number | undefined {
+  return CONTAINER_PORTS[type];
+}
+
+export interface ConnectableService {
+  type: string;
+  /** Published on the host. */
+  port: number;
+  /** Listening inside the container; the type's default when absent. */
+  internalPort?: number | null;
+  containerName: string;
+  credentials?: { user?: string; password?: string; database?: string } | null;
+}
+
+/** Host and port as seen from `from`. */
+export function serviceEndpoint(
+  service: Pick<ConnectableService, "type" | "port" | "internalPort" | "containerName">,
+  from: ConnectionOrigin
+): { host: string; port: number } {
+  if (from === "container") {
+    return {
+      host: service.containerName,
+      port: service.internalPort ?? containerPort(service.type) ?? service.port,
+    };
+  }
+  return { host: "localhost", port: service.port };
+}
+
+/**
+ * The connection URL a project receives for a service — the one function the
+ * deploy, the restart and both pages build it from.
+ *
+ * `project` is what decides the viewpoint; `from` overrides it for a page that
+ * wants to show the other one. No project at all is a standalone service, and
+ * the only thing there is to say about it is how to reach it from the host.
+ */
+export function serviceConnectionUrl(
+  service: ConnectableService,
+  project: { runtime_type: string; dockerNetwork?: string | null } | null,
+  opts: { from?: ConnectionOrigin } = {}
+): string {
+  const from =
+    opts.from ?? (project ? connectionOrigin(project.runtime_type, project.dockerNetwork) : "host");
+  const { host, port } = serviceEndpoint(service, from);
+  return buildConnectionString(service.type, { host, port, ...(service.credentials ?? {}) });
+}
+
+/**
+ * The URL with its password hidden, for a log.
+ *
+ * The deploy log used to say only that a variable had been replaced. With the
+ * host in the line the operator sees at once whether the app was handed a
+ * container name or `localhost` — which is the whole question when a database
+ * cannot be reached — and never the password.
+ */
+export function maskUrlPassword(url: string): string {
+  const scheme = url.indexOf("://");
+  if (scheme === -1) return url;
+  const at = url.lastIndexOf("@");
+  if (at === -1) return url;
+  const colon = url.indexOf(":", scheme + 3);
+  if (colon === -1 || colon > at) return url;
+  return `${url.slice(0, colon + 1)}***${url.slice(at)}`;
 }
 
 export function resolveServiceEnv<T extends LinkedService>(

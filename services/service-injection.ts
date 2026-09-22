@@ -1,12 +1,15 @@
 import { getDb } from "@/lib/db";
 import { decrypt } from "@/lib/crypto";
 import {
-  buildConnectionString,
-  reachesByContainerName,
+  connectionOrigin,
   resolveServiceEnv,
+  serviceConnectionUrl,
+  serviceEndpoint,
+  type ConnectionOrigin,
   type InjectionConflict,
   type ResolvedInjection,
 } from "@/lib/service-env";
+import { networkName } from "./docker/labels";
 import { internalPort } from "./service-provisioner";
 
 /**
@@ -30,6 +33,12 @@ import { internalPort } from "./service-provisioner";
  */
 export async function injectLinkedServiceEnv(
   project: { id: string; runtime_type: string },
+  /**
+   * Where the app calls from. A deploy passes the contract's network mode; a
+   * compose deploy passes `host` only when the whole stack runs on
+   * `network_mode: host`, which is the one case a container reaches the
+   * service like a native process would.
+   */
   dockerNetwork: string,
   envVars: Record<string, string>
 ): Promise<{
@@ -45,19 +54,13 @@ export async function injectLinkedServiceEnv(
     .where("project_id", "=", project.id)
     .execute();
 
-  // Only an app on the project network resolves the service by container name.
-  // On `host` the container shares the host's stack, and on `bridge` it never
-  // joins the project network at all — in both cases the way in is the port
-  // published on the host, exactly as for a native process.
-  const onProjectNetwork = reachesByContainerName(project.runtime_type, dockerNetwork);
+  // One rule for every runtime, in `lib/service-env.ts`: a container reaches
+  // the service by name on the project network, a native process on the port
+  // published on the host. The pipeline and the drivers put every container
+  // runtime on that network, so the name always resolves.
+  const from = connectionOrigin(project.runtime_type, dockerNetwork);
 
   return resolveServiceEnv(linkedServices, envVars, (svc) => {
-    // Container name and container port travel together: inside the network the
-    // published mapping does not exist, so a service published on 5433 is still
-    // listening on 5432. Pairing the container name with the host port is what
-    // made a database on a non-default port unreachable.
-    const host = onProjectNetwork ? svc.container_name : "localhost";
-    const svcPort = onProjectNetwork ? internalPort(svc.type, svc.port) : svc.port;
     let creds: { user?: string; password?: string; database?: string } = {};
     try {
       creds = JSON.parse(decrypt(svc.credentials));
@@ -65,12 +68,52 @@ export async function injectLinkedServiceEnv(
       /* credentials unreadable — fall back to an empty URL */
     }
 
-    return buildConnectionString(svc.type, {
-      host,
-      port: svcPort,
-      user: creds.user,
-      password: creds.password,
-      database: creds.database,
-    });
+    return serviceConnectionUrl(
+      {
+        type: svc.type,
+        port: svc.port,
+        internalPort: internalPort(svc.type, svc.port),
+        containerName: svc.container_name,
+        credentials: creds,
+      },
+      null,
+      { from }
+    );
   });
+}
+
+/**
+ * What a link will hand over, without the credentials — for the pages.
+ *
+ * The project page prints it under the variable name so the operator can see
+ * which host the app is about to receive; the service page uses `from` to
+ * preselect the matching line. Both read this rather than restating the rule,
+ * which is how they used to disagree with the deploy.
+ */
+export interface InjectionDescription {
+  from: ConnectionOrigin;
+  host: string;
+  port: number;
+  /** The network the name resolves on; null when reached from the host. */
+  network: string | null;
+}
+
+export function describeInjection(
+  service: { type: string; port: number; container_name: string },
+  project: { slug: string; runtime_type: string; dockerNetwork?: string | null } | null | undefined
+): InjectionDescription | null {
+  if (!project) return null;
+
+  const from = connectionOrigin(project.runtime_type, project.dockerNetwork);
+  const { host, port } = serviceEndpoint(
+    {
+      type: service.type,
+      port: service.port,
+      internalPort: internalPort(service.type, service.port),
+      containerName: service.container_name,
+    },
+    from
+  );
+
+  return { from, host, port, network: from === "container" ? networkName(project.slug) : null };
 }

@@ -73,11 +73,13 @@ export async function runReleaseCommand(command: string, opts: ReleaseOptions): 
 
   if (network === "host") {
     args.push("--network", "host");
-  } else if (network === "project") {
+  } else {
     // The release container runs BEFORE the app container, so the project
     // network may not exist yet — the app driver is what usually creates it.
     // Without this the very first deploy of a project fails at the release
-    // step with "network not found".
+    // step with "network not found". Every mode but `host` joins it, the same
+    // as the app: a migration is handed the same DATABASE_URL the app gets,
+    // and that names the service's container on this network.
     await ensureProjectNetwork(opts.slug);
     args.push("--network", networkName(opts.slug));
   }

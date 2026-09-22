@@ -44,7 +44,9 @@ const FROM_NOTES: Record<From, (service: Service) => React.ReactNode> = {
   network: (service) => (
     <>
       Host il nome del container, porta <Code>{String(service.internalPort)}</Code> — quella interna,
-      non quella pubblicata. È esattamente la riga che RunPanel inietta.
+      non quella pubblicata. Si risolve solo sulla rete{" "}
+      <Code>{service.networkName ?? "del progetto"}</Code>, a cui RunPanel aggancia l&apos;app a ogni
+      deploy.
     </>
   ),
   /*
@@ -59,25 +61,57 @@ const FROM_NOTES: Record<From, (service: Service) => React.ReactNode> = {
   container: (service) => (
     <>
       <Code>host.docker.internal</Code> è un alias che RunPanel aggiunge a ogni container: il
-      traffico esce e rientra dalla porta pubblicata (<Code>{String(service.port)}</Code>). Funziona
-      senza reti condivise. Con <Code>network: host</Code> usa <Code>localhost</Code>.
+      traffico esce e rientra dalla porta pubblicata (<Code>{String(service.port)}</Code>), quindi
+      passa dal firewall dell&apos;host, che può bloccarlo. Per un container di un altro progetto è
+      la sola strada; con <Code>network: host</Code> usa <Code>localhost</Code>.
     </>
   ),
-  host: (service) => (
+  host: () => (
     <>
       Per un processo nativo (PM2) e per i tuoi client: psql, TablePlus, uno script sul server. Da
       fuori dalla macchina, per un database, la risposta giusta è quasi sempre un tunnel SSH.
-      {service.project_id && !service.reachedByContainerName && (
-        <>
-          {" "}
-          È anche esattamente la riga che RunPanel inietta in <Code>{service.envKey}</Code>: l&apos;app
-          di questo progetto non gira in un container sulla rete del progetto, quindi ci arriva da
-          qui.
-        </>
-      )}
     </>
   ),
 };
+
+/**
+ * Which of the lines above the deploy actually writes into the project.
+ *
+ * Said under the copy field, for every viewpoint: the one being injected says
+ * so, the others name the one that is. The page used to claim the container
+ * line was «esattamente la riga che RunPanel inietta» for every linked
+ * service, PM2 projects included.
+ */
+function injectedLine(service: Service, from: From): React.ReactNode {
+  const injection = service.injection;
+  if (!service.project_id || !injection) return null;
+
+  const injectedFrom: From = injection.from === "container" ? "network" : "host";
+  if (from === injectedFrom) {
+    return (
+      <>
+        È la riga che RunPanel inietta in <Code>{service.envKey}</Code> a ogni deploy
+        {injection.network ? (
+          <>
+            : l&apos;app gira in un container sulla rete <Code>{injection.network}</Code>
+          </>
+        ) : (
+          <>: l&apos;app gira sull&apos;host, quindi ci arriva da qui</>
+        )}
+        .
+      </>
+    );
+  }
+  return (
+    <>
+      Non è la riga iniettata: in <Code>{service.envKey}</Code> il progetto riceve{" "}
+      <Code>
+        {injection.host}:{String(injection.port)}
+      </Code>{" "}
+      («{FROM_OPTIONS.find((o) => o.value === injectedFrom)?.label}»).
+    </>
+  );
+}
 
 export function ConnectionPanel({
   service,
@@ -173,13 +207,14 @@ export function ConnectionPanel({
               value={from}
               onChange={onFromChange}
               options={FROM_OPTIONS.filter(
-                (o) => o.value !== "network" || service.reachedByContainerName
+                (o) => o.value !== "network" || service.injection?.from === "container"
               )}
             />
 
             <div>
               <CopyField label="Riga pronta per le variabili" value={`${service.envKey}=${url}`} secret />
               <FieldHint>{FROM_NOTES[from](service)}</FieldHint>
+              {injectedLine(service, from) && <FieldHint>{injectedLine(service, from)}</FieldHint>}
             </div>
 
             <Section title="Credenziali" summary="Utente, database, password e nome del container">

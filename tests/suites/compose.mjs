@@ -1,5 +1,5 @@
 import { client, createReporter, docker, waitForDeploy, SETUP_TOKEN } from "../harness.mjs";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 /**
@@ -109,6 +109,35 @@ http.createServer((req, res) => {
     .split("\n").filter(Boolean);
   r.note(`containers: ${running.join(", ")}`);
   r.check("both services of the stack are running", running.length === 2, `${running.length} container(s)`);
+
+  // The stack has to share a network with the panel's services, or an
+  // injected DATABASE_URL naming a service container never resolves. Compose
+  // makes its own network; the override adds the project's on top.
+  const projectNetwork = `runpanel-net-${slug}`;
+  {
+    const history = await api.call(`/api/projects/${projectId}/logs`);
+    const latest = (history.body ?? []).find((d) => d.status === "running") ?? (history.body ?? [])[0];
+    const full = latest ? await api.call(`/api/deployments/${latest.id}`) : null;
+    const log = String(full?.body?.build_log ?? "");
+    const networkLines = log.split("\n").filter((line) => /Rete del progetto|ATTENZIONE/.test(line));
+    for (const line of networkLines) r.note(line);
+    // Compose lists services alphabetically, so the order is not asserted.
+    r.check(
+      "the deploy log says which services were attached",
+      networkLines.some(
+        (line) => line.includes(`→ ${projectNetwork}`) && line.includes("web") && line.includes("sidecar")
+      ),
+      networkLines.join(" | ") || "(no network line in the log)"
+    );
+  }
+  for (const name of running) {
+    const networks = docker("inspect", name, "--format", "{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}");
+    r.check(`${name} is on the project network`, networks.split(" ").includes(projectNetwork), networks);
+  }
+  r.check(
+    "the user's compose file is left untouched",
+    !readFileSync(join(repo, "docker-compose.yml"), "utf8").includes(projectNetwork)
+  );
 
   // Status must reflect the whole stack, not just one container.
   const projectAfter = await api.call(`/api/projects/${projectId}/status`);

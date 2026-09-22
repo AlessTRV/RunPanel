@@ -28,9 +28,9 @@ Two things worth knowing before turning it on:
 - **It fails closed.** The port is held open by the panel process: if the panel
   is not running, the port is shut. An app's database used to stay reachable
   while the panel was down.
-- **An app on the project network is unaffected.** It reaches its database by
-  container name on `runpanel-net-<slug>`, which never goes through the gate.
-  Traffic arriving via `host.docker.internal` does.
+- **An app on the project network is unaffected.** Every Docker or Compose
+  project reaches its database by container name on `runpanel-net-<slug>`, which
+  never goes through the gate. Traffic arriving via `host.docker.internal` does.
 
 Not offered for a **Compose** project, which publishes ports from a file RunPanel
 will not rewrite, nor for a container on `network: host`, which has no published

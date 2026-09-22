@@ -35,6 +35,13 @@ export interface LinkedServiceView {
   status: string;
   env_key?: string | null;
   inject_env?: number | null;
+  /**
+   * The host the deploy will write into the variable, resolved by the API
+   * from the project's runtime: a container name on the project network for
+   * a Docker or Compose project, `localhost` and the published port for a
+   * native one.
+   */
+  injection?: { from: "host" | "container"; host: string; port: number; network: string | null } | null;
 }
 
 export function ServiceLink({
@@ -118,10 +125,29 @@ export function ServiceLink({
       />
 
       {injecting && (
-        <p className="text-muted flex items-center gap-1.5 text-meta">
-          <span aria-hidden>└</span>
-          <Code>{envKey}</Code>
-        </p>
+        <div className="text-muted space-y-1 text-meta">
+          <p className="flex items-center gap-1.5">
+            <span aria-hidden>└</span>
+            <Code>{envKey}</Code>
+          </p>
+          {service.injection && (
+            // The host the app will actually receive. Printed here because a
+            // `localhost` handed to a container, or a container name handed to
+            // a PM2 process, is the whole reason a database "cannot be
+            // reached" — and it used to be visible only in a deploy log.
+            <p className="flex flex-wrap items-center gap-1.5 pl-4">
+              <span aria-hidden>→</span>
+              <Code>
+                {service.injection.host}:{String(service.injection.port)}
+              </Code>
+              <span>
+                {service.injection.network
+                  ? `(rete ${service.injection.network})`
+                  : "(dall'host, porta pubblicata)"}
+              </span>
+            </p>
+          )}
+        </div>
       )}
 
       <p className={`text-meta leading-relaxed ${statusTone(injecting, service.status, alsoDefined)}`}>
