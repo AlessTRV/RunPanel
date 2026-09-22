@@ -18,6 +18,7 @@ import { CommandField } from "@/components/ui/CommandField";
 import { EnvFilePathHint, HealthcheckHint, PortHint } from "@/components/DeployHints";
 import { AccessSection } from "@/components/AccessSection";
 import { ScheduledRestart } from "@/components/ScheduledRestart";
+import { BackupSection } from "./BackupSection";
 import { LinkedServiceDelete, type LinkedServiceRow } from "./LinkedServiceDelete";
 import { MountsSection } from "./MountsSection";
 import { OneTimeCommandsSection } from "./OneTimeCommandsSection";
@@ -594,6 +595,11 @@ export function SettingsTab({
         lastAt={project.restart_last_at}
         lastResult={project.restart_last_result}
         onSaved={(updated) => onProjectChange({ ...project, ...(updated as Partial<Project>) })}
+      />
+
+      <BackupSection
+        project={project}
+        onSaved={(backupSettings) => onProjectChange({ ...project, backup_settings: backupSettings })}
       />
 
       <Section

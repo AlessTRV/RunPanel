@@ -1,13 +1,15 @@
+import { parseBackupSettings, type ProjectBackupSettings } from "@/lib/backup-settings";
 import { describeCron } from "@/lib/cron";
 import { getDb } from "@/lib/db";
 import { staleWhileRevalidate } from "@/lib/stale-cache";
-import type { BackupRunStatus } from "@/lib/db/schema";
+import type { BackupRunStatus, ProjectsTable } from "@/lib/db/schema";
 import { readLogFile } from "../log-file";
 import { listDumpableDatabases } from "./dumpers";
 import { backupLogPath } from "./paths";
-import { listProjectVolumes } from "./project-export";
+import { backupDocker, listProjectVolumes, projectOwner, projectVolumes } from "./project-export";
 import { parseTargets } from "./scheduler";
 import type { BackupTarget } from "./types";
+import { stackServices, volumeUsers } from "./volume-ops";
 
 /**
  * The read side: what the pages ask for.
@@ -300,4 +302,68 @@ export async function listTargets(): Promise<TargetCatalog> {
   );
 
   return { services: withDatabases, projects: withVolumes };
+}
+
+// --- One project's volumes, for its settings page ------------------------------
+
+export interface ProjectBackupView {
+  settings: ProjectBackupSettings;
+  /** False when Docker could not be asked: the volume list is then unknown, not empty. */
+  docker: boolean;
+  volumes: {
+    name: string;
+    origin: "runpanel" | "compose";
+    composeVolume: string | null;
+    users: { name: string; state: string; rw: boolean; owned: boolean }[];
+  }[];
+  /** The Compose services a pre-backup command can run in. */
+  services: string[];
+  /** The policies that save this project's volumes, so the page can say whether anything does. */
+  coverage: { id: string; name: string; enabled: boolean; scheduled: boolean }[];
+}
+
+export async function projectBackupView(project: ProjectsTable): Promise<ProjectBackupView> {
+  const db = await getDb();
+  const policies = await db
+    .selectFrom("backup_policies")
+    .select(["id", "name", "enabled", "cron", "targets"])
+    .orderBy("created_at", "asc")
+    .execute();
+
+  const coverage = policies
+    .filter((policy) =>
+      parseTargets(policy.targets).some(
+        (target) =>
+          ((target.kind === "project" && target.id === project.id) || target.kind === "all-projects") &&
+          target.include.includes("volumes")
+      )
+    )
+    .map((policy) => ({
+      id: policy.id,
+      name: policy.name,
+      enabled: policy.enabled === 1,
+      scheduled: policy.cron !== "",
+    }));
+
+  const settings = parseBackupSettings(project.backup_settings);
+  const owner = projectOwner(project.slug);
+
+  try {
+    const volumes = await projectVolumes(project.slug);
+    const withUsers = await Promise.all(
+      volumes.map(async (volume) => ({
+        ...volume,
+        users: (await volumeUsers(backupDocker, volume.name, owner, { all: true })).map((user) => ({
+          name: user.name,
+          state: user.state,
+          rw: user.rw,
+          owned: user.owned,
+        })),
+      }))
+    );
+    const services = await stackServices(backupDocker, owner);
+    return { settings, docker: true, volumes: withUsers, services, coverage };
+  } catch {
+    return { settings, docker: false, volumes: [], services: [], coverage };
+  }
 }

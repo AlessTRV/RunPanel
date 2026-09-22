@@ -52,6 +52,8 @@ export interface Project {
   restart_next_at: string | null;
   restart_last_at: string | null;
   restart_last_result: string | null;
+  /** JSON — how the volumes are backed up. See `lib/backup-settings.ts`; null = defaults. */
+  backup_settings: string | null;
   /** `owner/name` when the source is a GitHub URL, null for a ZIP or another host. */
   repo: string | null;
   /** The bind list, as rows — the server splits the `-v` strings, not the browser. */

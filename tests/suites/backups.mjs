@@ -400,5 +400,96 @@ export async function run({ base, dataDir }) {
     r.check("but no longer point at a policy", orphaned.body?.runs?.[0]?.policyId === null);
   }
 
+  // --- a project's volume settings ---------------------------------------------
+  //
+  // Saved from the project's settings and read by every policy that includes
+  // the project. The paths reach `tar --exclude` and a restore's `find`, so
+  // what cannot be a plain relative path is a 400 here, not a surprise at 03:00.
+  const project = await api.call("/api/projects", {
+    method: "POST",
+    body: JSON.stringify({ name: "Backup Settings Suite" }),
+  });
+  const projectId = project.body?.id;
+  const settingsUrl = `/api/projects/${projectId}/backup`;
+
+  const initial = await api.call(settingsUrl);
+  r.check("a project's backup settings can be read", initial.status === 200, String(initial.status));
+  r.check(
+    "and default to pausing the writers, with nothing excluded",
+    initial.body?.settings?.consistency === "pause" &&
+      initial.body?.settings?.preBackup === null &&
+      JSON.stringify(initial.body?.settings?.excludes) === "{}",
+    JSON.stringify(initial.body?.settings)
+  );
+  r.check("with no policy covering them yet", Array.isArray(initial.body?.coverage) && initial.body.coverage.length === 0);
+
+  for (const [label, excludes] of [
+    ["a path climbing out of the volume", { "runpanel-x_data": ["../etc"] }],
+    ["an absolute path", { "runpanel-x_data": ["/etc/passwd"] }],
+    ["a wildcard", { "runpanel-x_data": ["*.parquet"] }],
+    ["a quote", { "runpanel-x_data": ["it's"] }],
+    ["a volume name Docker would refuse", { "../x": ["trades"] }],
+  ]) {
+    const refused = await api.call(settingsUrl, {
+      method: "PUT",
+      body: JSON.stringify({ consistency: "pause", preBackup: null, excludes }),
+    });
+    r.check(`an exclusion is refused: ${label}`, refused.status === 400, `${refused.status} ${JSON.stringify(refused.body).slice(0, 120)}`);
+  }
+
+  const badHook = await api.call(settingsUrl, {
+    method: "PUT",
+    body: JSON.stringify({ consistency: "live", preBackup: { service: "db", command: "   ", timeoutSec: 60 } }),
+  });
+  r.check("a pre-backup command with nothing to run is refused", badHook.status === 400, String(badHook.status));
+
+  const saved = await api.call(settingsUrl, {
+    method: "PUT",
+    body: JSON.stringify({
+      consistency: "live",
+      preBackup: { service: "db", command: "pg_dump -f /backup/db.sql", timeoutSec: 120 },
+      excludes: { "runpanel-x_data": ["./trades/", "cache/tmp", "trades"] },
+    }),
+  });
+  r.check("valid settings are saved", saved.status === 200, `${saved.status} ${JSON.stringify(saved.body).slice(0, 160)}`);
+  r.check(
+    "and come back normalised",
+    JSON.stringify(saved.body?.settings?.excludes) === JSON.stringify({ "runpanel-x_data": ["trades", "cache/tmp"] }),
+    JSON.stringify(saved.body?.settings?.excludes)
+  );
+
+  const row = await api.call(`/api/projects/${projectId}`);
+  const stored = JSON.parse(row.body?.backup_settings ?? "null");
+  r.check(
+    "the project row carries them",
+    stored?.consistency === "live" && stored?.preBackup?.service === "db",
+    String(row.body?.backup_settings)
+  );
+
+  await api.call("/api/backups/policies", {
+    method: "POST",
+    body: JSON.stringify({
+      name: "Volumi di tutti",
+      cron: "",
+      destinationId: destination.id,
+      targets: [{ kind: "all-projects", include: ["config", "volumes"] }],
+    }),
+  });
+  const covered = await api.call(settingsUrl);
+  r.check(
+    "a policy over every project's volumes is listed as covering this one",
+    covered.body?.coverage?.some((policy) => policy.name === "Volumi di tutti"),
+    JSON.stringify(covered.body?.coverage)
+  );
+
+  const missing = await api.call("/api/projects/nonexistent/backup", {
+    method: "PUT",
+    body: JSON.stringify({ consistency: "pause", preBackup: null }),
+  });
+  r.check("settings for a project that does not exist are a 404", missing.status === 404, String(missing.status));
+
+  const anonymous = await client(base).call(settingsUrl);
+  r.check("and they are behind the session", anonymous.status === 401, String(anonymous.status));
+
   return r.result();
 }

@@ -4,6 +4,14 @@ import { BRANCH_NAME_RULE, COMMIT_SHA_RULE, isBranchName, isCommitSha } from "./
 import { parseMountString } from "./mount";
 import { ruleProblem } from "./ip-access";
 import { deployPhases } from "./deploy-phases";
+import {
+  COMPOSE_SERVICE_PATTERN,
+  EXCLUDE_PATH_RULE,
+  MAX_EXCLUDES_PER_VOLUME,
+  MAX_PRE_BACKUP_TIMEOUT_SEC,
+  VOLUME_NAME_PATTERN,
+  normalizeExcludePath,
+} from "./backup-settings";
 
 
 
@@ -723,6 +731,40 @@ export const backupTargetSchema = z.discriminatedUnion("kind", [
   }),
   z.object({ kind: z.literal("panel") }),
 ]);
+
+/**
+ * How one project's volumes are backed up. Saved from the project's settings,
+ * read by every policy that includes the project with its volumes.
+ */
+export const projectBackupSettingsSchema = z.object({
+  consistency: z.enum(["pause", "live"]),
+  preBackup: z
+    .object({
+      service: z
+        .string()
+        .min(1)
+        .max(64)
+        .regex(COMPOSE_SERVICE_PATTERN, "Nome di servizio Compose non valido"),
+      command: z.string().trim().min(1, "Scrivi il comando da eseguire").max(4000),
+      timeoutSec: z.number().int().min(5).max(MAX_PRE_BACKUP_TIMEOUT_SEC),
+    })
+    .nullable(),
+  /** Per volume, by its Docker name. Stored normalised: `./trades/` arrives, `trades` is kept. */
+  excludes: z
+    .record(
+      z.string().max(255).regex(VOLUME_NAME_PATTERN, "Nome di volume non valido"),
+      z
+        .array(
+          z
+            .string()
+            .max(255)
+            .refine((path) => normalizeExcludePath(path) !== null, { message: EXCLUDE_PATH_RULE })
+            .transform((path) => normalizeExcludePath(path) as string)
+        )
+        .max(MAX_EXCLUDES_PER_VOLUME, `Al massimo ${MAX_EXCLUDES_PER_VOLUME} percorsi per volume`)
+    )
+    .default({}),
+});
 
 /**
  * The expression is checked by the real parser, not by a regex that agrees with
