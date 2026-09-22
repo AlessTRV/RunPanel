@@ -131,6 +131,43 @@ export async function run({ repoRoot }) {
     r.check("it is killed promptly, not after the full 60s", waited < 15_000, `${waited}ms`);
     r.check("the message names the reason", /No output for/.test(hungFailure?.message ?? ""), hungFailure?.message);
 
+    // --- a signal that fired before the call ---------------------------------
+    // `abort` is raised once. A caller whose run was cancelled a moment earlier
+    // hands over a signal that will never raise it again, and the command used
+    // to run to the end regardless.
+    {
+      const controller = new AbortController();
+      controller.abort();
+      const cancelledAt = Date.now();
+      let cancelled = null;
+      try {
+        await execToFile(node, ["-e", "setTimeout(()=>console.log('late'),20000)"], at("cancelled.bin"), {
+          signal: controller.signal,
+        });
+      } catch (err) {
+        cancelled = err;
+      }
+      r.check(
+        "an already-aborted signal kills the command at once",
+        cancelled instanceof ExecStreamError && Date.now() - cancelledAt < 10_000,
+        `${Date.now() - cancelledAt}ms ${cancelled}`
+      );
+    }
+
+    // --- the compression level -----------------------------------------------
+    {
+      const fastPath = at("fast.gz");
+      const fast = await execToFile(node, ["-e", `process.stdout.write("x".repeat(200000))`], fastPath, {
+        compress: true,
+        compressLevel: 1,
+      });
+      r.check(
+        "a chosen gzip level still produces a readable gzip",
+        zlib.gunzipSync(fs.readFileSync(fastPath)).length === 200000 && fast.rawBytes === 200000,
+        String(fast.rawBytes)
+      );
+    }
+
     // --- stdin direction -----------------------------------------------------
     const input = at("input.txt");
     fs.writeFileSync(input, payload);

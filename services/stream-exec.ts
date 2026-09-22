@@ -101,6 +101,12 @@ export interface ExecToFileOptions extends ExecStreamOptions {
   /** gzip on the way to disk. Skip it for output that is already compressed. */
   compress?: boolean;
   /**
+   * zlib's level, 1–9, when `compress` is on. The default is zlib's own; 1 is
+   * several times faster for a somewhat larger file, which is the right trade
+   * when something is waiting for the copy to end.
+   */
+  compressLevel?: number;
+  /**
    * Accept "exited 0, wrote nothing". Off by default because it is a real
    * failure mode: an image whose entrypoint swallows the error exits cleanly
    * having produced an empty dump, and an empty dump nobody notices is worse
@@ -204,6 +210,8 @@ export async function execToFile(
 
   const onAbort = () => child.kill("SIGKILL");
   opts.signal?.addEventListener("abort", onAbort, { once: true });
+  // A signal that fired before the call never raises `abort` again.
+  if (opts.signal?.aborted) onAbort();
 
   const stdout = child.stdout;
   if (!stdout) throw new Error(`${command} was spawned without a stdout pipe`);
@@ -212,7 +220,7 @@ export async function execToFile(
   let pipelineError: unknown = null;
   try {
     await (opts.compress
-      ? pipeline(stdout, counter, createGzip(), digest, sink)
+      ? pipeline(stdout, counter, createGzip({ level: opts.compressLevel }), digest, sink)
       : pipeline(stdout, counter, digest, sink));
   } catch (err) {
     pipelineError = err;
@@ -293,6 +301,7 @@ export async function execFromFile(
 
   const onAbort = () => child.kill("SIGKILL");
   opts.signal?.addEventListener("abort", onAbort, { once: true });
+  if (opts.signal?.aborted) onAbort();
 
   const stdin = child.stdin;
   if (!stdin) throw new Error(`${command} was spawned without a stdin pipe`);
