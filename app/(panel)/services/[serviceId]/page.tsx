@@ -3,7 +3,7 @@
 import { useCallback, useRef, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { Button } from "@heroui/react";
+import { Button, Input, Label, TextField } from "@heroui/react";
 import { Icon } from "@iconify/react";
 import { toast } from "sonner";
 import { useResource } from "@/lib/hooks/useResource";
@@ -11,6 +11,8 @@ import { usePollInterval } from "@/lib/hooks/usePollingInterval";
 import { useLineBuffer } from "@/lib/hooks/useLineBuffer";
 import { useServiceStream, type ConsoleMode, type MountApply } from "@/lib/hooks/useServiceStream";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { FormDialog } from "@/components/ui/FormDialog";
+import { Code, FieldHint, Hint } from "@/components/ui/Hint";
 import { Panel } from "@/components/ui/Panel";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { PageSkeleton } from "@/components/ui/Skeletons";
@@ -19,6 +21,7 @@ import type { LogLine } from "@/components/ui/LogViewer";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ScheduledRestart } from "@/components/ScheduledRestart";
 import { serviceLabel } from "@/lib/service-env";
+import { MAX_DISPLAY_NAME } from "@/lib/service-name";
 import { cn } from "@/lib/utils";
 import { ConnectionPanel } from "./_components/ConnectionPanel";
 import { ConsolePanel } from "./_components/ConsolePanel";
@@ -68,6 +71,8 @@ export default function ServiceDetailPage() {
   // Null until chosen, so the sensible default can depend on data that has not
   // loaded yet when the hook runs.
   const [fromChoice, setFromChoice] = useState<From | null>(null);
+  const [renameOpen, setRenameOpen] = useState(false);
+  const [renameValue, setRenameValue] = useState("");
 
   const tabParam = searchParams.get("tab") as ServiceTabId | null;
   const [activeTab, setActiveTab] = useState<ServiceTabId>(
@@ -248,11 +253,22 @@ export default function ServiceDetailPage() {
   return (
     <>
       <PageHeader
-        title={service.name}
+        title={service.displayName}
         description={`${label} ${service.version} · porta ${service.port} sull'host`}
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <StatusBadge status={service.status} />
+            <Button
+              variant="outline"
+              size="sm"
+              onPress={() => {
+                setRenameValue(service.displayName);
+                setRenameOpen(true);
+              }}
+            >
+              <Icon icon="solar:pen-linear" width={16} aria-hidden />
+              Rinomina
+            </Button>
             {running ? (
               <>
                 <Button variant="outline" size="sm" onPress={() => handleControl("restart")}>
@@ -273,6 +289,21 @@ export default function ServiceDetailPage() {
           </div>
         }
       />
+
+      {service.pendingContainerName && (
+        <Hint tone="info" title="Nome del container in attesa del prossimo deploy" className="mb-4">
+          Al prossimo deploy di <Code>{service.projectSlug}</Code> il container{" "}
+          <Code>{service.containerName}</Code> diventa <Code>{service.pendingContainerName}</Code>, e
+          l&apos;app riceve il nuovo host. Il database si riavvia per qualche secondo; i dati restano nel
+          volume che hanno ora, e il vecchio nome continua a funzionare come alias.
+        </Hint>
+      )}
+      {service.display_name && !service.projectSlug && service.display_name !== service.name && (
+        <FieldHint className="mb-4">
+          Il container resta <Code>{service.containerName}</Code>: prende il nome nuovo al deploy del
+          progetto a cui è collegato, e questo servizio non è collegato a nessuno.
+        </FieldHint>
+      )}
 
       <Tabs
         tabs={TABS}
@@ -353,6 +384,46 @@ export default function ServiceDetailPage() {
           />
         </div>
       </div>
+
+      {/*
+        The name the panel shows, and only that at first. The technical name is
+        part of the volume names and never changes; the container takes the new
+        one at the next deploy of the project it belongs to.
+      */}
+      <FormDialog
+        isOpen={renameOpen}
+        onOpenChange={setRenameOpen}
+        title="Rinomina servizio"
+        submitLabel="Salva"
+        isSubmitDisabled={!renameValue.trim() || renameValue.trim() === service.displayName}
+        onSubmit={async () => {
+          const res = await fetch(`/api/services/${serviceId}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ displayName: renameValue.trim() }),
+          });
+          if (!res.ok) {
+            const data = await res.json().catch(() => ({}));
+            toast.error(data.details?.[0]?.message ?? data.error ?? "Rinomina non riuscita");
+            // Thrown so the dialog stays open on what was typed.
+            throw new Error("rename failed");
+          }
+          toast.success("Servizio rinominato");
+          await refresh();
+        }}
+      >
+        <TextField value={renameValue} onChange={setRenameValue} maxLength={MAX_DISPLAY_NAME} autoFocus>
+          <Label>Nome</Label>
+          <Input />
+        </TextField>
+        <FieldHint>
+          Cambia subito ovunque nel pannello. Il nome tecnico <Code>{service.name}</Code> resta, perché
+          è nel nome del volume dei dati.{" "}
+          {service.projectSlug
+            ? `Il container prende il nome nuovo al prossimo deploy di ${service.projectSlug}, con un breve riavvio del database.`
+            : "Il container tiene il nome che ha: prende quello nuovo solo al deploy di un progetto collegato."}
+        </FieldHint>
+      </FormDialog>
     </>
   );
 }

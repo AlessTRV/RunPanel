@@ -9,6 +9,7 @@ import { Hint } from "@/components/ui/Hint";
 import { useResource } from "@/lib/hooks/useResource";
 import { formatBytes } from "@/lib/format";
 import type { ArtifactView, TargetCatalog } from "./types";
+import { serviceDisplayName } from "@/lib/service-name";
 
 /**
  * The confirmation in front of the only operation that can destroy production
@@ -76,7 +77,7 @@ export function RestoreDialog({
       const engine = String(artifact.meta?.engine ?? "");
       return (catalog.data?.services ?? [])
         .filter((service) => !engine || service.type === engine)
-        .map((service) => ({ id: service.id, label: `${service.name} (${service.type})` }));
+        .map((service) => ({ id: service.id, label: `${serviceDisplayName(service)} (${service.type})` }));
     }
     if (artifact.kind.startsWith("project-")) {
       return (catalog.data?.projects ?? []).map((project) => ({

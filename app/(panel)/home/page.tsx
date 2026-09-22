@@ -22,6 +22,7 @@ import { statusMeta, TONE_DOT } from "@/lib/status";
 import { formatBytes, formatUptime } from "@/lib/format";
 import { groupOverview, type FolderLike } from "@/lib/overview-groups";
 import { cn } from "@/lib/utils";
+import { serviceDisplayName } from "@/lib/service-name";
 
 interface Service {
   id: string;
@@ -215,7 +216,7 @@ const ProjectCard = memo(function ProjectCard({
                   className="border-border bg-surface-secondary hover:bg-surface-hover flex items-center gap-1.5 rounded-full border px-2 py-1 text-xs transition-colors"
                 >
                   <span className={cn("size-1.5 rounded-full", TONE_DOT[meta.tone])} aria-hidden />
-                  <span className="text-foreground">{service.name}</span>
+                  <span className="text-foreground">{serviceDisplayName(service)}</span>
                   <span className="text-muted font-mono">{service.type}</span>
                 </Link>
               </li>
@@ -252,7 +253,7 @@ const ServiceCard = memo(function ServiceCard({
         />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <h3 className="text-foreground truncate text-sm font-medium">{service.name}</h3>
+            <h3 className="text-foreground truncate text-sm font-medium">{serviceDisplayName(service)}</h3>
             <StatusBadge status={service.status} />
           </div>
           <p className="text-muted mt-1 truncate font-mono text-xs">
@@ -262,7 +263,7 @@ const ServiceCard = memo(function ServiceCard({
         <Icon icon="solar:alt-arrow-right-linear" width={16} className="text-muted shrink-0" aria-hidden />
       </Link>
       <MoveMenu
-        label={service.name}
+        label={serviceDisplayName(service)}
         folderId={service.folder_id}
         folders={folders}
         onMove={(folderId) => onMove(service.id, folderId)}

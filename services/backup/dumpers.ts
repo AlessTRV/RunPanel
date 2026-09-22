@@ -5,6 +5,7 @@ import { docker, dockerToFile, dockerTry } from "../docker/cli";
 import { databaseAdmin, execArgs, serviceTarget, type ServiceTarget } from "../service-databases";
 import { formatBytes } from "@/lib/format";
 import type { RunContext, StagedFile } from "./types";
+import { serviceDisplayName } from "@/lib/service-name";
 
 /**
  * Dumping a managed database.
@@ -355,7 +356,7 @@ export async function dumpServiceDatabase(
   const entryPath = engine.entry(service.name, database);
   const absolutePath = stagePath(ctx, entryPath);
 
-  ctx.log(`→ ${service.name}${database ? ` / ${database}` : " (server completo)"}`);
+  ctx.log(`→ ${serviceDisplayName(service)}${database ? ` / ${database}` : " (server completo)"}`);
   const { sha256, meta } = await engine.run(target, database, absolutePath, ctx);
 
   const stat = fs.statSync(absolutePath);

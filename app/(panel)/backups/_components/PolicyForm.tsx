@@ -19,6 +19,7 @@ import type {
   ProjectInclude,
   TargetCatalog,
 } from "./types";
+import { serviceDisplayName } from "@/lib/service-name";
 
 /**
  * Creating and editing a schedule.
@@ -453,7 +454,7 @@ export function PolicyForm({ policy }: Props) {
                         checked={chosen}
                         onChange={() => toggleService(service.id)}
                       />
-                      <span className="text-foreground">{service.name}</span>
+                      <span className="text-foreground">{serviceDisplayName(service)}</span>
                       <span className="text-muted text-xs">
                         {service.type} {service.version}
                       </span>

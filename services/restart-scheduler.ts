@@ -5,6 +5,7 @@ import { getSetting } from "@/lib/settings";
 import { restartFromLastDeployment } from "./project-restart";
 import { restartService } from "./service-provisioner";
 import { notify } from "./notify";
+import { serviceDisplayName } from "@/lib/service-name";
 
 /**
  * The tick that makes a scheduled restart happen.
@@ -139,7 +140,7 @@ export async function tick(now = new Date()): Promise<RestartTickResult> {
       .execute();
     const services = await db
       .selectFrom("services")
-      .select(["id", "name", "status", "restart_cron", "restart_next_at", "crashed_at", "container_name"])
+      .select(["id", "name", "display_name", "status", "restart_cron", "restart_next_at", "crashed_at", "container_name"])
       .where("restart_cron", "!=", "")
       .execute();
 
@@ -151,6 +152,7 @@ export async function tick(now = new Date()): Promise<RestartTickResult> {
         table: "services" as const,
         handle: s.container_name,
         ...s,
+        name: serviceDisplayName(s),
         restart_cron: s.restart_cron ?? "",
       })),
     ];

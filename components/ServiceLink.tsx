@@ -11,6 +11,7 @@ import { SettingToggle } from "@/components/ui/SettingToggle";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { serviceEnvKey, serviceLabel } from "@/lib/service-env";
+import { serviceDisplayName } from "@/lib/service-name";
 
 /**
  * A database attached to a project, and what that attachment does.
@@ -92,7 +93,7 @@ export function ServiceLink({
 
   async function unlink() {
     await patch({ projectId: null }, "Scollegamento non riuscito");
-    toast.success(`${service.name} scollegato`);
+    toast.success(`${serviceDisplayName(service)} scollegato`);
     onChanged();
   }
 
@@ -109,7 +110,7 @@ export function ServiceLink({
           href={`/services/${service.id}`}
           className="text-foreground hover:text-accent min-w-0 truncate text-sm transition-colors"
         >
-          {service.name}
+          {serviceDisplayName(service)}
         </Link>
         <span className="text-muted text-meta">{serviceLabel(service.type)}</span>
         <span className="ml-auto shrink-0">
@@ -163,7 +164,7 @@ export function ServiceLink({
       <ConfirmDialog
         isOpen={unlinking}
         onOpenChange={setUnlinking}
-        title={`Scollegare ${service.name}?`}
+        title={`Scollegare ${serviceDisplayName(service)}?`}
         description={
           <>
             Il servizio e i suoi dati restano. Dal prossimo deploy il progetto non riceve più{" "}

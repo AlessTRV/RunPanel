@@ -12,7 +12,17 @@ import type { ServiceMount } from "@/lib/mount";
 
 export interface Service {
   id: string;
+  /** The technical name: fixed for life, it is part of the volume names. */
   name: string;
+  /** What the panel shows; null means `name`. */
+  display_name: string | null;
+  /** The name to show, resolved by the server. */
+  displayName: string;
+  /**
+   * The container name the next deploy of its project will give it, when that
+   * differs from today's. Null when nothing is waiting.
+   */
+  pendingContainerName: string | null;
   type: string;
   version: string;
   status: string;

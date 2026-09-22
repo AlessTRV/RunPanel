@@ -3,6 +3,7 @@ import os from "os";
 import { compileRules, isAllowed, normalizeAddress } from "@/lib/ip-access";
 import { AccessRow, readAccess } from "@/lib/access-columns";
 import { GateKind, closeGate, gateStatus, openGate } from "./access-gate";
+import { serviceDisplayName } from "@/lib/service-name";
 
 /**
  * Turning the stored answer into a running gate.
@@ -188,7 +189,7 @@ export async function reconcileGates(): Promise<void> {
 
   const services = await db
     .selectFrom("services")
-    .select(["id", "name", "port", "access_mode", "access_allow", "access_port"])
+    .select(["id", "name", "display_name", "port", "access_mode", "access_allow", "access_port"])
     .where("access_mode", "=", "restricted")
     .execute();
 
@@ -202,7 +203,7 @@ export async function reconcileGates(): Promise<void> {
   let failed = 0;
 
   const targets: { kind: GateKind; id: string; name: string; port: number | null; row: AccessRow }[] = [
-    ...services.map((row) => ({ kind: "service" as const, id: row.id, name: row.name, port: row.port, row })),
+    ...services.map((row) => ({ kind: "service" as const, id: row.id, name: serviceDisplayName(row), port: row.port, row })),
     ...projects.map((row) => ({ kind: "project" as const, id: row.id, name: row.name, port: row.port, row })),
   ];
 

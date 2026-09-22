@@ -8,6 +8,7 @@ import type { MountApply } from "@/lib/hooks/useServiceStream";
 import { DatabasesPanel } from "./DatabasesPanel";
 import { MountsPanel } from "./MountsPanel";
 import type { Credentials, From, Service } from "./types";
+import { serviceDisplayName } from "@/lib/service-name";
 
 /**
  * Everything about the data this service holds: the databases inside it, and
@@ -82,7 +83,7 @@ export function DataSection({
         description="Il container viene rimosso subito"
         actionLabel="Elimina servizio"
         confirm={{
-          title: `Eliminare "${service.name}"?`,
+          title: `Eliminare "${serviceDisplayName(service)}"?`,
           confirmLabel: "Elimina",
           description: deleteData
             ? "Il container e il volume con i dati vengono eliminati. I dati non sono recuperabili."

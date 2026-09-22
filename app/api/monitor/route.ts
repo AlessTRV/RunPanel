@@ -5,6 +5,7 @@ import { processManager } from "@/services/process-manager";
 import { containerStats } from "@/services/docker/stats";
 import { dockerTry, lines } from "@/services/docker/cli";
 import { hostMetrics } from "@/services/host-metrics";
+import { serviceDisplayName } from "@/lib/service-name";
 
 const UPTIME_FORMAT = "{{.Name}}|{{.State.Running}}|{{.State.StartedAt}}";
 
@@ -82,7 +83,7 @@ export async function GET() {
 
     return {
       id: s.id,
-      name: s.name,
+      name: serviceDisplayName(s),
       type: s.type,
       status: s.status,
       port: s.port,

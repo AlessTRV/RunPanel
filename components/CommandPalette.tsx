@@ -6,6 +6,7 @@ import { Icon } from "@iconify/react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { NAV_ITEMS } from "@/lib/nav";
+import { serviceDisplayName } from "@/lib/service-name";
 
 /**
  * Ctrl/Cmd+K: go anywhere, do the frequent things.
@@ -138,7 +139,7 @@ export function CommandPalette() {
     for (const service of index.services) {
       list.push({
         id: `service:${service.id}`,
-        label: service.name,
+        label: serviceDisplayName(service),
         hint: `servizio · ${service.type}`,
         icon: "solar:database-linear",
         run: () => router.push(`/services/${service.id}`),

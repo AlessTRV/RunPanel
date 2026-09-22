@@ -13,6 +13,7 @@ import { PageSkeleton } from "@/components/ui/Skeletons";
 import { statusMeta, TONE_DOT } from "@/lib/status";
 import { formatBytes, formatUptime } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { serviceDisplayName } from "@/lib/service-name";
 
 interface ProcessInfo {
   running: boolean;
@@ -228,7 +229,7 @@ export default function MonitorPage() {
                       <Row
                         key={service.id}
                         nested
-                        label={service.name}
+                        label={serviceDisplayName(service)}
                         sublabel={`${service.type} · :${service.port}`}
                         status={service.status}
                         cpu={service.cpu}
@@ -255,7 +256,7 @@ export default function MonitorPage() {
             {standalone.map((service) => (
               <Row
                 key={service.id}
-                label={service.name}
+                label={serviceDisplayName(service)}
                 sublabel={`${service.type} · :${service.port}`}
                 status={service.status}
                 cpu={service.cpu}

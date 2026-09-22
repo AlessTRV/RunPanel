@@ -6,6 +6,7 @@ import { Icon } from "@iconify/react";
 import { toast } from "sonner";
 import { DeleteButton } from "@/components/ui/DangerAction";
 import { serviceLabel } from "@/lib/service-env";
+import { serviceDisplayName } from "@/lib/service-name";
 
 export interface LinkedServiceRow {
   id: string;
@@ -44,14 +45,14 @@ export function LinkedServiceDelete({
         href={`/services/${service.id}`}
         className="text-foreground hover:text-accent min-w-0 truncate text-sm transition-colors"
       >
-        {service.name}
+        {serviceDisplayName(service)}
       </Link>
       <span className="text-muted text-meta">{serviceLabel(service.type)}</span>
       <span className="ml-auto shrink-0">
         <DeleteButton
-          label={`Elimina ${service.name}`}
+          label={`Elimina ${serviceDisplayName(service)}`}
           confirm={{
-            title: `Eliminare "${service.name}"?`,
+            title: `Eliminare "${serviceDisplayName(service)}"?`,
             confirmLabel: "Elimina",
             description: (
               <>
@@ -79,7 +80,7 @@ export function LinkedServiceDelete({
               { method: "DELETE" }
             );
             if (res.ok) {
-              toast.success(`${service.name} eliminato`);
+              toast.success(`${serviceDisplayName(service)} eliminato`);
               setDeleteData(false);
               onDeleted();
             } else {

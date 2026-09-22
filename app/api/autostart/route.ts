@@ -6,6 +6,7 @@ import { autostartUpdateSchema } from "@/lib/validation";
 import { autostartProbeCache, containerPolicies } from "@/services/autostart/probe";
 import { storedConfig } from "@/services/autostart/install";
 import { lastReport, reconcilerEnabled } from "@/services/autostart/reconcile";
+import { serviceDisplayName } from "@/lib/service-name";
 
 /**
  * The whole autostart picture in one call: what the host does about booting the
@@ -35,7 +36,7 @@ export async function GET() {
       return {
         kind: "service" as const,
         id: service.id,
-        name: service.name,
+        name: serviceDisplayName(service),
         subtitle: `${service.type} ${service.version}`,
         status: service.status,
         ...settings,

@@ -5,6 +5,7 @@ import { dockerTry, lines } from "./docker/cli";
 import { appContainerName } from "./docker/labels";
 import { processManager } from "./process-manager";
 import { notify } from "./notify";
+import { serviceDisplayName } from "@/lib/service-name";
 
 /**
  * Making the status column mean what it says.
@@ -112,7 +113,7 @@ async function runSweep(): Promise<ReconcileStatusResult> {
   const db = await getDb();
   const [projects, services] = await Promise.all([
     db.selectFrom("projects").select(["id", "slug", "status", "runtime_type"]).execute(),
-    db.selectFrom("services").select(["id", "name", "container_name", "status"]).execute(),
+    db.selectFrom("services").select(["id", "name", "display_name", "container_name", "status"]).execute(),
   ]);
 
   const containers = await runningContainers();
@@ -201,7 +202,7 @@ async function runSweep(): Promise<ReconcileStatusResult> {
         if (next === "stopped") {
           void notify({
             key: "service.crashed",
-            name: service.name,
+            name: serviceDisplayName(service),
             container: service.container_name,
           });
         }

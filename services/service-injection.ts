@@ -11,6 +11,7 @@ import {
 } from "@/lib/service-env";
 import { networkName } from "./docker/labels";
 import { internalPort } from "./service-provisioner";
+import { serviceDisplayName } from "@/lib/service-name";
 
 /**
  * The connection strings a project's linked services contribute to its
@@ -50,7 +51,7 @@ export async function injectLinkedServiceEnv(
 
   const linkedServices = await db
     .selectFrom("services")
-    .select(["name", "type", "port", "credentials", "container_name", "inject_env", "env_key"])
+    .select(["name", "display_name", "type", "port", "credentials", "container_name", "inject_env", "env_key"])
     .where("project_id", "=", project.id)
     .execute();
 
@@ -60,7 +61,10 @@ export async function injectLinkedServiceEnv(
   // runtime on that network, so the name always resolves.
   const from = connectionOrigin(project.runtime_type, dockerNetwork);
 
-  return resolveServiceEnv(linkedServices, envVars, (svc) => {
+  // Named as the operator named them: these names are what the deploy log prints.
+  const named = linkedServices.map((row) => ({ ...row, name: serviceDisplayName(row) }));
+
+  return resolveServiceEnv(named, envVars, (svc) => {
     let creds: { user?: string; password?: string; database?: string } = {};
     try {
       creds = JSON.parse(decrypt(svc.credentials));

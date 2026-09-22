@@ -44,6 +44,7 @@ import type {
   StagedFile,
 } from "./types";
 import type { ProjectVolume } from "./volume-ops";
+import { serviceDisplayName } from "@/lib/service-name";
 
 /**
  * One backup, start to finish.
@@ -505,7 +506,9 @@ function describe(job: BackupJob): { refId: string | null; refName: string } {
     case "service-db":
       return {
         refId: job.service.id,
-        refName: job.database ? `${job.service.name} / ${job.database}` : job.service.name,
+        refName: job.database
+          ? `${serviceDisplayName(job.service)} / ${job.database}`
+          : serviceDisplayName(job.service),
       };
     case "panel-store":
       return { refId: null, refName: "Store del pannello" };

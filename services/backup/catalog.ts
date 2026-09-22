@@ -10,6 +10,7 @@ import { backupDocker, listProjectVolumes, projectOwner, projectVolumes } from "
 import { parseTargets } from "./scheduler";
 import type { BackupTarget } from "./types";
 import { stackServices, volumeUsers } from "./volume-ops";
+import { serviceDisplayName } from "@/lib/service-name";
 
 /**
  * The read side: what the pages ask for.
@@ -282,7 +283,7 @@ export async function listTargets(): Promise<TargetCatalog> {
   const withDatabases = await Promise.all(
     services.map(async (service) => ({
       id: service.id,
-      name: service.name,
+      name: serviceDisplayName(service),
       type: service.type,
       version: service.version,
       // A stopped or unreachable engine simply offers nothing rather than

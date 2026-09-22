@@ -14,6 +14,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { Code, Hint } from "@/components/ui/Hint";
 import { PageSkeleton } from "@/components/ui/Skeletons";
 import { StatusBadge } from "@/components/StatusBadge";
+import { serviceDisplayName } from "@/lib/service-name";
 
 interface Service {
   id: string;
@@ -56,7 +57,7 @@ const ServiceRow = memo(function ServiceRow({
 
       <Link href={`/services/${service.id}`} className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
-          <span className="text-foreground truncate text-sm font-medium">{service.name}</span>
+          <span className="text-foreground truncate text-sm font-medium">{serviceDisplayName(service)}</span>
           <StatusBadge status={service.status} />
         </div>
         <p className="text-muted mt-0.5 flex flex-wrap items-center gap-x-2 truncate text-xs">
@@ -126,7 +127,10 @@ export default function ServicesPage() {
     const q = search.trim().toLowerCase();
     if (!q) return services;
     return services.filter(
-      (s) => s.name.toLowerCase().includes(q) || s.type.toLowerCase().includes(q)
+      (s) =>
+        serviceDisplayName(s).toLowerCase().includes(q) ||
+        s.name.toLowerCase().includes(q) ||
+        s.type.toLowerCase().includes(q)
     );
   }, [services, search]);
 

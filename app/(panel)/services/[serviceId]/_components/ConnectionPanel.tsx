@@ -12,6 +12,7 @@ import { InfoTip } from "@/components/ui/Tooltip";
 import { AccessSection } from "@/components/AccessSection";
 import { buildConnectionString } from "@/lib/service-env";
 import type { Credentials, From, Service } from "./types";
+import { serviceDisplayName } from "@/lib/service-name";
 
 /**
  * How an application gets to this service — the question the page exists to
@@ -261,7 +262,7 @@ export function ConnectionPanel({
       <AccessSection
         kind="service"
         targetId={service.id}
-        name={service.name}
+        name={serviceDisplayName(service)}
         publicPort={service.port}
         access={service.access}
         gate={service.gate}

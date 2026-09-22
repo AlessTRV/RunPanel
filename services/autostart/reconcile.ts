@@ -10,6 +10,7 @@ import { execArgs, serviceTarget } from "../service-databases";
 import { reconcileStatuses } from "../status-reconcile";
 import path from "path";
 import { config } from "@/lib/config";
+import { serviceDisplayName } from "@/lib/service-name";
 
 /**
  * Bringing back what is supposed to be running, after a reboot.
@@ -108,7 +109,7 @@ async function candidates(): Promise<Candidate[]> {
     out.push({
       kind: "service",
       id: service.id,
-      name: service.name,
+      name: serviceDisplayName(service),
       order: settings.order,
       createdAt: service.created_at,
       delaySeconds: settings.delaySeconds,
