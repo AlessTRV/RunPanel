@@ -307,10 +307,10 @@ export function BackupSection({
           );
         })}
         <FieldHint>
-          Uno per riga, relativi alla radice del volume: <Code>trades</Code> esclude la cartella e tutto
-          quello che contiene. Il log e il manifest dicono cosa è stato escluso e quanto pesava. Al
-          ripristino quei percorsi restano come sono: l&apos;archivio non li contiene, quindi non li
-          sovrascrive né li cancella. {EXCLUDE_PATH_RULE}.
+          Uno per riga, relativi alla radice del volume, senza <Code>..</Code>, <Code>/</Code> iniziale
+          o caratteri jolly: <Code>trades</Code> esclude la cartella e tutto quello che contiene. Il log
+          e il manifest dicono cosa è stato escluso e quanto pesava. Al ripristino quei percorsi restano
+          come sono: l&apos;archivio non li contiene, quindi non li sovrascrive né li cancella.
         </FieldHint>
       </div>
 
