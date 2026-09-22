@@ -183,7 +183,7 @@ questa pagina: lo schermo sa solo se ce n'è uno.
 | **Backup concluso** | Riuscito, parziale o fallito, con artefatti, dimensione e durata |
 | **Aggiornamento disponibile** | Il controllo periodico ha trovato commit nuovi su RunPanel |
 | **Il pannello è ripartito** | Dopo un riavvio o un aggiornamento |
-| **Spazio su disco** | Sotto il 10% libero sulla cartella dei dati, e quando rientra |
+| **Spazio su disco** | Basso sotto il 10% o i 4 GB liberi; critico sotto i 2 GB o il 3%, o quando finiscono gli inode. Sul disco dei dati e su quello di Docker, se è un altro. Più un avviso quando il prossimo backup pianificato non avrebbe spazio. E quando rientra |
 
 Ogni voce ha il suo interruttore: una che fa troppo rumore si spegne senza
 perdere le altre.
@@ -197,11 +197,31 @@ il log che scorre — ma se fallisce sì.
 ### Perché non ti sommerge
 
 Tutto è **edge-triggered**: viene notificato il momento in cui una soglia viene
-attraversata, non lo stato. La soglia del disco ha due punti di isteresi. Sopra a
+attraversata, non lo stato. Le soglie del disco hanno un margine prima di dirsi rientrate. Sopra a
 questo c'è un silenzio di quindici minuti per evento e per soggetto — per
 soggetto, non globale, così un progetto che sbatte non copre un altro che cade
 nello stesso momento. L'aggiornamento del pannello è annunciato quando cambia il
 commit di destinazione, non finché ne esiste uno.
+
+### Lo spazio su disco
+
+Lo spazio finisce in più modi, e ognuno rompe qualcosa di diverso: per questo
+l'avviso ha due livelli e guarda tre cose.
+
+- **Basso** — sotto il 10% o sotto i 4 GB liberi, o sotto il 5% degli inode.
+  Funziona ancora tutto, ma la prossima build che scarica un'immagine, o la copia
+  di un volume grande, può riempire il resto.
+- **Critico** — sotto i 2 GB (la riserva sotto cui un backup non parte), sotto il
+  3%, o sotto il 2% degli inode. I backup vengono rifiutati, le build falliscono,
+  e un database che non riesce a scrivere si ferma o lascia file a metà. Arriva
+  come messaggio di errore, non di avviso.
+
+Il controllo gira ogni cinque minuti sul disco della cartella dei dati e, se
+Docker tiene immagini e volumi su un altro disco, anche su quello. Un disco già
+in difficoltà quando il pannello parte viene segnalato subito, senza aspettare
+che peggiori. Ogni policy di backup pianificata viene confrontata con lo spazio
+che le servirà, stimato dall'ultimo archivio (il doppio, più la riserva): se non
+ci starebbe, arriva un avviso prima dell'esecuzione, con quanto manca.
 
 ### Se la notifica non parte
 

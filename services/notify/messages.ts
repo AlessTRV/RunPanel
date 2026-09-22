@@ -280,7 +280,36 @@ export type NotifyEvent =
   | { key: "restart.scheduled"; kind: "project" | "service"; name: string; outcome: string; ok: boolean }
   /** `up` is the direction: false when it went away, true when it came back. */
   | { key: "docker.down"; up: boolean; detail?: string }
-  | { key: "disk.low"; up: boolean; freeBytes: number; totalBytes: number; path: string }
+  /**
+   * Space running out. One event and one switch for every flavour of it, so a
+   * panel whose operator enabled "disk" gets all of them — new keys would start
+   * switched off on every panel that ever saved its selection.
+   */
+  | {
+      key: "disk.low";
+      /** true once the reading is back to `ok`. */
+      up: boolean;
+      freeBytes: number;
+      totalBytes: number;
+      path: string;
+      /** How bad it is now. Absent on older callers, which only knew "low". */
+      level?: DiskLevel;
+      /** What it was before, so a step down from critical reads as one. */
+      from?: DiskLevel;
+      /** The panel's data, Docker's images and volumes, or both on one disk. */
+      scope?: "data" | "docker" | "both";
+      /** Set when it is the files, not the bytes, that ran out. */
+      inodes?: { free: number; total: number } | null;
+    }
+  /** A scheduled backup that will most likely not have room when it runs. */
+  | {
+      key: "disk.low";
+      up: boolean;
+      backup: { policy: string; needBytes: number; lastArchiveBytes: number; nextRunAt: string | null };
+      freeBytes: number;
+      totalBytes: number;
+      path: string;
+    }
   | {
       key: "deploy.finished";
       slug: string;
@@ -331,15 +360,83 @@ export function shouldAnnounceDeploy(trigger: DeployTrigger, ok: boolean): boole
  * The gap is the whole design. Without it a disk hovering at exactly the
  * threshold — which is precisely what a disk that is filling up does — crosses
  * back and forth on every tick and sends a warning and an all-clear,
- * alternating, forever. `wasLow` is what the previous reading concluded.
+ * alternating, forever.
  */
 export const DISK_LOW_RATIO = 0.10;
 export const DISK_RECOVERED_RATIO = 0.12;
 
-export function diskLow(free: number, total: number, wasLow: boolean | undefined): boolean {
-  if (total <= 0) return false;
+export type DiskLevel = "ok" | "low" | "critical";
+
+const GIB = 1024 ** 3;
+
+/**
+ * The backup reserve: below it a backup refuses to start. Mirrors
+ * `FREE_SPACE_RESERVE` in services/backup/paths.ts, which this module cannot
+ * import — the unit suite loads it on its own.
+ */
+export const BACKUP_RESERVE_BYTES = 2 * GIB;
+
+/**
+ * Two levels, each in bytes, in percent and in inodes, whichever trips first.
+ *
+ * A percentage alone was the old rule, and it is wrong at both ends: 10% of a
+ * 45 GB disk is 4.5 GB, and 10% of a 2 TB one is 200 GB of warnings nobody
+ * needs. The absolute floors are what actually breaks: under the reserve a
+ * backup refuses to start; a little above it a build pulling a base image, or a
+ * snapshot of a paused volume, is what fills the rest. And a disk can run out
+ * of inodes with gigabytes free — every write fails just the same.
+ *
+ *  - `low`: under 10%, under 4 GB, or under 5% of inodes. Things still work;
+ *    the next large build or backup may not.
+ *  - `critical`: under 3%, under the 2 GB reserve, or under 2% of inodes.
+ *    Backups are refused, image builds fail, and a database that cannot write
+ *    its log stops or, worse, keeps going with a torn file.
+ *
+ * Every threshold has a gap before it counts as recovered, for the reason
+ * `DISK_RECOVERED_RATIO` documents: a disk sitting on a line would otherwise
+ * alternate warning and all-clear on every tick.
+ */
+export function diskLevel(
+  reading: { free: number; total: number; inodesFree?: number; inodesTotal?: number },
+  previous: DiskLevel | undefined
+): DiskLevel {
+  const { free, total } = reading;
+  if (total <= 0) return "ok";
   const ratio = free / total;
-  return wasLow ? ratio < DISK_RECOVERED_RATIO : ratio < DISK_LOW_RATIO;
+  const inodes =
+    reading.inodesTotal && reading.inodesTotal > 0 && reading.inodesFree !== undefined
+      ? reading.inodesFree / reading.inodesTotal
+      : 1;
+
+  const wasCritical = previous === "critical";
+  const wasLow = previous === "low" || wasCritical;
+
+  const critical =
+    ratio < (wasCritical ? 0.04 : 0.03) ||
+    free < (wasCritical ? 2.5 * GIB : BACKUP_RESERVE_BYTES) ||
+    inodes < (wasCritical ? 0.03 : 0.02);
+  if (critical) return "critical";
+
+  const low =
+    ratio < (wasLow ? DISK_RECOVERED_RATIO : DISK_LOW_RATIO) ||
+    free < (wasLow ? 5 * GIB : 4 * GIB) ||
+    inodes < (wasLow ? 0.06 : 0.05);
+  return low ? "low" : "ok";
+}
+
+/**
+ * What a backup needs free to run, estimated from the last archive it made:
+ * every artefact is staged before the archive is written beside it, so the
+ * peak is about twice the archive, and the reserve comes on top.
+ */
+export function backupNeedBytes(lastArchiveBytes: number): number {
+  return BACKUP_RESERVE_BYTES + 2 * lastArchiveBytes;
+}
+
+/** With the same kind of gap: 10% more room than needed before it counts as fitting again. */
+export function backupWontFit(free: number, lastArchiveBytes: number, warned: boolean): boolean {
+  const need = backupNeedBytes(lastArchiveBytes);
+  return free < (warned ? need * 1.1 : need);
 }
 
 const TRIGGERS: Record<DeployTrigger, Html> = {
@@ -434,21 +531,76 @@ export function describe(event: NotifyEvent): NotifyMessage {
       const percent =
         event.totalBytes > 0 ? Math.round((event.freeBytes / event.totalBytes) * 100) : 0;
 
-      return event.up
-        ? {
-            level: "ok",
-            title: "Spazio su disco rientrato",
-            body: html`Di nuovo ${free} liberi su ${total} (${percent}%).`,
-          }
-        : {
-            level: "warn",
-            title: "Spazio su disco quasi finito",
-            body: join([
-              html`Restano ${bold(String(free))} su ${total} — il ${percent}%.`,
-              line("Cartella", code(event.path)),
-              html`Sotto questa soglia i backup e le build cominciano a fallire senza preavviso.`,
-            ]),
-          };
+      // --- a scheduled backup that will not fit ---------------------------------
+      if ("backup" in event) {
+        const when = event.backup.nextRunAt ? new Date(event.backup.nextRunAt) : null;
+        return event.up
+          ? {
+              level: "ok",
+              title: "Di nuovo spazio per il backup",
+              body: html`«${escapeHtml(event.backup.policy)}» ha di nuovo lo spazio che gli serve: ${free} liberi.`,
+            }
+          : {
+              level: "warn",
+              title: "Il prossimo backup rischia di non avere spazio",
+              body: join([
+                html`«${bold(event.backup.policy)}»${
+                  when && Number.isFinite(when.getTime())
+                    ? html` parte il ${escapeHtml(when.toLocaleString("it-IT"))}`
+                    : null
+                }: servono circa ${bold(String(bytes(event.backup.needBytes)))}, liberi ${free}.`,
+                html`L'ultimo archivio pesava ${bytes(event.backup.lastArchiveBytes)}; ogni elemento viene preparato su disco prima di finire nell'archivio, e sotto i 2 GB di riserva il backup non parte.`,
+                line("Cartella", code(event.path)),
+                html`Libera spazio (Storage → Pulisci ora), escludi dal backup le cartelle che non servono, o sposta i backup su S3.`,
+              ]),
+            };
+      }
+
+      const level = event.level ?? (event.up ? "ok" : "low");
+      const where =
+        event.scope === "docker"
+          ? html`Disco di Docker (immagini, volumi, cache delle build): ${code(event.path)}`
+          : event.scope === "both"
+            ? html`Disco dei dati del pannello e di Docker: ${code(event.path)}`
+            : line("Cartella", code(event.path));
+      const inodes = event.inodes
+        ? html`Sono finiti soprattutto gli inode, cioè i file: ${escapeHtml(event.inodes.free.toLocaleString("it-IT"))} liberi su ${escapeHtml(event.inodes.total.toLocaleString("it-IT"))}. Ogni scrittura fallisce anche con dei GB liberi.`
+        : null;
+
+      if (level === "ok") {
+        return {
+          level: "ok",
+          title: "Spazio su disco rientrato",
+          body: join([html`Di nuovo ${free} liberi su ${total} (${percent}%).`, where]),
+        };
+      }
+
+      if (level === "critical") {
+        return {
+          level: "danger",
+          title: "Disco quasi pieno: dati a rischio",
+          body: join([
+            html`Restano ${bold(String(free))} su ${total} — il ${percent}%.`,
+            where,
+            inodes,
+            html`I backup non partono più, le build delle immagini falliscono, e un database che non riesce a scrivere si ferma o lascia file a metà. Libera spazio adesso: Storage → Pulisci ora, o i log e gli archivi vecchi.`,
+          ]),
+        };
+      }
+
+      return {
+        level: "warn",
+        title:
+          event.from === "critical"
+            ? "Spazio su disco sopra la soglia critica, ma ancora basso"
+            : "Spazio su disco quasi finito",
+        body: join([
+          html`Restano ${bold(String(free))} su ${total} — il ${percent}%.`,
+          where,
+          inodes,
+          html`Sotto i 2 GB i backup vengono rifiutati; già adesso una build che scarica un'immagine, o la copia di un volume grande, può riempire il resto.`,
+        ]),
+      };
     }
 
     case "deploy.finished": {

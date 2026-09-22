@@ -29,7 +29,9 @@ export async function run({ repoRoot }) {
     render,
     describe,
     shouldAnnounceDeploy,
-    diskLow,
+    diskLevel,
+    backupNeedBytes,
+    backupWontFit,
     MAX_MESSAGE_LENGTH,
   } = await load("services", "notify", "messages.ts");
   const { parseNotifyEvents, DEFAULT_NOTIFY_EVENTS, NOTIFY_GROUPS, NOTIFY_EVENTS } = await load(
@@ -85,6 +87,42 @@ export async function run({ repoRoot }) {
       path: p,
     },
     { key: "disk.low", up: true, freeBytes: 50 * 1024 ** 3, totalBytes: 100 * 1024 ** 3, path: p },
+    {
+      key: "disk.low",
+      up: false,
+      level: "critical",
+      scope: "docker",
+      freeBytes: 1024 ** 3,
+      totalBytes: 100 * 1024 ** 3,
+      path: p,
+      inodes: { free: 10, total: 1000 },
+    },
+    {
+      key: "disk.low",
+      up: false,
+      level: "low",
+      from: "critical",
+      scope: "both",
+      freeBytes: 3 * 1024 ** 3,
+      totalBytes: 45 * 1024 ** 3,
+      path: p,
+    },
+    {
+      key: "disk.low",
+      up: false,
+      backup: { policy: p, needBytes: 5 * 1024 ** 3, lastArchiveBytes: 1024 ** 3, nextRunAt: "2026-09-27T01:00:00.000Z" },
+      freeBytes: 3 * 1024 ** 3,
+      totalBytes: 45 * 1024 ** 3,
+      path: p,
+    },
+    {
+      key: "disk.low",
+      up: true,
+      backup: { policy: p, needBytes: 5 * 1024 ** 3, lastArchiveBytes: 1024 ** 3, nextRunAt: null },
+      freeBytes: 9 * 1024 ** 3,
+      totalBytes: 45 * 1024 ** 3,
+      path: p,
+    },
     {
       key: "deploy.finished",
       slug: p,
@@ -343,15 +381,65 @@ export async function run({ repoRoot }) {
   r.check("only the first non-empty line is kept",
     firstLine("\n\nprimo\nsecondo") === "primo", firstLine("\n\nprimo\nsecondo"));
 
-  // --- Disk hysteresis ------------------------------------------------------
+  // --- Disk levels, and their hysteresis --------------------------------------
   //
   // A disk sitting exactly on the threshold is precisely what a disk that is
-  // filling up does, and without the gap it would alternate forever.
-  r.check("9% free trips the warning", diskLow(9, 100, false) === true);
-  r.check("11% free does not", diskLow(11, 100, false) === false);
-  r.check("once warned, 11% stays warned", diskLow(11, 100, true) === true);
-  r.check("13% clears it", diskLow(13, 100, true) === false);
-  r.check("an empty disk is not a division by zero", diskLow(0, 0, false) === false);
+  // filling up does, and without the gap it would alternate forever. The
+  // absolute floors are what actually breaks: the backup reserve is 2 GB
+  // whatever the size of the disk.
+  const GB = 1024 ** 3;
+  const disk = (freeGb, totalGb, extra = {}) => ({ free: freeGb * GB, total: totalGb * GB, ...extra });
+  r.check("plenty free is ok", diskLevel(disk(11, 45), undefined) === "ok");
+  r.check("under 10% is low", diskLevel(disk(200, 2100), undefined) === "low");
+  r.check("under 4 GB is low even at 9% of a small disk", diskLevel(disk(3.9, 40), undefined) === "low");
+  r.check("under the 2 GB backup reserve is critical", diskLevel(disk(1.9, 45), undefined) === "critical");
+  r.check("under 3% is critical", diskLevel(disk(50, 2000), undefined) === "critical");
+  r.check("once critical, 2.2 GB stays critical", diskLevel(disk(2.2, 45), "critical") === "critical");
+  r.check("and 3 GB steps down to low", diskLevel(disk(3, 45), "critical") === "low");
+  r.check("once low, 4.6 GB stays low", diskLevel(disk(4.6, 45), "low") === "low");
+  r.check("once low, 11% of a big disk stays low", diskLevel(disk(230, 2100), "low") === "low");
+  r.check("5.5 GB and over 12% clears it", diskLevel(disk(5.5, 45), "low") === "ok");
+  r.check(
+    "inodes running out is low with gigabytes free",
+    diskLevel(disk(20, 45, { inodesFree: 30_000, inodesTotal: 1_000_000 }), undefined) === "low"
+  );
+  r.check(
+    "and critical under 2%",
+    diskLevel(disk(20, 45, { inodesFree: 15_000, inodesTotal: 1_000_000 }), undefined) === "critical"
+  );
+  r.check(
+    "a filesystem that reports no inodes is judged on bytes",
+    diskLevel(disk(20, 45, { inodesFree: 0, inodesTotal: 0 }), undefined) === "ok"
+  );
+  r.check("an empty disk is not a division by zero", diskLevel({ free: 0, total: 0 }, undefined) === "ok");
+
+  // --- Room for the next backup -------------------------------------------------
+  r.check("a backup needs twice its archive plus the reserve", backupNeedBytes(1 * GB) === 4 * GB);
+  r.check("3.9 GB free is not enough for a 1 GB archive", backupWontFit(3.9 * GB, 1 * GB, false) === true);
+  r.check("4.1 GB is", backupWontFit(4.1 * GB, 1 * GB, false) === false);
+  r.check("once warned, it takes 10% more to clear", backupWontFit(4.3 * GB, 1 * GB, true) === true);
+
+  {
+    const critical = describe({ key: "disk.low", up: false, level: "critical", scope: "data", freeBytes: GB, totalBytes: 45 * GB, path: "/srv/data" });
+    r.check("a critical disk is danger, not a warning", critical.level === "danger", critical.level);
+    r.check("and says the data is at risk", /database/.test(critical.body), critical.body);
+    const docker = describe({ key: "disk.low", up: false, level: "low", scope: "docker", freeBytes: 3 * GB, totalBytes: 45 * GB, path: "/var/lib/docker" });
+    r.check("Docker's disk is named as such", /Docker/.test(docker.body), docker.body);
+    const stepped = describe({ key: "disk.low", up: false, level: "low", from: "critical", freeBytes: 3 * GB, totalBytes: 45 * GB, path: "/srv" });
+    r.check("stepping down from critical says so", /sopra la soglia critica/.test(stepped.title), stepped.title);
+    const inodes = describe({ key: "disk.low", up: false, level: "low", freeBytes: 20 * GB, totalBytes: 45 * GB, path: "/srv", inodes: { free: 30_000, total: 1_000_000 } });
+    r.check("running out of inodes is explained", /inode/.test(inodes.body), inodes.body);
+    const backup = describe({
+      key: "disk.low",
+      up: false,
+      backup: { policy: "weekly bkp", needBytes: 5 * GB, lastArchiveBytes: 1.5 * GB, nextRunAt: null },
+      freeBytes: 3 * GB,
+      totalBytes: 45 * GB,
+      path: "/srv/data/backups",
+    });
+    r.check("a backup that will not fit names the policy", backup.body.includes("weekly bkp") && backup.level === "warn", backup.body);
+    r.check("and how much it needs", backup.body.includes("5.0 GB"), backup.body);
+  }
 
   // --- Stored selection -----------------------------------------------------
   const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);

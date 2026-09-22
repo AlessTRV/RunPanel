@@ -100,8 +100,12 @@ function cooldownKey(event: NotifyEvent): string {
       // two occurrences minutes apart are two things that happened.
       return "";
     case "docker.down":
-    case "disk.low":
       return `${event.key}:${event.up ? "up" : "down"}`;
+    case "disk.low":
+      // Per disk and per level, and per policy for a backup that will not fit:
+      // a disk going from low to critical is new, and so is a second policy.
+      if ("backup" in event) return `${event.key}:backup:${event.backup.policy}:${event.up ? "up" : "down"}`;
+      return `${event.key}:${event.scope ?? "data"}:${event.level ?? (event.up ? "ok" : "low")}`;
     case "deploy.finished":
       // Never suppressed: two deploys of the same project minutes apart are two
       // pieces of news, and a deploy is something a person just caused.

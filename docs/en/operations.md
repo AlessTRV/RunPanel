@@ -180,7 +180,7 @@ this page: the screen only learns whether one exists.
 | **Backup finished** | Success, partial or failure, with artefacts, size and duration |
 | **Update available** | The periodic check found new commits on RunPanel |
 | **The panel restarted** | After a reboot or an update |
-| **Disk space** | Below 10% free on the data directory, and when it recovers |
+| **Disk space** | Low under 10% or 4 GB free; critical under 2 GB or 3%, or when inodes run out. On the data disk, and on Docker's when it is another one. Plus a warning when the next scheduled backup would not have room. And when it recovers |
 
 Each one has its own switch: a noisy one can be silenced without losing the rest.
 
@@ -193,11 +193,31 @@ with the log streaming — but a failed one is.
 ### Why it does not bury you
 
 Everything is **edge-triggered**: what gets announced is the moment a threshold
-is crossed, not the state. The disk threshold carries two points of hysteresis.
+is crossed, not the state. The disk thresholds carry a margin before they count as recovered.
 On top of that there is a fifteen-minute silence per event and per subject — per
 subject rather than globally, so one project flapping does not hide another
 falling over at the same moment. A panel update is announced when the target
 commit changes, not while one exists.
+
+### Disk space
+
+Space runs out in more than one way, and each breaks something different: so
+the warning has two levels and watches three things.
+
+- **Low** — under 10% or under 4 GB free, or under 5% of inodes. Everything
+  still works, but the next build that pulls an image, or the copy of a large
+  volume, can fill the rest.
+- **Critical** — under 2 GB (the reserve under which a backup refuses to
+  start), under 3%, or under 2% of inodes. Backups are refused, builds fail, and
+  a database that cannot write stops or leaves files half-written. It arrives as
+  an error, not a warning.
+
+The check runs every five minutes on the data directory's disk and, when Docker
+keeps images and volumes on another one, on that one too. A disk already in
+trouble when the panel starts is reported at once, without waiting for it to get
+worse. Every scheduled backup policy is compared with the room it will need,
+estimated from its last archive (twice that, plus the reserve): when it would not
+fit, a warning arrives before the run, saying how much is missing.
 
 ### When a notification cannot be sent
 

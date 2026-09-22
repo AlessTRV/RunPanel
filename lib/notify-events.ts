@@ -108,9 +108,9 @@ export const NOTIFY_GROUPS: NotifyEventGroup[] = [
       },
       {
         key: "disk.low",
-        label: "Spazio su disco quasi finito",
+        label: "Spazio su disco in esaurimento",
         description:
-          "Sotto il 10% libero sulla cartella dei dati. È la cosa che ferma i backup e le build senza preavviso.",
+          "Due livelli: basso sotto il 10% o i 4 GB liberi, critico sotto i 2 GB, dove i backup vengono rifiutati, le build delle immagini falliscono e i database rischiano i dati. Guarda anche gli inode, il disco di Docker se è un altro, e ti avvisa prima quando il prossimo backup pianificato non avrebbe spazio.",
       },
     ],
   },
