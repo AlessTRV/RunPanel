@@ -36,6 +36,39 @@ check starts nothing and stops nothing, and before calling something stopped tha
 claimed to be running it waits for two readings that agree, so a `pm2` that fails
 to answer for an instant does not paint the whole panel red.
 
+## Scheduled restarts
+
+Every project and every service can be restarted at fixed times: the
+**Riavvio programmato** section is in the project's Settings and on the service
+page. Pick a ready interval (every night at 04:00, every Sunday, every 6 hours,
+every hour) or write a five-field cron expression, with a preview of the next
+three restarts computed by the same parser that later runs them.
+
+The time is in the **panel's time zone**, set under **Impostazioni** and shared
+with backups. Until you save one the panel uses UTC, and the page says so rather
+than showing the browser's zone as if it were already set. An unknown zone is
+refused on save. Changing it recomputes the pending restarts at once, so a
+nightly schedule does not fire one last time at the old hour.
+
+When the time comes the panel decides like this:
+
+- **Running**: it restarts it. A project comes back from its last successful
+  deploy, with linked services' variables injected as in a deploy.
+- **Stopped by you**: it leaves it stopped. A schedule does not override your
+  decision.
+- **Went down on its own**: it makes **a single attempt** to bring it back. If
+  that fails it gives up, and tries again only if it comes back up and crashes
+  again. What tells a crash from a stop is the periodic status check: it marks
+  the crash when it finds something stopped that the panel had not stopped, and
+  every start, stop or deploy clears it.
+- **Deploy in progress** or **last deploy failed**: it skips it.
+
+Under the schedule the page shows the last occurrence and what it did, such as
+«Riavviato» or «Saltato: fermato a mano». A restart missed while the panel was
+down is not caught up: the right moment is the next one. With Telegram
+notifications on, a message arrives for every restart that ran or failed, not
+for skips.
+
 ## Updating the panel
 
 RunPanel is installed by cloning it, so the directory it runs from is a git
@@ -106,6 +139,7 @@ this page: the screen only learns whether one exists.
 | Event | When |
 |---|---|
 | **Project or service stopped** | The process is gone and it was not the panel that stopped it |
+| **Scheduled restart** | A fixed-time restart ran, or the attempt after a crash failed |
 | **Docker unreachable** | The daemon stopped answering, and again when it comes back |
 | **Deploy finished** | Always for automatic deploys; for manual ones only on failure |
 | **Backup finished** | Success, partial or failure, with artefacts, size and duration |

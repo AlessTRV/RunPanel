@@ -59,6 +59,13 @@ export default function AccountPage() {
 
   const [pollingInterval, setPollingInterval] = useState("5");
   const [timezone, setTimezone] = useState(Intl.DateTimeFormat().resolvedOptions().timeZone);
+  /**
+   * The zone the schedulers really use, as the server reports it. The field
+   * above is prefilled with the browser's zone for convenience, which made an
+   * unsaved panel look configured while every schedule ran in UTC.
+   */
+  const [effectiveZone, setEffectiveZone] = useState<string | null>(null);
+  const [zoneSaved, setZoneSaved] = useState(false);
   const [publicUrl, setPublicUrl] = useState("");
   // Seeded from the shared default, not from "5": that is a value belonging to
   // the refresh picker above, and it is not one of this control's options — so
@@ -74,6 +81,8 @@ export default function AccountPage() {
       .then((data) => {
         if (data.polling_interval) setPollingInterval(data.polling_interval);
         if (data.timezone) setTimezone(data.timezone);
+        setZoneSaved(Boolean(data.timezone));
+        if (typeof data.timezone_effective === "string") setEffectiveZone(data.timezone_effective);
         if (data.panel_public_url) setPublicUrl(data.panel_public_url);
         // Narrowed rather than trusted: this arrives as JSON, and a stored
         // value that is not on the list is the same empty-picker bug the
@@ -133,7 +142,11 @@ export default function AccountPage() {
           },
         }),
       });
-      if (res.ok) toast.success("Preferenze salvate");
+      if (res.ok) {
+        toast.success("Preferenze salvate");
+        setZoneSaved(true);
+        setEffectiveZone(timezone);
+      }
       else {
         const d = await res.json();
         // The public URL is the one preference that can be rejected for a
@@ -197,10 +210,27 @@ export default function AccountPage() {
             </FieldHint>
           </div>
 
-          <TextField value={timezone} onChange={setTimezone}>
-            <Label>Fuso orario</Label>
-            <Input placeholder="Europe/Rome" />
-          </TextField>
+          <div>
+            <TextField value={timezone} onChange={setTimezone}>
+              <Label>Fuso orario</Label>
+              <Input placeholder="Europe/Rome" />
+            </TextField>
+            <FieldHint>
+              {zoneSaved && effectiveZone === timezone ? (
+                <>
+                  Le pianificazioni, backup e riavvii programmati, seguono l&apos;ora di{" "}
+                  <Code>{effectiveZone}</Code>.
+                </>
+              ) : (
+                <>
+                  Le pianificazioni, backup e riavvii programmati, usano ora{" "}
+                  <Code>{effectiveZone ?? "UTC"}</Code>
+                  {zoneSaved ? "" : ": nessun fuso è stato ancora salvato"}. Salva per passare a{" "}
+                  <Code>{timezone || "UTC"}</Code>; i prossimi riavvii vengono ricalcolati.
+                </>
+              )}
+            </FieldHint>
+          </div>
 
           {/*
             The one address the panel cannot work out for itself.

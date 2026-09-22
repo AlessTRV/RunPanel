@@ -276,6 +276,8 @@ export type NotifyEvent =
       runtime: string;
     }
   | { key: "service.crashed"; name: string; container: string }
+  /** A scheduled restart that ran, or tried to. Skips are not announced. */
+  | { key: "restart.scheduled"; kind: "project" | "service"; name: string; outcome: string; ok: boolean }
   /** `up` is the direction: false when it went away, true when it came back. */
   | { key: "docker.down"; up: boolean; detail?: string }
   | { key: "disk.low"; up: boolean; freeBytes: number; totalBytes: number; path: string }
@@ -397,6 +399,16 @@ export function describe(event: NotifyEvent): NotifyMessage {
           html`${bold(event.name)} non è più in esecuzione, e non è stato il pannello a fermarlo.`,
           line("Container", code(event.container)),
           html`Un progetto collegato a questo servizio probabilmente non riesce più a connettersi.`,
+        ]),
+      };
+
+    case "restart.scheduled":
+      return {
+        level: event.ok ? "info" : "danger",
+        title: event.ok ? "Riavvio programmato eseguito" : "Riavvio programmato fallito",
+        body: join([
+          html`${bold(event.name)} (${escapeHtml(event.kind === "project" ? "progetto" : "servizio")}): ${escapeHtml(event.outcome)}.`,
+          event.ok ? null : html`Il pannello non riprova da solo: guarda lo stato e decidi tu.`,
         ]),
       };
 

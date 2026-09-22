@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth-guard";
-import { describeCron, nextOccurrences } from "@/lib/cron";
+import { describeCron, isValidTimeZone, nextOccurrences } from "@/lib/cron";
 import { getSetting } from "@/lib/settings";
 import { cronPreviewSchema } from "@/lib/validation";
 
@@ -32,7 +32,10 @@ export async function POST(request: NextRequest) {
   }
 
   const { cron, count } = parsed.data;
-  const timezone = parsed.data.timezone ?? (await getSetting("timezone")) ?? "UTC";
+  // The zone the scheduler will really use: a stored value that no longer
+  // resolves is read as UTC there, so the preview must say UTC too.
+  const stored = await getSetting("timezone");
+  const timezone = parsed.data.timezone ?? (stored && isValidTimeZone(stored) ? stored : "UTC");
 
   return NextResponse.json({
     description: describeCron(cron),

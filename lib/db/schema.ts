@@ -76,6 +76,19 @@ export interface ProjectsTable {
   builder_config: string;
   port: number | null;
   status: ProjectStatus;
+  /**
+   * A cron expression exactly as typed. Empty = no scheduled restart. See
+   * migration 020. Nullable in the type only, so an insert may leave it out:
+   * the column defaults to '' and every reader treats NULL the same way.
+   */
+  restart_cron: string | null;
+  /** The next due instant in UTC. Also the scheduler's claim token. */
+  restart_next_at: string | null;
+  restart_last_at: string | null;
+  /** What the last scheduled occurrence did, in the operator's words. */
+  restart_last_result: string | null;
+  /** Set by the status sweep on a stop nobody asked for; cleared by every start, stop and deploy. */
+  crashed_at: string | null;
   /** 0 | 1 */
   auto_deploy: number;
   webhook_secret: string;
@@ -239,6 +252,12 @@ export interface ServicesTable {
   type: ServiceType;
   version: string;
   status: ServiceStatus;
+  /** The same five columns as `ProjectsTable` — see migration 020. */
+  restart_cron: string | null;
+  restart_next_at: string | null;
+  restart_last_at: string | null;
+  restart_last_result: string | null;
+  crashed_at: string | null;
   port: number;
   /** AES-256-GCM ciphertext of a JSON credentials object */
   credentials: string;

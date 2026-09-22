@@ -56,7 +56,9 @@ export async function POST(request: NextRequest, { params }: Params) {
         await processManager.stop(slug, runtimeType);
         await db
           .updateTable("projects")
-          .set({ status: "stopped", updated_at: nowIso() })
+          // A stop that was asked for: not a crash, so the scheduled restart
+          // leaves the project alone.
+          .set({ status: "stopped", crashed_at: null, updated_at: nowIso() })
           .where("id", "=", projectId)
           .execute();
         break;

@@ -40,7 +40,9 @@ export async function POST(request: NextRequest, { params }: Params) {
   const setStatus = (status: "running" | "stopped") =>
     db
       .updateTable("services")
-      .set({ status, updated_at: nowIso() })
+      // Asked for, either way: not a crash, so the scheduled restart treats a
+      // stop here as a decision and a start as a clean slate.
+      .set({ status, crashed_at: null, updated_at: nowIso() })
       .where("id", "=", serviceId)
       .execute();
 

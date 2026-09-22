@@ -772,7 +772,7 @@ async function runDeploy(
       // a port — `updateProjectSchema` demands `min(1)`, so writing it made
       // every later save of the settings form answer 400. Null is what
       // "no port" already means on this column.
-      .set({ status: "running", port: port > 0 ? port : null, updated_at: nowIso() })
+      .set({ status: "running", port: port > 0 ? port : null, crashed_at: null, updated_at: nowIso() })
       .where("id", "=", project.id)
       .execute();
 

@@ -47,6 +47,11 @@ export interface Project {
    */
   pinned_sha: string | null;
   pinned_at: string | null;
+  /** The restart schedule — see migration 020. Empty cron = off. */
+  restart_cron: string;
+  restart_next_at: string | null;
+  restart_last_at: string | null;
+  restart_last_result: string | null;
   /** `owner/name` when the source is a GitHub URL, null for a ZIP or another host. */
   repo: string | null;
   /** The bind list, as rows — the server splits the `-v` strings, not the browser. */

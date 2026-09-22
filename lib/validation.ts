@@ -157,8 +157,24 @@ export const updateFolderSchema = z.object({
   name: folderNameSchema,
 });
 
+/**
+ * A restart schedule: empty switches it off, anything else has to parse.
+ * Defined here rather than reusing `cronExpressionSchema`, which is declared
+ * further down and would not exist yet when this object is built.
+ */
+export const restartCronSchema = z
+  .string()
+  .max(120)
+  .superRefine((value, ctx) => {
+    if (value === "") return;
+    const parsed = parseCron(value);
+    if (!parsed.ok) ctx.addIssue({ code: "custom", message: parsed.error });
+  });
+
 export const updateProjectSchema = z.object({
   name: z.string().min(1).max(100).optional(),
+  /** Empty means no scheduled restart. Interpreted in the panel's `timezone`. */
+  restartCron: restartCronSchema.optional(),
   appName: z.string().max(100).optional().nullable(),
   sourceType: z.enum(["github", "upload"]).optional(),
   sourceUrl: repoUrlSchema.optional().nullable(),
@@ -657,6 +673,8 @@ export const envKeySchema = z
 export const updateServiceSchema = z.object({
   projectId: z.string().min(1).max(32).nullable().optional(),
   injectEnv: z.boolean().optional(),
+  /** Empty means no scheduled restart. Interpreted in the panel's `timezone`. */
+  restartCron: restartCronSchema.optional(),
   envKey: envKeySchema.nullable().optional(),
   access: accessSchema.optional(),
   /**

@@ -123,7 +123,7 @@ export async function restartFromLastDeployment(
 
   await db
     .updateTable("projects")
-    .set({ status: "running", updated_at: nowIso() })
+    .set({ status: "running", crashed_at: null, updated_at: nowIso() })
     .where("id", "=", projectId)
     .execute();
 

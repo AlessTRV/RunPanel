@@ -21,6 +21,7 @@ import { parseContractJson } from "@/lib/deploy-contract";
 import { AccessRow, readAccess, reportGate, syncGate } from "@/services/access";
 import { allocateLoopbackPort, closeGate } from "@/services/access-gate";
 import { folderExists } from "@/services/folders";
+import { restartScheduleColumns } from "@/services/restart-scheduler";
 import { ServicesTable } from "@/lib/db/schema";
 
 type Params = { params: Promise<{ serviceId: string }> };
@@ -152,7 +153,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     return NextResponse.json({ error: "Servizio non trovato" }, { status: 404 });
   }
 
-  const { projectId, injectEnv, envKey, access, folderId } = parsed.data;
+  const { projectId, injectEnv, envKey, access, folderId, restartCron } = parsed.data;
   const detaching = projectId === null && service.project_id !== null;
   const attaching = typeof projectId === "string" && projectId !== service.project_id;
 
@@ -173,6 +174,8 @@ export async function PATCH(request: NextRequest, { params }: Params) {
         ? 1
         : 0;
   const nextEnvKey = envKey === undefined ? service.env_key : envKey;
+  // The next occurrence is computed on save, so the page can show it at once.
+  const restartColumns = restartCron === undefined ? {} : await restartScheduleColumns(restartCron);
 
   // Two links in one project cannot answer to the same variable. Checked before
   // anything is written, so a rejected request changes nothing.
@@ -291,6 +294,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       project_id: nextProjectId,
       inject_env: nextInject,
       env_key: nextEnvKey,
+      ...restartColumns,
       access_mode: nextAccess.access_mode,
       access_allow: nextAccess.access_allow,
       access_port: nextAccess.access_port,

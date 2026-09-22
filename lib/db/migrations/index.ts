@@ -18,6 +18,7 @@ import * as oneTimeCommands from "./016-one-time-commands";
 import * as deploymentContract from "./017-deployment-contract";
 import * as dropContainerId from "./018-drop-container-id";
 import * as folders from "./019-folders";
+import * as scheduledRestart from "./020-scheduled-restart";
 
 /**
  * Migrations are registered statically rather than read from disk with
@@ -46,6 +47,7 @@ export const migrations: Record<string, Migration> = {
   "017-deployment-contract": deploymentContract,
   "018-drop-container-id": dropContainerId,
   "019-folders": folders,
+  "020-scheduled-restart": scheduledRestart,
 };
 
 export class StaticMigrationProvider implements MigrationProvider {

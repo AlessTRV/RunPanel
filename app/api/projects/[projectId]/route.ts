@@ -16,6 +16,7 @@ import { restartFromLastDeployment } from "@/services/project-restart";
 import { getPreset } from "@/services/deploy-presets";
 import { queuedForProject } from "@/services/one-time-commands";
 import { folderExists } from "@/services/folders";
+import { restartScheduleColumns } from "@/services/restart-scheduler";
 import { processManager } from "@/services/process-manager";
 import { removeService } from "@/services/service-provisioner";
 import { disconnectFromNetwork, removeProjectNetwork } from "@/services/docker-network";
@@ -117,7 +118,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     return NextResponse.json({ error: "Progetto non trovato" }, { status: 404 });
   }
 
-  const { name, appName, sourceType, sourceUrl, sourceBranch, runtimeType, port, autoDeploy, deployTrigger, builderConfig, presetId, access, folderId } =
+  const { name, appName, sourceType, sourceUrl, sourceBranch, runtimeType, port, autoDeploy, deployTrigger, builderConfig, presetId, access, folderId, restartCron } =
     parsed.data;
 
   // Checked before anything is written, so a move to a folder that is not
@@ -159,6 +160,11 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   if (runtimeType !== undefined && runtimeType !== null) updates.runtime_type = runtimeType;
   if (port !== undefined) updates.port = port;
   if (autoDeploy !== undefined) updates.auto_deploy = autoDeploy ? 1 : 0;
+  if (restartCron !== undefined) {
+    // The next occurrence is computed on save, so the page can show it at
+    // once and the first tick cannot mistake a fresh schedule for a missed one.
+    Object.assign(updates, await restartScheduleColumns(restartCron));
+  }
 
   if (deployTrigger !== undefined) {
     updates.deploy_trigger = deployTrigger;

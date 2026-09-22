@@ -20,6 +20,11 @@ export interface Service {
   credentials: string;
   project_id: string | null;
   created_at: string;
+  /** The restart schedule — see migration 020. Empty cron = off. */
+  restart_cron: string;
+  restart_next_at: string | null;
+  restart_last_at: string | null;
+  restart_last_result: string | null;
   /** Resolved server-side, from the service template and the owning project. */
   containerName: string;
   internalPort: number;

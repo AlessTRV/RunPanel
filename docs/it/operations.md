@@ -35,6 +35,41 @@ era più su da prima. Il controllo non avvia e non ferma niente, e per dichiarar
 fermo qualcosa che risultava avviato aspetta due letture d'accordo, così un
 `pm2` che non risponde per un istante non tinge di rosso l'intero pannello.
 
+## Riavvio programmato
+
+Ogni progetto e ogni servizio può essere riavviato a orari fissi: la sezione
+**Riavvio programmato** sta nelle Impostazioni del progetto e nella pagina del
+servizio. Si sceglie un intervallo pronto (ogni notte alle 04:00, ogni domenica,
+ogni 6 ore, ogni ora) oppure si scrive un'espressione cron a cinque campi, con
+l'anteprima dei prossimi tre riavvii calcolata dallo stesso parser che poi li
+esegue.
+
+L'ora è quella del **fuso orario del pannello**, che si imposta in
+**Impostazioni** ed è lo stesso dei backup. Finché non lo salvi il pannello usa
+UTC, e la pagina lo dice invece di mostrare il fuso del browser come se fosse già
+impostato. Un fuso sconosciuto viene rifiutato al salvataggio. Cambiarlo
+ricalcola subito i riavvii in attesa, così una pianificazione notturna non scatta
+un'ultima volta all'ora vecchia.
+
+Al momento stabilito il pannello decide così:
+
+- **In esecuzione**: lo riavvia. Un progetto riparte dall'ultimo deploy riuscito,
+  con le variabili dei servizi collegati iniettate come in un deploy.
+- **Fermato da te**: lo lascia fermo. Una pianificazione non scavalca una tua
+  decisione.
+- **Caduto da solo**: fa **un solo tentativo** di rimetterlo in piedi. Se non ci
+  riesce lascia perdere, e ci riprova solo se torna su e cade di nuovo. A
+  distinguere un crash da uno stop è il controllo di stato periodico: segna il
+  crash quando scopre che qualcosa si è fermato senza che il pannello lo avesse
+  fermato, e ogni avvio, stop o deploy lo cancella.
+- **Deploy in corso** o **ultimo deploy fallito**: lo salta.
+
+Sotto la pianificazione la pagina mostra l'ultima occorrenza e cosa ha fatto,
+per esempio «Riavviato» o «Saltato: fermato a mano». Un riavvio perso mentre il
+pannello era spento non viene recuperato: il momento giusto è il prossimo. Se le
+notifiche Telegram sono attive arriva un messaggio per ogni riavvio eseguito o
+fallito, non per i salti.
+
 ## Aggiornare il pannello
 
 RunPanel si installa clonandolo, quindi la cartella da cui gira è un working tree
@@ -107,6 +142,7 @@ questa pagina: lo schermo sa solo se ce n'è uno.
 | Evento | Quando |
 |---|---|
 | **Progetto o servizio fermo** | Il processo non c'è più e non è stato il pannello a fermarlo |
+| **Riavvio programmato** | Un riavvio a orario fisso è stato eseguito, o il tentativo dopo un crash è fallito |
 | **Docker non risponde** | Il daemon è irraggiungibile, e di nuovo quando torna |
 | **Deploy concluso** | Sempre per i deploy automatici; per quelli manuali solo se falliscono |
 | **Backup concluso** | Riuscito, parziale o fallito, con artefatti, dimensione e durata |

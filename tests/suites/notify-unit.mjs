@@ -71,6 +71,10 @@ export async function run({ repoRoot }) {
   const catalogue = (p) => [
     { key: "project.crashed", slug: p, runtime: p },
     { key: "service.crashed", name: p, container: p },
+    // Both branches: the failed one carries the error text, which comes from
+    // a driver and is exactly the kind of string nobody escaped.
+    { key: "restart.scheduled", kind: "project", name: p, outcome: p, ok: true },
+    { key: "restart.scheduled", kind: "service", name: p, outcome: p, ok: false },
     { key: "docker.down", up: false, detail: p },
     { key: "docker.down", up: true },
     {

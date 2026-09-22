@@ -2,10 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSession, getAdminPasswordHash, verifyPassword, setAdminPassword, createSession, destroyAllSessions } from "@/lib/auth";
 import { encrypt } from "@/lib/crypto";
 import { z } from "zod";
-import { getAllSettings, setSetting } from "@/lib/settings";
+import { getAllSettings, getSetting, setSetting } from "@/lib/settings";
+import { isValidTimeZone } from "@/lib/cron";
+import { rescheduleRestarts } from "@/services/restart-scheduler";
 import { ACCENT_PRESETS, ACCENT_SETTING_KEY } from "@/lib/themes";
 import { PANEL_PUBLIC_URL_SETTING } from "@/lib/panel-url";
-import { panelPublicUrlSchema } from "@/lib/validation";
+import { panelPublicUrlSchema, timeZoneSchema } from "@/lib/validation";
 import { PANEL_UPDATE_INTERVALS, POLL_INTERVALS } from "@/lib/polling";
 import {
   PANEL_UPDATE_ALLOWED_SIGNERS_SETTING,
@@ -24,7 +26,12 @@ const PRESENCE_ONLY_SETTINGS = new Set(["github_token"]);
 const preferencesSchema = z
   .object({
     polling_interval: z.enum(["2", "5", "10"]).optional(),
-    timezone: z.string().max(64).optional(),
+    /**
+     * The zone every schedule is read in — backups and restarts. Checked by
+     * the runtime that will use it: an unknown zone used to be stored as typed
+     * and then read as UTC by the schedulers, without a word.
+     */
+    timezone: timeZoneSchema.optional(),
     [ACCENT_SETTING_KEY]: z
       .enum(ACCENT_PRESETS.map((p) => p.id) as [string, ...string[]])
       .optional(),
@@ -98,6 +105,13 @@ export async function GET() {
     settings[key] = PRESENCE_ONLY_SETTINGS.has(key) ? (value ? "configured" : "") : value;
   }
 
+  // The zone the schedulers actually use, which is not always the one stored:
+  // nothing saved, or a value saved before it was validated, both mean UTC.
+  // The settings page used to prefill the browser's own zone into an unsaved
+  // field, so it looked set while every schedule ran in UTC.
+  const storedZone = all.timezone;
+  settings.timezone_effective = storedZone && isValidTimeZone(storedZone) ? storedZone : "UTC";
+
   return NextResponse.json(settings, { headers: { "Cache-Control": "no-store" } });
 }
 
@@ -165,8 +179,15 @@ export async function PUT(request: NextRequest) {
 
     // An allowlist rather than "any string that is not a secret": otherwise a
     // preferences payload can write arbitrary keys into the settings table.
+    const previousZone = parsed.data.timezone !== undefined ? await getSetting("timezone") : null;
     for (const [key, value] of Object.entries(parsed.data)) {
       if (value !== undefined) await setSetting(key, value);
+    }
+
+    // A pending restart was computed in the old zone. Left alone it would fire
+    // at the old wall-clock time once more before the new zone took effect.
+    if (parsed.data.timezone !== undefined && parsed.data.timezone !== previousZone) {
+      await rescheduleRestarts();
     }
     return NextResponse.json({ success: true });
   }

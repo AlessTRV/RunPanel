@@ -109,6 +109,11 @@ export async function register() {
   const { startBackupScheduler } = await import("./services/backup/scheduler");
   startBackupScheduler();
 
+  // Scheduled restarts, per project and per service. Same shape as the backup
+  // scheduler; a schedule missed while the panel was down is not caught up.
+  const { startRestartScheduler } = await import("./services/restart-scheduler");
+  startRestartScheduler();
+
   // Auto-deploy for the projects that ask GitHub instead of waiting to be told.
   // Nothing to reconcile at boot: the poller reads the branch on its first tick
   // and compares, so a push made while the panel was down is picked up then.

@@ -11,6 +11,7 @@
 export const NOTIFY_EVENTS = [
   "project.crashed",
   "service.crashed",
+  "restart.scheduled",
   "docker.down",
   "disk.low",
   "deploy.finished",
@@ -48,6 +49,12 @@ export const NOTIFY_GROUPS: NotifyEventGroup[] = [
         key: "service.crashed",
         label: "Un servizio si è fermato da solo",
         description: "Stessa cosa per un container di database.",
+      },
+      {
+        key: "restart.scheduled",
+        label: "Riavvio programmato",
+        description:
+          "Quando un riavvio a orario fisso riavvia un progetto o un servizio, o ci prova dopo un crash e non ci riesce. I salti non vengono notificati.",
       },
       {
         key: "docker.down",
@@ -113,6 +120,7 @@ export const NOTIFY_GROUPS: NotifyEventGroup[] = [
 export const DEFAULT_NOTIFY_EVENTS: NotifyEventKey[] = [
   "project.crashed",
   "service.crashed",
+  "restart.scheduled",
   "docker.down",
   "disk.low",
   "deploy.finished",

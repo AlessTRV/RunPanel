@@ -138,7 +138,12 @@ async function runSweep(): Promise<ReconcileStatusResult> {
 
     const updated = await db
       .updateTable("projects")
-      .set({ status: next, updated_at: nowIso() })
+      // `crashed_at` is what tells a crash from a decision downstream: the
+      // scheduled restart skips a target somebody stopped and gives one
+      // attempt to a target that went away by itself. Cleared on the way back
+      // up, so a target Docker's own restart policy revived is not treated as
+      // crashed at the next scheduled occurrence.
+      .set({ status: next, crashed_at: next === "stopped" ? nowIso() : null, updated_at: nowIso() })
       .where("id", "=", project.id)
       // Only if nothing has moved the row since it was read. A deploy that
       // started while the drivers were being asked has already written
@@ -181,7 +186,12 @@ async function runSweep(): Promise<ReconcileStatusResult> {
 
       const updated = await db
         .updateTable("services")
-        .set({ status: next, updated_at: nowIso() })
+        // `crashed_at` is what tells a crash from a decision downstream: the
+      // scheduled restart skips a target somebody stopped and gives one
+      // attempt to a target that went away by itself. Cleared on the way back
+      // up, so a target Docker's own restart policy revived is not treated as
+      // crashed at the next scheduled occurrence.
+      .set({ status: next, crashed_at: next === "stopped" ? nowIso() : null, updated_at: nowIso() })
         .where("id", "=", service.id)
         .where("status", "=", service.status)
         .executeTakeFirst();

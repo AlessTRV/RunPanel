@@ -95,6 +95,10 @@ function cooldownKey(event: NotifyEvent): string {
       return `${event.key}:${event.slug}`;
     case "service.crashed":
       return `${event.key}:${event.name}`;
+    case "restart.scheduled":
+      // Never suppressed: a schedule fires at most once per occurrence, and
+      // two occurrences minutes apart are two things that happened.
+      return "";
     case "docker.down":
     case "disk.low":
       return `${event.key}:${event.up ? "up" : "down"}`;

@@ -17,6 +17,7 @@ import { PageSkeleton } from "@/components/ui/Skeletons";
 import { Tabs, type TabItem } from "@/components/ui/Tabs";
 import type { LogLine } from "@/components/ui/LogViewer";
 import { StatusBadge } from "@/components/StatusBadge";
+import { ScheduledRestart } from "@/components/ScheduledRestart";
 import { serviceLabel } from "@/lib/service-env";
 import { cn } from "@/lib/utils";
 import { ConnectionPanel } from "./_components/ConnectionPanel";
@@ -307,6 +308,17 @@ export default function ServiceDetailPage() {
               onReveal={revealCredentials}
               onSaved={refresh}
             />
+            <div className="mt-4">
+              <ScheduledRestart
+                kind="service"
+                id={service.id}
+                cron={service.restart_cron ?? ""}
+                nextAt={service.restart_next_at}
+                lastAt={service.restart_last_at}
+                lastResult={service.restart_last_result}
+                onSaved={() => void refresh()}
+              />
+            </div>
           </div>
 
           <div className={section("data")}>

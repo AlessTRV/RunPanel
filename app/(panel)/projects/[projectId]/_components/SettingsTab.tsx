@@ -17,6 +17,7 @@ import { Code, FieldHint } from "@/components/ui/Hint";
 import { CommandField } from "@/components/ui/CommandField";
 import { EnvFilePathHint, HealthcheckHint, PortHint } from "@/components/DeployHints";
 import { AccessSection } from "@/components/AccessSection";
+import { ScheduledRestart } from "@/components/ScheduledRestart";
 import { LinkedServiceDelete, type LinkedServiceRow } from "./LinkedServiceDelete";
 import { MountsSection } from "./MountsSection";
 import { OneTimeCommandsSection } from "./OneTimeCommandsSection";
@@ -577,6 +578,21 @@ export function SettingsTab({
         access={project.access}
         gate={project.gate}
         unavailable={accessUnavailable}
+        onSaved={(updated) => onProjectChange({ ...project, ...(updated as Partial<Project>) })}
+      />
+
+      {/*
+        Saved on its own, like the access section above, rather than through the
+        sticky bar: a schedule is one decision with its own preview, and holding
+        it hostage to an unrelated unsaved port change would be a surprise.
+      */}
+      <ScheduledRestart
+        kind="project"
+        id={project.id}
+        cron={project.restart_cron ?? ""}
+        nextAt={project.restart_next_at}
+        lastAt={project.restart_last_at}
+        lastResult={project.restart_last_result}
         onSaved={(updated) => onProjectChange({ ...project, ...(updated as Partial<Project>) })}
       />
 

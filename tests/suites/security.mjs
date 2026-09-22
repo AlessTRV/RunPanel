@@ -216,11 +216,19 @@ export async function run({ base }) {
 
   // --- settings are an allowlist -------------------------------------------
   const settings = await owner.call("/api/settings");
+  // `timezone_effective` is not a row of the store but a value derived from
+  // `timezone`: the zone the schedulers really use, which the settings page
+  // must show because an unsaved or invalid one silently means UTC.
   const leaked = Object.keys(settings.body).filter(
     (key) =>
-      !["polling_interval", "timezone", "accent_preset", "github_token", "panel_public_url"].includes(
-        key
-      )
+      ![
+        "polling_interval",
+        "timezone",
+        "timezone_effective",
+        "accent_preset",
+        "github_token",
+        "panel_public_url",
+      ].includes(key)
   );
   r.check("settings returns only the keys a client needs", leaked.length === 0, leaked.join(","));
   r.check(
