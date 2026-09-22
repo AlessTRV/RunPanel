@@ -8,6 +8,13 @@
  * letting a test loose on a machine full of somebody else's containers.
  */
 
+import crypto from "crypto";
+import fs from "fs";
+import { Transform } from "stream";
+import { pipeline } from "stream/promises";
+import { createGzip } from "zlib";
+import type { PreBackupCommand, VolumeConsistency } from "../../lib/backup-settings";
+
 export const COMPOSE_PROJECT_LABEL = "com.docker.compose.project";
 export const COMPOSE_VOLUME_LABEL = "com.docker.compose.volume";
 export const COMPOSE_SERVICE_LABEL = "com.docker.compose.service";
@@ -212,8 +219,376 @@ export async function volumeUsers(
   return users;
 }
 
+/** The services of the project's Compose stack, from the containers that exist. */
+export async function stackServices(cli: DockerCli, owner: ProjectOwner): Promise<string[]> {
+  const listed = await cli.run([
+    "ps", "-a", "-q", "--no-trunc", "--filter", `label=${COMPOSE_PROJECT_LABEL}=${owner.composeProject}`,
+  ]);
+  const services = new Set<string>();
+  for (const container of await inspectContainers(cli, splitLines(listed.stdout), owner)) {
+    if (container.composeProject === owner.composeProject && container.composeService) {
+      services.add(container.composeService);
+    }
+  }
+  return [...services].sort();
+}
+
 /** States in which a container can still touch its volumes. */
 const ACTIVE_STATES = new Set(["running", "paused", "restarting"]);
+
+function messageOf(err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err);
+  return message.length > 500 ? `${message.slice(0, 500)}…` : message;
+}
+
+function seconds(ms: number): string {
+  return `${(ms / 1000).toFixed(1).replace(".", ",")} s`;
+}
+
+function megabytes(bytes: number): string {
+  return bytes >= 1024 ** 3
+    ? `${(bytes / 1024 ** 3).toFixed(1).replace(".", ",")} GB`
+    : `${Math.round(bytes / 1024 ** 2)} MB`;
+}
+
+// --- The command run before the copy --------------------------------------------
+
+export interface PreBackupOutcome {
+  service: string;
+  container: string | null;
+  ok: boolean;
+  ms: number;
+  error?: string;
+}
+
+/**
+ * The project's own way of making its data safe to copy — an SQLite
+ * `.backup`, a `pg_dump` into the volume, a flush — run in one service of its
+ * stack. It never throws: whether a failure is fatal depends on whether the
+ * writers are going to be paused anyway, which is the caller's to decide.
+ */
+export async function runPreBackup(
+  cli: DockerCli,
+  owner: ProjectOwner,
+  hook: PreBackupCommand,
+  log: (line: string) => void
+): Promise<PreBackupOutcome> {
+  const started = Date.now();
+  let container: string | null = null;
+  try {
+    const listed = await cli.run([
+      "ps", "-q", "--no-trunc",
+      "--filter", `label=${COMPOSE_PROJECT_LABEL}=${owner.composeProject}`,
+      "--filter", `label=${COMPOSE_SERVICE_LABEL}=${hook.service}`,
+    ]);
+    const target = (await inspectContainers(cli, splitLines(listed.stdout), owner)).find(
+      (info) =>
+        info.composeProject === owner.composeProject &&
+        info.composeService === hook.service &&
+        info.state === "running"
+    );
+    if (!target) throw new Error(`il servizio "${hook.service}" dello stack non è in esecuzione`);
+    container = target.name;
+
+    log(`  comando pre-backup in ${target.name}…`);
+    const result = await cli.run(["exec", target.id, "sh", "-c", hook.command], {
+      timeout: hook.timeoutSec * 1000,
+    });
+    for (const line of splitLines(`${result.stdout}\n${result.stderr}`).slice(-20)) log(`    ${line}`);
+
+    const ms = Date.now() - started;
+    log(`  comando pre-backup completato in ${seconds(ms)}`);
+    return { service: hook.service, container, ok: true, ms };
+  } catch (err) {
+    const error = messageOf(err);
+    log(`  comando pre-backup fallito: ${error}`);
+    return { service: hook.service, container, ok: false, ms: Date.now() - started, error };
+  }
+}
+
+/**
+ * Whether a failed pre-backup command stops the copy, and why.
+ *
+ * Only when nothing else would make it consistent: with the writers paused the
+ * copy is still the state a power cut would have left, which is what SQLite and
+ * Postgres recover from. With a live copy the command was the only guarantee,
+ * and a copy that merely looks fine is the outcome this exists to prevent.
+ */
+export function preBackupBlocks(
+  outcome: PreBackupOutcome | null,
+  consistency: VolumeConsistency
+): string | null {
+  if (!outcome || outcome.ok || consistency === "pause") return null;
+  return (
+    `Il comando pre-backup è fallito (${outcome.error ?? "motivo sconosciuto"}) e il progetto chiede la ` +
+    "copia a caldo: la copia sarebbe incoerente, il volume non è stato salvato"
+  );
+}
+
+// --- Copying ------------------------------------------------------------------------
+
+/**
+ * Where the ids of paused containers are written down, so a panel that dies
+ * mid-copy does not leave an application frozen: the next boot unpauses them.
+ */
+export interface PauseJournal {
+  /** Before anything is paused, with everything about to be. */
+  record(ids: string[]): void;
+  /** Once the copy is over, with whatever could not be resumed. */
+  settle(stillPaused: string[]): void;
+}
+
+export interface ExportRequest {
+  volume: string;
+  owner: ProjectOwner;
+  image: string;
+  consistency: VolumeConsistency;
+  /** Where the finished `.tar.gz` is written. */
+  destination: string;
+  /** The uncompressed copy taken while the writers are paused; removed afterwards. */
+  scratch: string;
+  /** Free bytes on the disk `scratch` is on, or null when that cannot be asked. */
+  freeBytes: () => number | null;
+  /** Never eaten into by the uncompressed copy. */
+  reserveBytes: number;
+  /** A pause that lasts longer is ended, and the copy with it. */
+  pauseLimitMs: number;
+  journal: PauseJournal;
+  log: (line: string) => void;
+  signal?: AbortSignal;
+}
+
+export interface ConsistencyReport {
+  /** What was asked for. */
+  mode: VolumeConsistency;
+  /**
+   * What the copy is: `paused` — every writer was frozen; `idle` — nothing
+   * was writing; `live` — something may have been writing during the copy.
+   */
+  result: "paused" | "idle" | "live";
+  paused: string[];
+  pausedMs: number | null;
+  /** Writers left running, and why. */
+  notPaused: { name: string; reason: string }[];
+  /** `snapshot`: raw to disk while paused, compressed after; `stream`: compressed as it is read. */
+  method: "snapshot" | "stream";
+}
+
+export interface ExportResult {
+  bytes: number;
+  rawBytes: number;
+  sha256: string;
+  estimatedBytes: number | null;
+  consistency: ConsistencyReport;
+}
+
+/** Headroom on top of the estimate, for what is written while the copy is being planned. */
+const SNAPSHOT_MARGIN = 1.1;
+
+function tarArgs(volume: string, image: string): string[] {
+  return [
+    "run", "--rm",
+    // Read-only, so taking a backup can never write into the volume.
+    "-v", `${volume}:/from:ro`,
+    "-w", "/from",
+    image,
+    "tar", "-cf", "-", ".",
+  ];
+}
+
+/** `du -sk`, through the same helper. Null when it cannot be told. */
+async function estimateBytes(cli: DockerCli, volume: string, image: string): Promise<number | null> {
+  try {
+    const result = await cli.run(
+      ["run", "--rm", "-v", `${volume}:/from:ro`, image, "du", "-sk", "/from"],
+      { timeout: 120_000 }
+    );
+    const kb = Number.parseInt(result.stdout.trim().split(/\s+/)[0] ?? "", 10);
+    return Number.isFinite(kb) ? kb * 1024 : null;
+  } catch {
+    return null;
+  }
+}
+
+async function gzipFile(source: string, destination: string): Promise<{ bytes: number; sha256: string }> {
+  const hash = crypto.createHash("sha256");
+  let bytes = 0;
+  const digest = new Transform({
+    transform(chunk: Buffer, _encoding, callback) {
+      hash.update(chunk);
+      bytes += chunk.length;
+      callback(null, chunk);
+    },
+  });
+  await pipeline(
+    fs.createReadStream(source),
+    createGzip(),
+    digest,
+    fs.createWriteStream(destination, { mode: 0o600 })
+  );
+  return { bytes, sha256: hash.digest("hex") };
+}
+
+/**
+ * A volume, copied so that the copy can be trusted.
+ *
+ * A tar taken while an application writes can hold a database file from one
+ * instant and its write-ahead log from another: a copy that restores without
+ * complaint and then fails — or worse, does not fail. So the containers of this
+ * project that have the volume mounted read-write are frozen for as long as the
+ * copy reads, and only them: a read-only mount cannot tear anything, and
+ * another project's container is never paused on this one's behalf — it is
+ * reported instead, and the copy is marked `live`.
+ *
+ * The pause is kept as short as the disk allows. While the writers are frozen
+ * the tar goes to disk uncompressed, which is as fast as the volume can be
+ * read; compressing it, which is the slow part, happens after they are running
+ * again. Only when the disk has no room for that copy is it compressed while
+ * they wait, and the log says so.
+ */
+export async function exportVolume(cli: DockerCli, request: ExportRequest): Promise<ExportResult> {
+  const { volume, owner, log } = request;
+
+  const users = await volumeUsers(cli, volume, owner);
+  const writers = users.filter((user) => user.rw && ACTIVE_STATES.has(user.state));
+  const notPaused: { name: string; reason: string }[] = [];
+
+  let pausable: VolumeUser[] = [];
+  if (request.consistency === "pause") {
+    for (const writer of writers) {
+      if (!writer.owned) notPaused.push({ name: writer.name, reason: "non è di questo progetto" });
+      else if (writer.state === "restarting") notPaused.push({ name: writer.name, reason: "si sta riavviando" });
+    }
+    // One already paused by somebody else is not writing, and is not ours to resume.
+    pausable = writers.filter((writer) => writer.owned && writer.state === "running");
+  }
+
+  const report: ConsistencyReport = {
+    mode: request.consistency,
+    result: "idle",
+    paused: [],
+    pausedMs: null,
+    notPaused,
+    method: "stream",
+  };
+
+  // --- nothing to pause --------------------------------------------------------------
+  if (pausable.length === 0) {
+    const running = writers.filter((writer) => writer.state !== "paused");
+    if (request.consistency === "live" && running.length > 0) {
+      report.result = "live";
+      log(
+        `  ATTENZIONE: copia a caldo, come chiede il progetto, con ${running.map((w) => w.name).join(", ")} ` +
+          "in scrittura: la copia può essere incoerente"
+      );
+    } else if (notPaused.length > 0) {
+      report.result = "live";
+      for (const entry of notPaused) {
+        log(`  ATTENZIONE: ${entry.name} scrive nel volume e ${entry.reason}: la copia può essere incoerente`);
+      }
+    } else {
+      log("  nessun container sta scrivendo nel volume: copia senza pausa");
+    }
+
+    const result = await cli.toFile(tarArgs(volume, request.image), request.destination, {
+      compress: true,
+      signal: request.signal,
+      onStderr: (line) => log(`  ${line}`),
+    });
+    return { ...result, estimatedBytes: null, consistency: report };
+  }
+
+  // --- pausing -----------------------------------------------------------------------
+  const estimate = await estimateBytes(cli, volume, request.image);
+  const free = request.freeBytes();
+  const room = free === null ? null : free - request.reserveBytes;
+  const snapshot = estimate !== null && room !== null && estimate * SNAPSHOT_MARGIN < room;
+  report.method = snapshot ? "snapshot" : "stream";
+
+  if (!snapshot) {
+    log(
+      estimate === null || room === null
+        ? "  non riesco a stimare lo spazio per la copia rapida: comprimo durante la pausa, che durerà di più"
+        : `  spazio insufficiente per la copia rapida (servono ~${megabytes(estimate)}, disponibili ` +
+            `${megabytes(Math.max(room, 0))} oltre la riserva): comprimo durante la pausa, che durerà di più`
+    );
+  }
+
+  // A timer of its own rather than `AbortSignal.timeout`, whose timer does not
+  // hold the process open: with nothing else pending the limit would never fire.
+  const limit = new AbortController();
+  const limitTimer = setTimeout(() => limit.abort(), request.pauseLimitMs);
+  const signal = request.signal ? AbortSignal.any([request.signal, limit.signal]) : limit.signal;
+
+  request.journal.record(pausable.map((writer) => writer.id));
+  const paused: VolumeUser[] = [];
+  const started = Date.now();
+  let copied: { bytes: number; rawBytes: number; sha256: string };
+
+  try {
+    for (const writer of pausable) {
+      try {
+        await cli.run(["pause", writer.id], { timeout: 30_000 });
+        paused.push(writer);
+      } catch (err) {
+        notPaused.push({ name: writer.name, reason: `la pausa non è riuscita (${messageOf(err)})` });
+      }
+    }
+    report.paused = paused.map((writer) => writer.name);
+    if (paused.length > 0) log(`  in pausa: ${report.paused.join(", ")}`);
+    for (const entry of notPaused) {
+      log(`  ATTENZIONE: ${entry.name} scrive nel volume e ${entry.reason}: la copia può essere incoerente`);
+    }
+
+    try {
+      copied = await cli.toFile(
+        tarArgs(volume, request.image),
+        snapshot ? request.scratch : request.destination,
+        { compress: !snapshot, signal, onStderr: (line) => log(`  ${line}`) }
+      );
+    } catch (err) {
+      if (limit.signal.aborted && !request.signal?.aborted) {
+        throw new Error(
+          `La copia ha superato il limite di ${Math.round(request.pauseLimitMs / 60_000)} minuti di pausa ed è ` +
+            "stata interrotta; i container sono stati ripresi. Escludi le cartelle che non servono, o usa un " +
+            "comando pre-backup con la copia a caldo."
+        );
+      }
+      throw err;
+    }
+  } finally {
+    clearTimeout(limitTimer);
+    const stillPaused: string[] = [];
+    for (const writer of paused) {
+      try {
+        await cli.run(["unpause", writer.id], { timeout: 30_000 });
+      } catch (err) {
+        stillPaused.push(writer.id);
+        log(`  ERRORE: non riesco a riprendere ${writer.name}: ${messageOf(err)}`);
+      }
+    }
+    request.journal.settle(stillPaused);
+    report.pausedMs = Date.now() - started;
+    if (paused.length > 0) {
+      log(
+        stillPaused.length === 0
+          ? `  ripresi dopo ${seconds(report.pausedMs)} di pausa`
+          : `  ${paused.length - stillPaused.length} ripresi su ${paused.length}: RunPanel riproverà al prossimo avvio`
+      );
+    }
+  }
+
+  report.result = notPaused.length > 0 || paused.length === 0 ? "live" : "paused";
+
+  if (!snapshot) return { ...copied, estimatedBytes: estimate, consistency: report };
+
+  try {
+    const compressed = await gzipFile(request.scratch, request.destination);
+    return { ...compressed, rawBytes: copied.rawBytes, estimatedBytes: estimate, consistency: report };
+  } finally {
+    fs.rmSync(request.scratch, { force: true });
+  }
+}
 
 // --- Restoring ---------------------------------------------------------------------
 

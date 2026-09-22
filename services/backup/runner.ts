@@ -1,6 +1,5 @@
 import fs from "fs";
 import path from "path";
-import { config } from "@/lib/config";
 import { getDb, nowIso } from "@/lib/db";
 import type {
   BackupArtifactStatus,
@@ -18,7 +17,16 @@ import { writeArchive } from "./archive";
 import { loadDestination } from "./destinations";
 import { DumpSkipped, dumpServiceDatabase } from "./dumpers";
 import { dumpPanelStore } from "./panel-store";
-import { archiveFileName, backupLog, clearStaging, relativeArchivePath, stagingDir } from "./paths";
+import {
+  FREE_SPACE_RESERVE,
+  archiveFileName,
+  backupLog,
+  clearStaging,
+  freeBytes,
+  relativeArchivePath,
+  stagingDir,
+} from "./paths";
+import { resumeAbandonedPauses } from "./pause-journal";
 import {
   exportProjectConfig,
   exportProjectRepo,
@@ -86,19 +94,6 @@ export class BackupBusyError extends Error {
   }
 }
 
-/** Refuse to start rather than fill the disk and take the machine down with it. */
-const FREE_SPACE_RESERVE = 2 * 1024 * 1024 * 1024;
-
-function freeBytes(): number | null {
-  try {
-    const stat = fs.statfsSync(config.backupsDir);
-    return Number(stat.bsize) * Number(stat.bavail);
-  } catch {
-    // Not every filesystem answers. An unknown amount of space is not a reason
-    // to refuse to take a backup.
-    return null;
-  }
-}
 
 /**
  * Create the run and return as soon as its row exists, with the work still
@@ -198,6 +193,7 @@ async function execute({ runId, request, startedAt, emit, log }: ExecuteArgs): P
     stagingDir: stagingDir(runId),
     log: emit,
     signal: request.signal,
+    preBackup: new Map(),
   };
   fs.mkdirSync(ctx.stagingDir, { recursive: true });
 
@@ -212,6 +208,8 @@ async function execute({ runId, request, startedAt, emit, log }: ExecuteArgs): P
     }
 
     emit(`Backup ${runId} — ${request.policyName ?? "esecuzione manuale"}`);
+    const resumed = await resumeAbandonedPauses().catch(() => 0);
+    if (resumed > 0) emit(`Ripresi ${resumed} container rimasti in pausa da un backup interrotto`);
     if (!(await isDockerAvailable())) {
       // Recorded as a failed run, never skipped in silence: a policy that
       // quietly does nothing is worse than one that visibly fails.

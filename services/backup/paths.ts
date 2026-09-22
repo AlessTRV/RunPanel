@@ -21,6 +21,21 @@ export function assertBackupId(id: string): string {
   return id;
 }
 
+/** Refuse to start rather than fill the disk and take the machine down with it. */
+export const FREE_SPACE_RESERVE = 2 * 1024 * 1024 * 1024;
+
+/** Free bytes on the disk the backups are written to, staging included. */
+export function freeBytes(): number | null {
+  try {
+    const stat = fs.statfsSync(config.backupsDir);
+    return Number(stat.bsize) * Number(stat.bavail);
+  } catch {
+    // Not every filesystem answers. An unknown amount of space is not a reason
+    // to refuse to take a backup.
+    return null;
+  }
+}
+
 export function stagingDir(runId: string): string {
   return path.join(config.backupStagingDir, assertBackupId(runId));
 }

@@ -8,11 +8,23 @@ import { config } from "@/lib/config";
 import { getDb } from "@/lib/db";
 import type { ProjectsTable } from "@/lib/db/schema";
 import { formatBytes } from "@/lib/format";
+import { parseBackupSettings } from "@/lib/backup-settings";
 import { docker, dockerFromFile, dockerToFile, dockerTry } from "../docker/cli";
 import { composeProjectName } from "../docker/compose";
 import { LABEL_PROJECT, ownedFilters } from "../docker/labels";
+import { FREE_SPACE_RESERVE, freeBytes } from "./paths";
+import { pauseJournal } from "./pause-journal";
 import type { RunContext, StagedFile } from "./types";
-import { discoverVolumes, type DockerCli, type ProjectOwner, type ProjectVolume } from "./volume-ops";
+import {
+  discoverVolumes,
+  exportVolume,
+  preBackupBlocks,
+  runPreBackup,
+  type DockerCli,
+  type PreBackupOutcome,
+  type ProjectOwner,
+  type ProjectVolume,
+} from "./volume-ops";
 
 /**
  * A project's configuration, its repository and its volumes.
@@ -312,11 +324,38 @@ async function helperImage(fallback: string | null): Promise<string> {
 }
 
 /**
+ * A pause longer than this is ended, the copy with it, and the artifact fails.
+ * Ten minutes is several times what a volume of tens of gigabytes takes to be
+ * read into staging; past it, something is wrong, and an application frozen
+ * for longer is worse than a volume missing from one night's archive.
+ */
+const PAUSE_LIMIT_MS = 10 * 60_000;
+
+/**
+ * The project's pre-backup command, once per run: the first of its volumes
+ * runs it, the others wait for that same outcome.
+ */
+function preBackupOnce(project: ProjectsTable, ctx: RunContext): Promise<PreBackupOutcome> | null {
+  const hook = parseBackupSettings(project.backup_settings).preBackup;
+  if (!hook) return null;
+
+  ctx.preBackup ??= new Map();
+  let pending = ctx.preBackup.get(project.id);
+  if (!pending) {
+    pending = runPreBackup(backupDocker, projectOwner(project.slug), hook, ctx.log);
+    ctx.preBackup.set(project.id, pending);
+  }
+  return pending;
+}
+
+/**
  * A volume, read through a throwaway container that has it mounted read-only.
  *
  * The tar goes to stdout rather than to a bind-mounted directory: a bind mount
  * is resolved by the Docker daemon, so a panel running inside a container would
- * be handing it a path that means something entirely different there.
+ * be handing it a path that means something entirely different there. How the
+ * writers are handled while it reads — paused, or left running and said so —
+ * is `exportVolume`'s, and the project's settings choose.
  */
 export async function exportProjectVolume(
   project: ProjectsTable,
@@ -328,33 +367,43 @@ export async function exportProjectVolume(
     throw new Error(`Il volume "${volume}" non risulta di questo progetto`);
   }
 
+  const settings = parseBackupSettings(project.backup_settings);
   const image = await helperImage(null);
   const entryPath = `projects/${project.slug}/volumes/${volume}.tar.gz`;
   const destination = stage(ctx, entryPath);
 
   ctx.log(`→ ${project.slug}: volume ${volume}`);
 
-  const result = await dockerToFile(
-    [
-      "run", "--rm",
-      // Read-only, so taking a backup can never write into the volume.
-      "-v", `${volume}:/from:ro`,
-      "-w", "/from",
-      image,
-      "tar", "-cf", "-", ".",
-    ],
-    destination,
-    { compress: true, onStderr: (line) => ctx.log(`  ${line}`), signal: ctx.signal }
-  );
+  const pending = preBackupOnce(project, ctx);
+  const preBackup = pending ? await pending : null;
+  const blocked = preBackupBlocks(preBackup, settings.consistency);
+  if (blocked) throw new Error(blocked);
+  if (preBackup && !preBackup.ok) {
+    ctx.log("  proseguo con la pausa dei container: la copia resta coerente, senza quello che il comando avrebbe preparato");
+  }
 
-  const bytes = fs.statSync(destination).size;
-  ctx.log(`  ${formatBytes(bytes)}`);
+  const result = await exportVolume(backupDocker, {
+    volume,
+    owner: projectOwner(project.slug),
+    image,
+    consistency: settings.consistency,
+    destination,
+    scratch: `${destination}.raw.tar`,
+    freeBytes,
+    reserveBytes: FREE_SPACE_RESERVE,
+    pauseLimitMs: PAUSE_LIMIT_MS,
+    journal: pauseJournal(ctx.runId),
+    log: ctx.log,
+    signal: ctx.signal,
+  });
+
+  ctx.log(`  ${formatBytes(result.bytes)}`);
 
   return {
     file: {
       absolutePath: destination,
       entryPath,
-      bytes,
+      bytes: result.bytes,
       sha256: result.sha256,
       precompressed: true,
     },
@@ -368,6 +417,8 @@ export async function exportProjectVolume(
       helperImage: image,
       format: "tar-gzip",
       uncompressedBytes: result.rawBytes,
+      consistency: result.consistency,
+      preBackup,
       restoreWith: "tar -xf - dentro il volume, a container fermo",
     },
   };

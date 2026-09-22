@@ -6,6 +6,7 @@ import type {
   ProjectsTable,
   ServicesTable,
 } from "@/lib/db/schema";
+import type { PreBackupOutcome } from "./volume-ops";
 
 /** What a policy asks for. Mirrors `backupTargetSchema` in lib/validation.ts. */
 export type ProjectInclude = "config" | "volumes" | "repo";
@@ -65,6 +66,11 @@ export interface RunContext {
   /** Appended to the run log and pushed to anyone watching the stream. */
   log: (line: string) => void;
   signal?: AbortSignal;
+  /**
+   * A project's pre-backup command, run once per backup however many of its
+   * volumes there are, keyed by project id.
+   */
+  preBackup?: Map<string, Promise<PreBackupOutcome>>;
 }
 
 // --- The manifest, which is also the archive's own documentation -------------

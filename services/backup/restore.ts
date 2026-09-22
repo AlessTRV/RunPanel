@@ -601,6 +601,11 @@ async function restoreProjectConfig(
         // that has nothing to do with it.
         pinned_sha: null,
         pinned_at: null,
+        // How its volumes are backed up is configuration too. An archive from
+        // before the column existed says nothing, and the current value stays.
+        ...(payload.project.backup_settings !== undefined
+          ? { backup_settings: payload.project.backup_settings }
+          : {}),
         updated_at: nowIso(),
       })
       .where("id", "=", targetId)

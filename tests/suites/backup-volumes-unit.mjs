@@ -4,6 +4,7 @@ import { pathToFileURL } from "node:url";
 import { join } from "node:path";
 import fs from "node:fs";
 import os from "node:os";
+import { gunzipSync as zlibGunzip } from "node:zlib";
 
 /**
  * Backing up and restoring a project's volumes, against a simulated daemon.
@@ -232,6 +233,308 @@ export async function run({ repoRoot }) {
         refused = err;
       }
       r.check("a container that will not stay down stops the restore", refused !== null, String(refused?.message));
+    }
+
+    // --- export: the writers are frozen for the copy, and only for the copy ----------
+    const VOLUME = "runpanel-memebot_memebot-data";
+    const rw = [{ name: VOLUME, rw: true }];
+    const journalSpy = () => {
+      const events = [];
+      return {
+        events,
+        journal: {
+          record: (ids) => events.push(["record", [...ids]]),
+          settle: (ids) => events.push(["settle", [...ids]]),
+        },
+      };
+    };
+    let exportCount = 0;
+    const exportRequest = (docker, overrides = {}) => {
+      const n = exportCount++;
+      const spy = overrides.spy ?? journalSpy();
+      return {
+        spy,
+        request: {
+          volume: VOLUME,
+          owner,
+          image: "alpine",
+          consistency: "pause",
+          destination: join(scratch, `export-${n}.tar.gz`),
+          scratch: join(scratch, `export-${n}.raw.tar`),
+          freeBytes: () => 100 * 1024 ** 3,
+          reserveBytes: 2 * 1024 ** 3,
+          pauseLimitMs: 60_000,
+          journal: spy.journal,
+          log: say,
+          ...overrides.request,
+        },
+      };
+    };
+    const du = () => "2048\t/from";
+
+    {
+      const docker = simulatedDocker({
+        containers: [
+          stackContainer("c1", "record", rw),
+          stackContainer("c2", "viewer", [{ name: VOLUME, rw: false }]),
+          stackContainer("c3", "label", rw, "paused"),
+        ],
+        hooks: { run: du },
+      });
+      log.length = 0;
+      const { request, spy } = exportRequest(docker);
+      const result = await ops.exportVolume(docker.cli, request);
+      const copy = docker.calls.find((call) => call.args.includes("tar"));
+      const at = Object.fromEntries((copy?.users ?? []).map((u) => [u.name, u.state]));
+
+      r.check("the writer is paused while the volume is read", at["memebot-record"] === "paused", JSON.stringify(at));
+      r.check("a read-only mount is left running", at["memebot-viewer"] === "running");
+      r.check("the copy mounts the volume read-only", copy?.args.includes(`${VOLUME}:/from:ro`), copy?.args.join(" "));
+      r.check(
+        "while paused it is copied uncompressed, to the scratch file",
+        copy?.compress === false && copy?.destination === request.scratch,
+        JSON.stringify({ compress: copy?.compress, destination: copy?.destination })
+      );
+      r.check("the writer runs again afterwards", docker.container("c1").state === "running");
+      r.check(
+        "one somebody else had paused is neither paused nor resumed by the backup",
+        docker.container("c3").state === "paused" &&
+          !docker.calls.some(({ args }) => ["pause", "unpause"].includes(args[0]) && args.includes("c3"))
+      );
+      r.check(
+        "the journal is written before the pause and cleared after",
+        JSON.stringify(spy.events) === JSON.stringify([["record", ["c1"]], ["settle", []]]),
+        JSON.stringify(spy.events)
+      );
+      r.check(
+        "the archive is compressed once they are running",
+        (() => {
+          try {
+            return zlibGunzip(fs.readFileSync(request.destination)).toString() === `tar of ${VOLUME}\n`;
+          } catch {
+            return false;
+          }
+        })()
+      );
+      r.check("and the scratch copy is gone", !fs.existsSync(request.scratch));
+      r.check(
+        "the report says the copy is consistent, and who was paused",
+        result.consistency.result === "paused" &&
+          result.consistency.paused.join() === "memebot-record" &&
+          typeof result.consistency.pausedMs === "number",
+        JSON.stringify(result.consistency)
+      );
+      r.check("the log says who was paused", log.some((line) => line.includes("in pausa: memebot-record")), log.join(" | "));
+      r.check("and for how long", log.some((line) => /ripresi dopo \d+,\d s di pausa/.test(line)), log.join(" | "));
+      r.check("the backup deletes nothing", docker.destructive().length === 0, JSON.stringify(docker.destructive()));
+    }
+
+    {
+      // The copy fails halfway: the writers must come back regardless.
+      const docker = simulatedDocker({
+        containers: [stackContainer("c1", "record", rw), stackContainer("c2", "label", rw)],
+        hooks: {
+          run: du,
+          toFile: () => {
+            throw new Error("tar: read error");
+          },
+        },
+      });
+      const { request, spy } = exportRequest(docker);
+      let failed = null;
+      try {
+        await ops.exportVolume(docker.cli, request);
+      } catch (err) {
+        failed = err;
+      }
+      r.check("a failed copy is reported", String(failed?.message).includes("tar: read error"), String(failed));
+      r.check(
+        "and every writer is resumed anyway",
+        ["c1", "c2"].every((id) => docker.container(id).state === "running"),
+        docker.state.containers.map((c) => `${c.name}:${c.state}`).join(", ")
+      );
+      r.check("the journal is cleared", JSON.stringify(spy.events.at(-1)) === JSON.stringify(["settle", []]));
+    }
+
+    {
+      // A copy that runs past the limit is cut short, and the pause with it.
+      const docker = simulatedDocker({
+        containers: [stackContainer("c1", "record", rw)],
+        hooks: {
+          run: du,
+          toFile: (_args, _state, opts) =>
+            new Promise((_, reject) => opts.signal.addEventListener("abort", () => reject(new Error("killed")))),
+        },
+      });
+      const { request } = exportRequest(docker, { request: { pauseLimitMs: 50 } });
+      let failed = null;
+      try {
+        await ops.exportVolume(docker.cli, request);
+      } catch (err) {
+        failed = err;
+      }
+      r.check("a pause past its limit ends the copy", /limite/.test(String(failed?.message)), String(failed?.message));
+      r.check("and the writer is running again", docker.container("c1").state === "running");
+    }
+
+    {
+      // Not enough room for the uncompressed copy: compress while paused, and say so.
+      const docker = simulatedDocker({ containers: [stackContainer("c1", "record", rw)], hooks: { run: du } });
+      log.length = 0;
+      const { request } = exportRequest(docker, {
+        request: { freeBytes: () => 2 * 1024 ** 3 + 1024, reserveBytes: 2 * 1024 ** 3 },
+      });
+      const result = await ops.exportVolume(docker.cli, request);
+      const copy = docker.calls.find((call) => call.args.includes("tar"));
+      r.check(
+        "without room it is compressed straight into the archive",
+        copy?.compress === true && copy?.destination === request.destination && result.consistency.method === "stream"
+      );
+      r.check("still with the writer paused", copy?.users.find((u) => u.name === "memebot-record")?.state === "paused");
+      r.check("and the log says the pause will be longer", log.some((line) => line.includes("spazio insufficiente")), log.join(" | "));
+    }
+
+    {
+      // Copy while live, as the project asked: no pause, and it is said.
+      const docker = simulatedDocker({ containers: [stackContainer("c1", "record", rw)], hooks: { run: du } });
+      log.length = 0;
+      const { request } = exportRequest(docker, { request: { consistency: "live" } });
+      const result = await ops.exportVolume(docker.cli, request);
+      r.check("a live copy pauses nothing", !docker.verbs().includes("pause"));
+      r.check("and is marked live", result.consistency.result === "live", JSON.stringify(result.consistency));
+      r.check("and the log warns about it", log.some((line) => line.includes("ATTENZIONE") && line.includes("memebot-record")), log.join(" | "));
+    }
+
+    {
+      // Nothing is writing: no pause is needed, and none happens.
+      const docker = simulatedDocker({
+        containers: [stackContainer("c1", "record", rw, "exited"), stackContainer("c2", "viewer", [{ name: VOLUME, rw: false }])],
+      });
+      const { request, spy } = exportRequest(docker);
+      const result = await ops.exportVolume(docker.cli, request);
+      r.check("with no writer running, nothing is paused", !docker.verbs().includes("pause") && spy.events.length === 0);
+      r.check("and the copy is consistent", result.consistency.result === "idle", JSON.stringify(result.consistency));
+    }
+
+    {
+      // A writer that is not this project's: never paused on its behalf, and never silent.
+      const docker = simulatedDocker({
+        containers: [
+          stackContainer("c1", "record", rw),
+          { id: "c9", name: "intruder", labels: { "com.docker.compose.project": "runpanel-memebot2" }, mounts: rw },
+        ],
+        hooks: { run: du },
+      });
+      log.length = 0;
+      const { request } = exportRequest(docker);
+      const result = await ops.exportVolume(docker.cli, request);
+      r.check("another project's writer is not paused", !docker.calls.some(({ args }) => args[0] === "pause" && args.includes("c9")));
+      r.check("the project's own writer still is", docker.calls.some(({ args }) => args[0] === "pause" && args.includes("c1")));
+      r.check("the copy is marked live", result.consistency.result === "live", JSON.stringify(result.consistency));
+      r.check("and the log names the container", log.some((line) => line.includes("intruder") && line.includes("ATTENZIONE")), log.join(" | "));
+    }
+
+    {
+      // A container that cannot be resumed stays in the journal for the next boot.
+      const docker = simulatedDocker({
+        containers: [stackContainer("c1", "record", rw)],
+        hooks: {
+          run: du,
+          unpause: () => {
+            throw new Error("daemon busy");
+          },
+        },
+      });
+      log.length = 0;
+      const { request, spy } = exportRequest(docker);
+      await ops.exportVolume(docker.cli, request);
+      r.check(
+        "a container that could not be resumed stays in the journal",
+        JSON.stringify(spy.events.at(-1)) === JSON.stringify(["settle", ["c1"]]),
+        JSON.stringify(spy.events)
+      );
+      r.check("and the log says so", log.some((line) => line.startsWith("  ERRORE") && line.includes("memebot-record")));
+    }
+
+    // --- the pre-backup command ------------------------------------------------------
+    {
+      const docker = simulatedDocker({
+        containers: [
+          stackContainer("c1", "record", rw),
+          // Same service name, in a stack whose name only starts the same.
+          {
+            id: "c9",
+            name: "other-record",
+            labels: { "com.docker.compose.project": "runpanel-memebot2", "com.docker.compose.service": "record" },
+          },
+        ],
+      });
+      log.length = 0;
+      const hook = { service: "record", command: "python -m memebot snapshot", timeoutSec: 60 };
+      const outcome = await ops.runPreBackup(docker.cli, owner, hook, say);
+      const exec = docker.calls.find(({ args }) => args[0] === "exec");
+      r.check("the command runs in the stack's service", exec?.args.join(" ") === "exec c1 sh -c python -m memebot snapshot", exec?.args.join(" "));
+      r.check("and reports success", outcome.ok === true && outcome.container === "memebot-record", JSON.stringify(outcome));
+    }
+
+    {
+      const docker = simulatedDocker({
+        containers: [stackContainer("c1", "record", rw)],
+        hooks: {
+          exec: () => {
+            throw new Error("sqlite3: database is locked");
+          },
+        },
+      });
+      const outcome = await ops.runPreBackup(docker.cli, owner, { service: "record", command: "x", timeoutSec: 5 }, say);
+      r.check("a failing command is an outcome, not an exception", outcome.ok === false, JSON.stringify(outcome));
+      r.check("carrying its reason", String(outcome.error).includes("database is locked"));
+    }
+
+    {
+      const docker = simulatedDocker({ containers: [stackContainer("c1", "record", rw, "exited")] });
+      const outcome = await ops.runPreBackup(docker.cli, owner, { service: "record", command: "x", timeoutSec: 5 }, say);
+      r.check("a service that is not running fails the command", outcome.ok === false && !docker.verbs().includes("exec"));
+    }
+
+    {
+      const failed = { service: "record", container: null, ok: false, ms: 1, error: "locked" };
+      r.check(
+        "a failed command with the writers paused lets the copy go ahead",
+        ops.preBackupBlocks(failed, "pause") === null
+      );
+      r.check(
+        "with a live copy it stops it, saying why",
+        String(ops.preBackupBlocks(failed, "live")).includes("locked")
+      );
+      r.check(
+        "a command that worked never stops anything",
+        ops.preBackupBlocks({ ...failed, ok: true, error: undefined }, "live") === null
+      );
+      r.check("nor does having none", ops.preBackupBlocks(null, "live") === null);
+    }
+
+    // --- the settings, read tolerantly --------------------------------------------------
+    {
+      const { parseBackupSettings, DEFAULT_PRE_BACKUP_TIMEOUT_SEC, MAX_PRE_BACKUP_TIMEOUT_SEC } = await load(
+        "lib",
+        "backup-settings.ts"
+      );
+      r.check("no settings pause the writers", parseBackupSettings(null).consistency === "pause");
+      r.check("unreadable settings do too", parseBackupSettings("{not json").consistency === "pause");
+      r.check("an unknown mode falls back to pausing", parseBackupSettings('{"consistency":"yolo"}').consistency === "pause");
+      r.check("a live copy is kept when asked for", parseBackupSettings('{"consistency":"live"}').consistency === "live");
+      r.check(
+        "a command with a bad service name is dropped",
+        parseBackupSettings('{"preBackup":{"service":"-x","command":"true"}}').preBackup === null
+      );
+      const hook = parseBackupSettings('{"preBackup":{"service":"db","command":"pg_dump"}}').preBackup;
+      r.check("a command gets the default timeout", hook?.timeoutSec === DEFAULT_PRE_BACKUP_TIMEOUT_SEC, JSON.stringify(hook));
+      r.check(
+        "and a timeout past the maximum is capped",
+        parseBackupSettings('{"preBackup":{"service":"db","command":"pg_dump","timeoutSec":999999}}').preBackup?.timeoutSec ===
+          MAX_PRE_BACKUP_TIMEOUT_SEC
+      );
     }
 
     r.check(

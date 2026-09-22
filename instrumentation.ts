@@ -57,6 +57,16 @@ export async function register() {
     console.error("[mounts] Recovery failed:", err instanceof Error ? err.message : err);
   });
 
+  // Containers a backup paused while copying their volume, when this process
+  // died before it could resume them. Same reasoning as the line above: Docker
+  // never unpauses anything by itself, so nothing else would ever come back
+  // for an application frozen that way.
+  const { resumeAbandonedPauses } = await import("./services/backup/pause-journal");
+  const resumed = await resumeAbandonedPauses().catch(() => 0);
+  if (resumed > 0) {
+    console.log(`[backup] Ripresi ${resumed} container rimasti in pausa da un backup interrotto`);
+  }
+
   // An unclaimed panel is a panel anyone can claim, and the first person to do
   // so gets a shell on this host. Print the token the setup form has to quote,
   // so claiming it requires reading this log rather than merely arriving first.

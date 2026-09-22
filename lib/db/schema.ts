@@ -148,6 +148,11 @@ export interface ProjectsTable {
   access_port: number | null;
   /** Where the Overview files this project. NULL is the root. See migration 019. */
   folder_id: string | null;
+  /**
+   * JSON — see `ProjectBackupSettings` in lib/backup-settings.ts. NULL means
+   * every default, and is what every project created before migration 021 has.
+   */
+  backup_settings: string | null;
   created_at: string;
   updated_at: string;
 }

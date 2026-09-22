@@ -79,8 +79,11 @@ export const composeDriver: IProcessDriver = {
     if (services.length === 0) return { running: false };
 
     // A stack is up when every service is. Reporting "running" while one
-    // container is dead would hide exactly the failure worth seeing.
-    const running = services.every((s) => s.state === "running");
+    // container is dead would hide exactly the failure worth seeing. A paused
+    // one is not dead: a backup freezes the writers of a volume for the length
+    // of the copy, and the status sweep reading that as a crash would send a
+    // "stopped by itself" notification for every nightly backup.
+    const running = services.every((s) => s.state === "running" || s.state === "paused");
 
     // Resource usage is the sum across the stack, read from the stats stream.
     void containerStats.ensureStarted();
