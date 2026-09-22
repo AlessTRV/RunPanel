@@ -8,7 +8,7 @@ import { config } from "@/lib/config";
 import { getDb } from "@/lib/db";
 import type { ProjectsTable } from "@/lib/db/schema";
 import { formatBytes } from "@/lib/format";
-import { parseBackupSettings } from "@/lib/backup-settings";
+import { excludesFor, parseBackupSettings } from "@/lib/backup-settings";
 import { docker, dockerFromFile, dockerToFile, dockerTry } from "../docker/cli";
 import { composeProjectName } from "../docker/compose";
 import { LABEL_PROJECT, ownedFilters } from "../docker/labels";
@@ -387,6 +387,7 @@ export async function exportProjectVolume(
     owner: projectOwner(project.slug),
     image,
     consistency: settings.consistency,
+    excludes: excludesFor(settings, volume),
     destination,
     scratch: `${destination}.raw.tar`,
     freeBytes,
@@ -419,6 +420,10 @@ export async function exportProjectVolume(
       uncompressedBytes: result.rawBytes,
       consistency: result.consistency,
       preBackup,
+      // What a restore must leave alone: none of it is in this archive.
+      excludes: result.excluded.map((entry) => entry.path),
+      excluded: result.excluded,
+      estimatedBytes: result.estimatedBytes,
       restoreWith: "tar -xf - dentro il volume, a container fermo",
     },
   };

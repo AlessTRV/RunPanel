@@ -1,5 +1,6 @@
 import fs from "fs";
 import path from "path";
+import { normalizeExcludeList } from "@/lib/backup-settings";
 import { decrypt, encrypt } from "@/lib/crypto";
 import { config } from "@/lib/config";
 import { getDb, nowIso } from "@/lib/db";
@@ -681,7 +682,15 @@ async function restoreVolume(
   const held = await holdVolumeForRestore(backupDocker, volume, projectOwner(project.slug), emit);
   stopped.containers.push(...held.filter((id) => !stopped.containers.includes(id)));
 
-  await writeVolume(backupDocker, { volume, image: "alpine", archive: file, log: emit });
+  // Read from the artifact, not from today's settings: what matters is what
+  // this archive left out. Validated again, since it goes into a shell script.
+  const keep = normalizeExcludeList(
+    Array.isArray(artifact.meta.excludes)
+      ? artifact.meta.excludes.filter((path): path is string => typeof path === "string")
+      : []
+  );
+
+  await writeVolume(backupDocker, { volume, image: "alpine", archive: file, keep, log: emit });
 
   emit(`  volume ${volume} ripristinato`);
 }

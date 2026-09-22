@@ -259,6 +259,7 @@ export async function run({ repoRoot }) {
           owner,
           image: "alpine",
           consistency: "pause",
+          excludes: [],
           destination: join(scratch, `export-${n}.tar.gz`),
           scratch: join(scratch, `export-${n}.raw.tar`),
           freeBytes: () => 100 * 1024 ** 3,
@@ -535,6 +536,121 @@ export async function run({ repoRoot }) {
         parseBackupSettings('{"preBackup":{"service":"db","command":"pg_dump","timeoutSec":999999}}').preBackup?.timeoutSec ===
           MAX_PRE_BACKUP_TIMEOUT_SEC
       );
+    }
+
+    // --- exclusions ---------------------------------------------------------------------
+    {
+      const { normalizeExcludePath, normalizeExcludeList, parseBackupSettings, MAX_EXCLUDES_PER_VOLUME } = await load(
+        "lib",
+        "backup-settings.ts"
+      );
+      for (const [raw, expected] of [
+        ["trades", "trades"],
+        ["trades/", "trades"],
+        ["./trades", "trades"],
+        ["  cache/tmp  ", "cache/tmp"],
+        [".cache", ".cache"],
+        ["with space/x", "with space/x"],
+        ["dati/città", "dati/città"],
+      ]) {
+        r.check(`exclusion "${raw}" is kept as "${expected}"`, normalizeExcludePath(raw) === expected, String(normalizeExcludePath(raw)));
+      }
+      for (const raw of ["", ".", "./", "/etc", "../x", "a/../b", "a//b", "*.parquet", "trades/[0-9]", "a\\b", "it's", "a\nb"]) {
+        r.check(`exclusion ${JSON.stringify(raw)} is refused`, normalizeExcludePath(raw) === null, String(normalizeExcludePath(raw)));
+      }
+      r.check(
+        "a list is deduplicated after normalising",
+        JSON.stringify(normalizeExcludeList(["trades", "./trades/", "models"])) === '["trades","models"]'
+      );
+      r.check(
+        "and capped",
+        normalizeExcludeList(Array.from({ length: 80 }, (_, i) => `d${i}`)).length === MAX_EXCLUDES_PER_VOLUME
+      );
+      const stored = parseBackupSettings(
+        JSON.stringify({ excludes: { [VOLUME]: ["trades/", "../etc"], "not a volume!": ["x"], empty: [] } })
+      );
+      r.check(
+        "stored exclusions are read back normalised, the invalid ones dropped",
+        JSON.stringify(stored.excludes) === JSON.stringify({ [VOLUME]: ["trades"] }),
+        JSON.stringify(stored.excludes)
+      );
+    }
+
+    {
+      const args = ops.tarArgs(VOLUME, "alpine", ["trades", "cache/tmp"]);
+      r.check(
+        "each exclusion is anchored at the volume's root",
+        args.includes("--exclude=./trades") && args.includes("--exclude=./cache/tmp"),
+        args.join(" ")
+      );
+      r.check("and comes before the path being archived", args.indexOf("--exclude=./trades") < args.lastIndexOf("."));
+      r.check("no exclusion, no --exclude", !ops.tarArgs(VOLUME, "alpine").some((a) => a.startsWith("--exclude")));
+    }
+
+    {
+      const docker = simulatedDocker({
+        containers: [stackContainer("c1", "record", rw)],
+        hooks: {
+          run: (args) =>
+            args.includes("du -sk /from; for p in \"$@\"; do du -sk \"/from/$p\" 2>/dev/null || echo \"- /from/$p\"; done")
+              ? "3000000\t/from\n480000\t/from/trades\n- /from/typo"
+              : "",
+        },
+      });
+      log.length = 0;
+      const { request } = exportRequest(docker, { request: { excludes: ["trades", "typo"] } });
+      const result = await ops.exportVolume(docker.cli, request);
+      const copy = docker.calls.find((call) => call.args.includes("tar"));
+      r.check("the copy leaves the excluded path out", copy?.args.includes("--exclude=./trades"), copy?.args.join(" "));
+      r.check(
+        "the paths are handed to the measuring shell as arguments, not spliced into it",
+        docker.calls.some(({ args }) => args.at(-2) === "trades" && args.at(-1) === "typo" && args.includes("sh"))
+      );
+      r.check(
+        "the log says what was excluded, and how much",
+        log.some((line) => line.includes("esclusi: trades (469 MB)")),
+        log.join(" | ")
+      );
+      r.check(
+        "and which exclusion matched nothing",
+        log.some((line) => line.includes("typo (non presente nel volume)")),
+        log.join(" | ")
+      );
+      r.check(
+        "the report lists them with their sizes",
+        JSON.stringify(result.excluded) ===
+          JSON.stringify([
+            { path: "trades", bytes: 480000 * 1024, missing: false },
+            { path: "typo", bytes: null, missing: true },
+          ]),
+        JSON.stringify(result.excluded)
+      );
+      r.check(
+        "and the estimate leaves them out",
+        result.estimatedBytes === (3000000 - 480000) * 1024,
+        String(result.estimatedBytes)
+      );
+    }
+
+    {
+      // The restore keeps what the backup never had.
+      const script = ops.restoreScript(["trades", "a/b"]);
+      r.check("a restore with kept paths refuses to run outside the volume", script.startsWith("cd /to || exit 1;"), script);
+      r.check(
+        "the kept paths and everything under them are spared",
+        script.includes("-path './trades' -o -path './trades/*'") && script.includes("-path './a/b' -o -path './a/b/*'"),
+        script
+      );
+      r.check("the find grouping is escaped for the shell", script.includes("\\( -path") && script.includes("\\) -prune"), script);
+      r.check("and the archive is still unpacked last", script.endsWith("; tar -xf - -C /to"), script);
+      r.check("a quote cannot break out of a pattern", ops.restoreScript(["it's"]).includes(`'./it'"'"'s'`));
+
+      const docker = simulatedDocker({ containers: [stackContainer("c1", "record", rw, "exited")] });
+      log.length = 0;
+      await ops.writeVolume(docker.cli, { volume: VOLUME, image: "alpine", archive: join(scratch, "v.tar.gz"), keep: ["trades"], log: say });
+      const write = docker.calls.find((call) => call.source);
+      r.check("the write carries the keeping script", write?.args.at(-1) === ops.restoreScript(["trades"]), write?.args.at(-1));
+      r.check("and the log says what was kept", log.some((line) => line.includes("conservati come sono") && line.includes("trades")));
     }
 
     r.check(

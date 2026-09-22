@@ -343,6 +343,8 @@ export interface ExportRequest {
   owner: ProjectOwner;
   image: string;
   consistency: VolumeConsistency;
+  /** Normalised paths, relative to the volume's root, left out of the copy. */
+  excludes: readonly string[];
   /** Where the finished `.tar.gz` is written. */
   destination: string;
   /** The uncompressed copy taken while the writers are paused; removed afterwards. */
@@ -380,34 +382,96 @@ export interface ExportResult {
   sha256: string;
   estimatedBytes: number | null;
   consistency: ConsistencyReport;
+  excluded: ExcludedPath[];
 }
 
 /** Headroom on top of the estimate, for what is written while the copy is being planned. */
 const SNAPSHOT_MARGIN = 1.1;
 
-function tarArgs(volume: string, image: string): string[] {
+/**
+ * `./<path>` rather than `<path>`: busybox tar, like GNU tar, matches an
+ * exclusion at every component boundary, so a bare `trades` would also drop
+ * `reports/trades`. Anchored at the root it means exactly the one path, and
+ * everything under it.
+ */
+export function tarArgs(volume: string, image: string, excludes: readonly string[] = []): string[] {
   return [
     "run", "--rm",
     // Read-only, so taking a backup can never write into the volume.
     "-v", `${volume}:/from:ro`,
     "-w", "/from",
     image,
-    "tar", "-cf", "-", ".",
+    "tar", "-cf", "-",
+    ...excludes.map((path) => `--exclude=./${path}`),
+    ".",
   ];
 }
 
-/** `du -sk`, through the same helper. Null when it cannot be told. */
-async function estimateBytes(cli: DockerCli, volume: string, image: string): Promise<number | null> {
+export interface ExcludedPath {
+  path: string;
+  /** On disk when the copy was planned; null when it could not be measured. */
+  bytes: number | null;
+  /** Not in the volume at all — most likely a typo worth seeing. */
+  missing: boolean;
+}
+
+/** True when `path` is `parent` or lies inside it. */
+function within(path: string, parent: string): boolean {
+  return path === parent || path.startsWith(`${parent}/`);
+}
+
+/**
+ * `du -sk` of the volume and of each excluded path, through the same helper.
+ * The paths go in as arguments, never into the script, and were validated to
+ * be plain relative paths before they were ever stored.
+ */
+async function measure(
+  cli: DockerCli,
+  volume: string,
+  image: string,
+  excludes: readonly string[]
+): Promise<{ total: number | null; excluded: ExcludedPath[] }> {
   try {
+    const script = 'du -sk /from; for p in "$@"; do du -sk "/from/$p" 2>/dev/null || echo "- /from/$p"; done';
     const result = await cli.run(
-      ["run", "--rm", "-v", `${volume}:/from:ro`, image, "du", "-sk", "/from"],
+      ["run", "--rm", "-v", `${volume}:/from:ro`, image, "sh", "-c", script, "sh", ...excludes],
       { timeout: 120_000 }
     );
-    const kb = Number.parseInt(result.stdout.trim().split(/\s+/)[0] ?? "", 10);
-    return Number.isFinite(kb) ? kb * 1024 : null;
+
+    const sizes = new Map<string, number | null>();
+    for (const line of splitLines(result.stdout)) {
+      const gap = line.search(/\s/);
+      if (gap < 0) continue;
+      const size = line.slice(0, gap);
+      const kb = Number.parseInt(size, 10);
+      sizes.set(line.slice(gap).trim(), size === "-" || !Number.isFinite(kb) ? null : kb * 1024);
+    }
+
+    return {
+      total: sizes.get("/from") ?? null,
+      excluded: excludes.map((path) => {
+        const key = `/from/${path}`;
+        const bytes = sizes.get(key) ?? null;
+        return { path, bytes, missing: sizes.has(key) && bytes === null };
+      }),
+    };
   } catch {
-    return null;
+    return { total: null, excluded: excludes.map((path) => ({ path, bytes: null, missing: false })) };
   }
+}
+
+/**
+ * The copy's size, less what is excluded — each excluded tree counted once,
+ * however many of the other exclusions lie inside it.
+ */
+function estimateCopy(total: number | null, excluded: ExcludedPath[]): number | null {
+  if (total === null) return null;
+  let left = total;
+  for (const entry of excluded) {
+    const nested = excluded.some((other) => other.path !== entry.path && within(entry.path, other.path));
+    if (!nested && entry.bytes) left -= entry.bytes;
+  }
+  return Math.max(left, 0);
 }
 
 async function gzipFile(source: string, destination: string): Promise<{ bytes: number; sha256: string }> {
@@ -447,7 +511,8 @@ async function gzipFile(source: string, destination: string): Promise<{ bytes: n
  * they wait, and the log says so.
  */
 export async function exportVolume(cli: DockerCli, request: ExportRequest): Promise<ExportResult> {
-  const { volume, owner, log } = request;
+  const { volume, owner, log, excludes } = request;
+  const tar = tarArgs(volume, request.image, excludes);
 
   const users = await volumeUsers(cli, volume, owner);
   const writers = users.filter((user) => user.rw && ACTIVE_STATES.has(user.state));
@@ -472,6 +537,24 @@ export async function exportVolume(cli: DockerCli, request: ExportRequest): Prom
     method: "stream",
   };
 
+  // Measured only when it tells somebody something: a pause needs to know
+  // whether an uncompressed copy fits, and exclusions deserve their sizes.
+  const sizes =
+    pausable.length > 0 || excludes.length > 0
+      ? await measure(cli, volume, request.image, excludes)
+      : { total: null, excluded: [] };
+  const estimate = estimateCopy(sizes.total, sizes.excluded);
+  if (sizes.excluded.length > 0) {
+    const described = sizes.excluded.map((entry) =>
+      entry.missing
+        ? `${entry.path} (non presente nel volume)`
+        : entry.bytes === null
+          ? entry.path
+          : `${entry.path} (${megabytes(entry.bytes)})`
+    );
+    log(`  esclusi: ${described.join(", ")}`);
+  }
+
   // --- nothing to pause --------------------------------------------------------------
   if (pausable.length === 0) {
     const running = writers.filter((writer) => writer.state !== "paused");
@@ -490,16 +573,15 @@ export async function exportVolume(cli: DockerCli, request: ExportRequest): Prom
       log("  nessun container sta scrivendo nel volume: copia senza pausa");
     }
 
-    const result = await cli.toFile(tarArgs(volume, request.image), request.destination, {
+    const result = await cli.toFile(tar, request.destination, {
       compress: true,
       signal: request.signal,
       onStderr: (line) => log(`  ${line}`),
     });
-    return { ...result, estimatedBytes: null, consistency: report };
+    return { ...result, estimatedBytes: estimate, consistency: report, excluded: sizes.excluded };
   }
 
   // --- pausing -----------------------------------------------------------------------
-  const estimate = await estimateBytes(cli, volume, request.image);
   const free = request.freeBytes();
   const room = free === null ? null : free - request.reserveBytes;
   const snapshot = estimate !== null && room !== null && estimate * SNAPSHOT_MARGIN < room;
@@ -542,7 +624,7 @@ export async function exportVolume(cli: DockerCli, request: ExportRequest): Prom
 
     try {
       copied = await cli.toFile(
-        tarArgs(volume, request.image),
+        tar,
         snapshot ? request.scratch : request.destination,
         { compress: !snapshot, signal, onStderr: (line) => log(`  ${line}`) }
       );
@@ -580,11 +662,19 @@ export async function exportVolume(cli: DockerCli, request: ExportRequest): Prom
 
   report.result = notPaused.length > 0 || paused.length === 0 ? "live" : "paused";
 
-  if (!snapshot) return { ...copied, estimatedBytes: estimate, consistency: report };
+  if (!snapshot) {
+    return { ...copied, estimatedBytes: estimate, consistency: report, excluded: sizes.excluded };
+  }
 
   try {
     const compressed = await gzipFile(request.scratch, request.destination);
-    return { ...compressed, rawBytes: copied.rawBytes, estimatedBytes: estimate, consistency: report };
+    return {
+      ...compressed,
+      rawBytes: copied.rawBytes,
+      estimatedBytes: estimate,
+      consistency: report,
+      excluded: sizes.excluded,
+    };
   } finally {
     fs.rmSync(request.scratch, { force: true });
   }
@@ -652,22 +742,54 @@ export async function startContainers(
   }
 }
 
+function shellQuote(value: string): string {
+  return `'${value.split("'").join(`'"'"'`)}'`;
+}
+
 /**
  * The shell run inside the helper to replace a volume's contents.
  *
- * The glob patterns cover dotfiles too; without the second one a restore
- * leaves the previous contents' hidden files behind.
+ * With nothing kept, the volume is emptied and the archive unpacked. The glob
+ * patterns cover dotfiles too; without the second one a restore leaves the
+ * previous contents' hidden files behind.
+ *
+ * With paths kept — the ones the backup excluded — everything else goes and
+ * they stay exactly as they are: an archive made without `trades/` has nothing
+ * to put back there, and emptying it would turn "not backed up" into "deleted
+ * by the restore". Files first, then the directories left empty; a kept path's
+ * parents are never empty, so they survive the second pass on their own. A
+ * failed `cd` ends the script before either `find` could run anywhere else.
  */
-export function restoreScript(): string {
-  return "rm -rf /to/* /to/..?* /to/.[!.]* 2>/dev/null; tar -xf - -C /to";
+export function restoreScript(keep: readonly string[] = []): string {
+  if (keep.length === 0) return "rm -rf /to/* /to/..?* /to/.[!.]* 2>/dev/null; tar -xf - -C /to";
+
+  const patterns = keep.flatMap((path) => [shellQuote(`./${path}`), shellQuote(`./${path}/*`)]);
+  const kept = patterns.map((pattern) => `-path ${pattern}`).join(" -o ");
+  const notKept = patterns.map((pattern) => `! -path ${pattern}`).join(" ");
+
+  return [
+    "cd /to || exit 1",
+    `find . -mindepth 1 \\( ${kept} \\) -prune -o ! -type d -exec rm -f {} +`,
+    `find . -mindepth 1 -depth -type d ${notKept} -exec rmdir {} + 2>/dev/null`,
+    "tar -xf - -C /to",
+  ].join("; ");
 }
 
 export async function writeVolume(
   cli: DockerCli,
-  request: { volume: string; image: string; archive: string; log: (line: string) => void }
+  request: {
+    volume: string;
+    image: string;
+    archive: string;
+    /** Paths the backup excluded, left untouched by the restore. */
+    keep?: readonly string[];
+    log: (line: string) => void;
+  }
 ): Promise<void> {
+  const keep = request.keep ?? [];
+  if (keep.length > 0) request.log(`  conservati come sono, perché esclusi dal backup: ${keep.join(", ")}`);
   await cli.fromFile(
-    ["run", "--rm", "-i", "-v", `${request.volume}:/to`, request.image, "sh", "-c", restoreScript()],
+    ["run", "--rm", "-i", "-v", `${request.volume}:/to`, request.image, "sh", "-c", restoreScript(keep)],
     request.archive,
     { decompress: true, onStderr: (line) => request.log(`  ${line}`) }
   );
