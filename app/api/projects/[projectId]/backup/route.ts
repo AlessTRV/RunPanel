@@ -52,10 +52,15 @@ export async function PUT(request: NextRequest, { params }: Params) {
     );
   }
 
+  // Stored in the form the backup reads — through the same parser — so
+  // `trades` and `./trades/` typed on two lines are one exclusion on disk too,
+  // and what the page shows after saving is what the next run will do.
+  const settings = parseBackupSettings(JSON.stringify(parsed.data));
+
   const db = await getDb();
   const result = await db
     .updateTable("projects")
-    .set({ backup_settings: JSON.stringify(parsed.data), updated_at: nowIso() })
+    .set({ backup_settings: JSON.stringify(settings), updated_at: nowIso() })
     .where("id", "=", projectId)
     .executeTakeFirst();
 
@@ -63,7 +68,5 @@ export async function PUT(request: NextRequest, { params }: Params) {
     return NextResponse.json({ error: "Progetto non trovato" }, { status: 404 });
   }
 
-  // Read back through the same parser the backup uses, so what the page shows
-  // after saving is what the next run will do.
-  return NextResponse.json({ settings: parseBackupSettings(JSON.stringify(parsed.data)) });
+  return NextResponse.json({ settings });
 }
