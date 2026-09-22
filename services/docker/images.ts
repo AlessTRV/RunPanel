@@ -1,5 +1,12 @@
 import { docker, dockerTry, lines } from "./cli";
 import { imageRepo, labelArgs, ownedFilters } from "./labels";
+import {
+  buildCachePruneArgs,
+  composeOrphanImages,
+  danglingImagePruneArgs,
+  parseReclaimed,
+  unusedImageRefs,
+} from "@/lib/docker-cleanup";
 
 /**
  * Image lifecycle.
@@ -113,48 +120,107 @@ export async function removeProjectImages(slug: string): Promise<string[]> {
 }
 
 /**
- * Dangling images RunPanel produced. Scoped by label so a prune here can never
- * touch an unrelated dangling image belonging to the user.
+ * Images with no tag and no container. Routine: RunPanel's own only. Deep —
+ * the Storage page's button — every one of them, which is where a compose
+ * rebuild's leftovers are: they carry compose's labels, not ours.
  */
+export async function pruneDangling(deep = false): Promise<number> {
+  const result = await dockerTry(danglingImagePruneArgs(deep), { timeout: 120_000 });
+  return parseReclaimed(result?.stdout ?? "");
+}
+
+/** Kept for the callers that only ever meant the routine pass. */
 export async function pruneDanglingOwned(): Promise<number> {
-  const result = await dockerTry([
-    "image",
-    "prune",
-    "-f",
-    ...ownedFilters(),
-    "--filter",
-    "dangling=true",
-  ], { timeout: 120_000 });
-
-  return parseReclaimed(result?.stdout ?? "");
+  return pruneDangling(false);
 }
 
-/** Build cache is not labelled by Docker, so this is all-or-nothing by age. */
+/**
+ * Build cache is not labelled by Docker, so this is all-or-nothing by age.
+ * Zero hours means all of it.
+ */
 export async function pruneBuildCache(keepHours: number): Promise<number> {
-  const result = await dockerTry(
-    ["builder", "prune", "-f", "--filter", `until=${keepHours}h`],
-    { timeout: 120_000 }
-  );
+  const result = await dockerTry(buildCachePruneArgs(keepHours), { timeout: 300_000 });
   return parseReclaimed(result?.stdout ?? "");
 }
 
-/** Docker prints "Total reclaimed space: 1.23GB" — turn that into bytes. */
-export function parseReclaimed(stdout: string): number {
-  const match = stdout.match(/Total reclaimed space:\s*([\d.]+)\s*([KMGT]?B)/i);
-  if (!match) return 0;
+/** Re-exported: the parser lives with the rest of the clean's arithmetic. */
+export { parseReclaimed };
 
-  const amount = Number.parseFloat(match[1]);
-  if (!Number.isFinite(amount)) return 0;
+/**
+ * Images compose built for a RunPanel project that no longer exists.
+ *
+ * Compose stamps `com.docker.compose.project` on what it builds and refuses
+ * our labels, so these were invisible to every clean, and deleting a compose
+ * project left its images behind.
+ */
+export async function listComposeOrphanImages(knownSlugs: ReadonlySet<string>): Promise<string[]> {
+  // The id list first, then an inspect for the labels: the `images` formatter
+  // has no access to labels at all, and asking for one fails the whole call.
+  const ids = await dockerTry(["images", "--filter", "label=com.docker.compose.project", "-q"]);
+  const unique = [...new Set(lines(ids?.stdout ?? ""))];
+  if (unique.length === 0) return [];
 
-  const unit = match[2].toUpperCase();
-  const multipliers: Record<string, number> = {
-    B: 1,
-    KB: 1000,
-    MB: 1000 ** 2,
-    GB: 1000 ** 3,
-    TB: 1000 ** 4,
-  };
-  return amount * (multipliers[unit] ?? 1);
+  const result = await dockerTry(
+    [
+      "image",
+      "inspect",
+      "--format",
+      '{{.Id}}{{"\\t"}}{{index .Config.Labels "com.docker.compose.project"}}{{"\\t"}}{{range .RepoTags}}{{.}} {{end}}',
+      ...unique,
+    ],
+    { timeout: 60_000 }
+  );
+  if (!result) return [];
+
+  // One entry per name, or the id when compose's image has none left, so the
+  // removal takes every name and the image with them.
+  const images = lines(result.stdout).flatMap((line) => {
+    const [id, project, tags] = line.split("\t");
+    const names = (tags ?? "").split(" ").filter(Boolean);
+    const composeProject = project && project !== "<no value>" ? project : null;
+    return (names.length > 0 ? names : [id]).map((ref) => ({ ref, composeProject }));
+  });
+  return composeOrphanImages(images, knownSlugs);
+}
+
+/**
+ * Remove every image no container uses, except RunPanel's rollback tags.
+ * Opt-in only — see `unusedImageRefs` for why, and for why this does not
+ * lean on `image prune -a`.
+ */
+export async function removeUnusedImages(): Promise<string[]> {
+  const [all, owned, containers] = await Promise.all([
+    dockerTry(["images", "--format", "{{.ID}}\t{{.Repository}}:{{.Tag}}"]),
+    dockerTry(["images", ...ownedFilters(), "-q"]),
+    dockerTry(["ps", "-aq", "--no-trunc"]),
+  ]);
+  if (!all || !owned || !containers) return [];
+
+  const ids = lines(containers.stdout);
+  const used =
+    ids.length === 0
+      ? null
+      : await dockerTry(["inspect", "--format", "{{.Image}}", ...ids], { timeout: 60_000 });
+  // An inspect that failed says nothing about which images are in use, and
+  // guessing "none" would offer every image on the host for deletion.
+  if (ids.length > 0 && !used) return [];
+
+  const refs = unusedImageRefs(
+    lines(all.stdout).map((line) => {
+      const [id, ref] = line.split("\t");
+      return { id, ref };
+    }),
+    new Set(lines(owned.stdout)),
+    new Set(used ? lines(used.stdout) : [])
+  );
+
+  const removed: string[] = [];
+  for (const ref of refs) {
+    // No `-f`: an image a container started using in the meantime is refused
+    // by the daemon rather than pulled out from under it.
+    if (await dockerTry(["rmi", ref], { timeout: 60_000 })) removed.push(ref);
+  }
+  return removed;
 }
 
 /** Pull a template image, stamping it as ours so the GC can account for it. */

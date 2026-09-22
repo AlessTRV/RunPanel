@@ -2,6 +2,7 @@ import crypto from "crypto";
 import { decrypt } from "@/lib/crypto";
 import type { ServicesTable } from "@/lib/db/schema";
 import { buildConnectionString } from "@/lib/service-env";
+import { CONTAINER_LOG_ARGS } from "@/lib/docker-cleanup";
 import { IServiceTemplate, ServiceConfig } from "./service-templates/types";
 import { postgresqlTemplate } from "./service-templates/postgresql";
 import { mysqlTemplate } from "./service-templates/mysql";
@@ -129,6 +130,10 @@ export async function provisionService(
     "-p", publishArg(access ?? OPEN_ACCESS, config.port, dockerConfig.port),
     "--restart", "unless-stopped",
     ...labelArgs(ownership),
+    // Bounded, like every container the panel starts: a database's log is
+    // mostly connection lines, and nothing ever truncated them. Takes effect
+    // on an existing service the next time it is recreated.
+    ...CONTAINER_LOG_ARGS,
   ];
 
   for (const [key, value] of Object.entries(dockerConfig.env)) {

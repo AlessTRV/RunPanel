@@ -3,6 +3,7 @@ import { docker, dockerTry, dockerStream, lines } from "../docker/cli";
 import { appContainerName, labelArgs } from "../docker/labels";
 import { containerStats } from "../docker/stats";
 import { markRunStart, sinceArgs } from "./run-log";
+import { CONTAINER_LOG_ARGS } from "@/lib/docker-cleanup";
 
 export const dockerDriver: IProcessDriver = {
   async start(slug: string, startCmd: string, opts: StartOpts): Promise<void> {
@@ -37,6 +38,11 @@ export const dockerDriver: IProcessDriver = {
       // back after a host reboot. Services already had this; apps did not.
       "--restart", opts.restartPolicy ?? "unless-stopped",
       ...labelArgs({ project: slug, kind: "app", deployment: opts.deploymentId }),
+      // Docker keeps a container's whole output in one file on the host and
+      // never truncates it: an app logging a line per request filled the disk
+      // in its own time. Applies from the next start, since the container is
+      // recreated on every one.
+      ...CONTAINER_LOG_ARGS,
     ];
 
     if (hostNetwork) {

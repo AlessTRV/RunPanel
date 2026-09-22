@@ -70,6 +70,41 @@ pannello era spento non viene recuperato: il momento giusto è il prossimo. Se l
 notifiche Telegram sono attive arriva un messaggio per ogni riavvio eseguito o
 fallito, non per i salti.
 
+## Liberare spazio
+
+La pagina **Storage** mostra quanto occupa Docker e cosa si può recuperare.
+**Pulisci ora** toglie soltanto cose che si possono ricreare, mai volumi o dati:
+
+- le versioni vecchie delle immagini dei progetti, oltre quelle che scegli di
+  tenere per il rollback;
+- le immagini senza nome che nessun container usa, di chiunque siano: sono gli
+  avanzi delle build, compose compreso;
+- container, immagini e network orfani di RunPanel, comprese le immagini che
+  compose ha costruito per un progetto poi eliminato;
+- la cache di build: tutta per default, oppure solo quella più vecchia di una
+  settimana se spegni l'opzione. Tutta libera più spazio, ma la prossima build di
+  ogni progetto riparte da zero.
+
+Un'opzione in più, spenta per default, toglie **tutte le immagini che nessun
+container usa**, anche quelle che RunPanel non ha creato: versioni vecchie delle
+immagini dei database, immagini di base, immagini di altri progetti Docker sulla
+macchina. Si riscaricano o si ricostruiscono quando servono, ma un'immagine
+costruita a mano e mai pubblicata andrebbe persa, per questo chiede conferma. Le
+versioni dei progetti tenute per il rollback restano comunque.
+
+Il totale liberato è misurato sull'occupazione di Docker prima e dopo, non sui
+numeri che stampano i singoli comandi: la cache di build veniva sempre contata
+come zero, e con lo storage containerd anche una pulizia di immagini riportava
+pochi kB. I volumi orfani si tolgono solo dal pannello **Risorse orfane**,
+perché contengono i dati di progetti o servizi che non esistono più.
+
+Due cose evitano che lo spazio torni a riempirsi. Eliminare un progetto Compose
+toglie anche le immagini che compose ha costruito. E ogni container che il
+pannello avvia, app o database, ha il log limitato a tre file da 10 MB: prima
+Docker lo teneva intero per sempre. Il limite vale dal prossimo deploy per le app
+e dalla prossima ricreazione per i servizi; i servizi di uno stack Compose seguono
+quello che dice il tuo file.
+
 ## Aggiornare il pannello
 
 RunPanel si installa clonandolo, quindi la cartella da cui gira è un working tree

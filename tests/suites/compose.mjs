@@ -150,6 +150,11 @@ http.createServer((req, res) => {
   const leftovers = docker("ps", "-a", "--filter", `label=com.docker.compose.project=${projectName}`, "--format", "{{.Names}}")
     .split("\n").filter(Boolean);
   r.check("deleting the project brings the whole stack down", leftovers.length === 0, leftovers.join(","));
+  // The images compose built for the stack go with it. They used to stay,
+  // untouched by every clean, because they carry compose's labels, not ours.
+  const images = docker("images", "--filter", `label=com.docker.compose.project=${projectName}`, "--format", "{{.Repository}}:{{.Tag}}")
+    .split("\n").filter(Boolean);
+  r.check("and the images it built", images.length === 0, images.join(","));
 
   return r.result();
 }

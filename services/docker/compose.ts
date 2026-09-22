@@ -176,9 +176,15 @@ export async function composeRestart(ctx: ComposeContext): Promise<void> {
  * Tear the stack down. Volumes are kept unless explicitly asked for — they hold
  * the data, and losing them must be a decision rather than a side effect.
  */
-export async function composeDown(ctx: ComposeContext, opts: { removeVolumes?: boolean } = {}): Promise<void> {
+export async function composeDown(
+  ctx: ComposeContext,
+  opts: { removeVolumes?: boolean; removeImages?: boolean } = {}
+): Promise<void> {
   const args = [...baseArgs(ctx), "down", "--remove-orphans"];
   if (opts.removeVolumes) args.push("--volumes");
+  // `local` is only what compose built itself: a pulled `postgres:16` stays,
+  // since another stack may well be using it.
+  if (opts.removeImages) args.push("--rmi", "local");
   await dockerTry(args, { cwd: ctx.projectDir, timeout: 180_000 });
 }
 

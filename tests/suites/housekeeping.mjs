@@ -70,6 +70,11 @@ CMD ["sh","-c","while true; do sleep 1; done"]
   }
   r.note(`images: ${tags.join(", ") || "(none)"}`);
 
+  // A container's log is a file on the host that nothing ever truncated: an
+  // app that logs a line per request filled the disk in its own time.
+  const appLog = docker("inspect", `runpanel-${slug}`, "--format", "{{json .HostConfig.LogConfig}}");
+  r.check("the app container rotates its log", appLog.includes('"max-size":"10m"') && appLog.includes('"max-file":"3"'), appLog);
+
   const versioned = tags.filter((t) => !t.endsWith(":current"));
   r.check("retention converges to at most 2 versioned images", versioned.length <= 2, `${versioned.length}`);
   r.check("a :current alias exists", tags.some((t) => t.endsWith(":current")), tags.join(","));
@@ -115,6 +120,60 @@ CMD ["sh","-c","while true; do sleep 1; done"]
 
   docker("rm", "-f", "not-ours-test", "runpanel-test-ghost");
 
+  // --- the deep clean "Pulisci ora" asks for ---------------------------------
+  // Three images, each with a layer of its own large enough to be counted:
+  // a compose image of a project that no longer exists, an image that lost its
+  // tag to a rebuild, and a tagged image that is simply not ours. The first two
+  // are garbage whoever made them; the third must survive unless the operator
+  // explicitly asks for unused images too.
+  const scratch = join(dataDir, "gc-scratch");
+  mkdirSync(scratch, { recursive: true });
+  // Forty megabytes of noise per image: `docker system df` prints three or
+  // four significant digits, so a smaller layer would vanish in its rounding.
+  const buildTiny = (tag, marker, labels = []) => {
+    writeFileSync(
+      join(scratch, "Dockerfile"),
+      `FROM alpine
+RUN head -c 40000000 /dev/urandom > /blob && echo "${marker}-${Date.now()}" > /marker
+`
+    );
+    return docker("build", "-q", ...labels.flatMap((l) => ["--label", l]), ...(tag ? ["-t", tag] : []), scratch);
+  };
+  buildTiny("runpanel-ghostcompose-web:latest", "ghost", ["com.docker.compose.project=runpanel-ghostcompose"]);
+  // Built with no name: dangling under both image stores. A rebuild under the
+  // same tag leaves one behind only on the classic store — the containerd one
+  // deletes the old image on the spot.
+  const firstId = buildTiny(null, "untagged");
+  buildTiny("rp-gc-keep:x", "keep");
+  r.check("the untagged image really is dangling before the clean", firstId !== "" &&
+    docker("images", "-q", "--filter", "dangling=true").split("\n").some((id) => id && firstId.includes(id)), firstId);
+
+  const listed = await api.call("/api/storage");
+  r.check(
+    "a deleted project's compose image is listed as an orphan",
+    listed.body.orphans?.images?.includes("runpanel-ghostcompose-web:latest"),
+    JSON.stringify(listed.body.orphans?.images)
+  );
+
+  const deep = await api.call("/api/storage", { method: "POST", body: JSON.stringify({ deep: true }) });
+  r.check("the deep clean succeeds", deep.status === 200, `${deep.status} ${JSON.stringify(deep.body).slice(0, 200)}`);
+  r.check(
+    "it removes the orphaned compose image",
+    docker("images", "-q", "runpanel-ghostcompose-web:latest") === ""
+  );
+  r.check(
+    "and the image that lost its tag",
+    docker("image", "inspect", firstId, "--format", "{{.Id}}") === ""
+  );
+  r.check("but leaves a tagged image that is not ours", docker("images", "-q", "rp-gc-keep:x") !== "");
+  r.check(
+    "and says how much it freed instead of 0 B",
+    Number(deep.body.reclaimedBytes) >= 40_000_000,
+    String(deep.body.reclaimedBytes)
+  );
+
+  docker("rmi", "-f", "rp-gc-keep:x", "runpanel-ghostcompose-web:latest");
+
   // --- volumes -------------------------------------------------------------
   const svc = await api.call("/api/services", {
     method: "POST",
@@ -123,6 +182,9 @@ CMD ["sh","-c","while true; do sleep 1; done"]
   r.check("service provisioned", svc.status === 201, `${svc.status} ${JSON.stringify(svc.body).slice(0, 140)}`);
 
   if (svc.status === 201) {
+    const svcLog = docker("inspect", svc.body.container_name, "--format", "{{json .HostConfig.LogConfig}}");
+    r.check("a service container rotates its log too", svcLog.includes('"max-size":"10m"'), svcLog);
+
     const volumes = docker("volume", "ls", "--filter", `label=runpanel.project=${slug}`, "--format", "{{.Name}}");
     r.check("volume created WITH ownership labels", volumes.length > 0, `"${volumes}"`);
 

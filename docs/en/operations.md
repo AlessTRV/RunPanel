@@ -69,6 +69,41 @@ down is not caught up: the right moment is the next one. With Telegram
 notifications on, a message arrives for every restart that ran or failed, not
 for skips.
 
+## Freeing space
+
+The **Storage** page shows how much Docker holds and what can be reclaimed.
+**Pulisci ora** removes only things that can be recreated, never volumes or data:
+
+- old versions of the projects' images, beyond the ones you choose to keep for
+  rollback;
+- images with no name that no container uses, whoever made them: they are build
+  leftovers, compose's included;
+- RunPanel's orphaned containers, images and networks, including the images
+  compose built for a project since deleted;
+- the build cache: all of it by default, or only what is older than a week if you
+  switch the option off. All of it frees more, but each project's next build
+  starts from scratch.
+
+One more option, off by default, removes **every image no container uses**,
+including those RunPanel did not create: old versions of database images, base
+images, images of other Docker projects on the machine. They come back with a
+pull or a rebuild, but an image built by hand and never pushed would be lost,
+which is why it asks for confirmation. The project versions kept for rollback
+stay regardless.
+
+The amount freed is measured on Docker's footprint before and after, not on the
+numbers the individual commands print: the build cache was always counted as
+zero, and under the containerd image store even an image clean reported a few
+kB. Orphaned volumes are removed only from the **Risorse orfane** panel, because
+they hold the data of projects or services that no longer exist.
+
+Two things keep the space from filling up again. Deleting a Compose project also
+removes the images compose built for it. And every container the panel starts,
+app or database, has its log capped at three 10 MB files: Docker used to keep
+all of it forever. The cap applies from the next deploy for apps and from the
+next recreation for services; the services of a Compose stack follow what your
+file says.
+
 ## Updating the panel
 
 RunPanel is installed by cloning it, so the directory it runs from is a git

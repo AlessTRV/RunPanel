@@ -65,10 +65,18 @@ const sweepSchema = z.object({
    * "free up some space".
    */
   removeOrphans: z.boolean().optional(),
+  /**
+   * The button's clean: orphans that hold no data, and every image with no
+   * tag whoever built it. See `SweepOptions.deep`.
+   */
+  deep: z.boolean().optional(),
+  /** Every image no container uses, the operator's own included. Opt-in. */
+  unusedImages: z.boolean().optional(),
   retention: z
     .object({
       imagesPerProject: z.number().int().min(1).max(50),
-      buildCacheHours: z.number().int().min(1).max(24 * 365),
+      /** Zero means all of it: the cache is only ever cache. */
+      buildCacheHours: z.number().int().min(0).max(24 * 365),
     })
     .optional(),
 });
@@ -96,6 +104,8 @@ export async function POST(request: NextRequest) {
 
   const result = await sweep({
     removeOrphans: parsed.data.removeOrphans ?? false,
+    deep: parsed.data.deep ?? false,
+    unusedImages: parsed.data.unusedImages ?? false,
     retention: parsed.data.retention ?? DEFAULT_RETENTION,
   });
 

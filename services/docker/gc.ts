@@ -4,12 +4,15 @@ import { dockerTry, isDockerAvailable, lines } from "./cli";
 import { LABEL_KIND, LABEL_PROJECT, ownedFilters, parseLabels } from "./labels";
 import { serviceVolumeNames } from "../service-provisioner";
 import {
+  listComposeOrphanImages,
   listOwnedImages,
   pruneBuildCache,
-  pruneDanglingOwned,
+  pruneDangling,
   pruneProjectImages,
   removeImages,
+  removeUnusedImages,
 } from "./images";
+import { footprintFromDf } from "@/lib/docker-cleanup";
 import { removeVolumes } from "./volumes";
 import { pruneBuildLogs } from "../build-logs";
 
@@ -47,7 +50,41 @@ export interface OrphanReport {
 export interface SweepResult extends OrphanReport {
   reclaimedBytes: number;
   prunedImageTags: string[];
+  /** Images no container used, removed because the operator asked for them. */
+  unusedImages: string[];
   skipped?: string;
+}
+
+export interface SweepOptions {
+  retention?: RetentionPolicy;
+  /** Every orphan, volumes included — volumes hold data, so a human asks. */
+  removeOrphans?: boolean;
+  /**
+   * What the Storage page's button asks for: the orphans that hold no data
+   * (containers, images, networks), and every image with no tag whoever
+   * built it. Never from the periodic pass: a service's container is created
+   * a moment before its row, and a timer landing in between would call it an
+   * orphan.
+   */
+  deep?: boolean;
+  /** Also every image no container uses — the operator's own included. */
+  unusedImages?: boolean;
+  project?: string;
+}
+
+/**
+ * Everything Docker holds on this host, in bytes.
+ *
+ * The only honest measure of a clean. A prune's own total covers the prune
+ * alone, `docker rmi` prints no size at all, and under the containerd image
+ * store even a prune's total counts the manifests and not the layers — so a
+ * clean that removed gigabytes of images could report kilobytes. Before minus
+ * after is what the disk actually got back, give or take the rounding of
+ * `system df`.
+ */
+async function dockerFootprint(): Promise<number | null> {
+  const result = await dockerTry(["system", "df", "--format", "{{.Type}}\t{{.Size}}"], { timeout: 60_000 });
+  return result ? footprintFromDf(result.stdout) : null;
 }
 
 /** The set of project slugs that currently exist. Anything else is an orphan. */
@@ -150,6 +187,10 @@ export async function findOrphans(): Promise<OrphanReport> {
     })
     .map((image) => (image.tag === "<none>" ? image.id : `${image.repository}:${image.tag}`));
 
+  // What compose built for a project that is gone. Its images carry compose's
+  // labels rather than ours, so the listing above never saw them.
+  images.push(...(await listComposeOrphanImages(slugs)));
+
   const volumes = lines(volumesOut?.stdout ?? "")
     .map((line) => {
       const [name, labels] = line.split("\t");
@@ -172,9 +213,7 @@ export async function findOrphans(): Promise<OrphanReport> {
  * `removeOrphans` is opt-in because orphaned volumes hold data: a project
  * deleted by accident can still be recovered from its volume until this runs.
  */
-export async function sweep(
-  options: { retention?: RetentionPolicy; removeOrphans?: boolean; project?: string } = {}
-): Promise<SweepResult> {
+export async function sweep(options: SweepOptions = {}): Promise<SweepResult> {
   const retention = options.retention ?? DEFAULT_RETENTION;
   const result: SweepResult = {
     containers: [],
@@ -183,11 +222,19 @@ export async function sweep(
     networks: [],
     reclaimedBytes: 0,
     prunedImageTags: [],
+    unusedImages: [],
   };
 
   if (!(await isDockerAvailable())) {
     return { ...result, skipped: "Docker non è raggiungibile" };
   }
+
+  // Not after a deploy: that pass is scoped to one project, nobody reads its
+  // total, and `system df` can take seconds on a host with many images.
+  const before = options.project ? null : await dockerFootprint();
+  // What the prunes say they freed: a floor under the measured figure, for
+  // when `system df` could not be read.
+  let reported = 0;
 
   // 1. Retention on per-project images.
   const slugs = options.project ? [options.project] : [...(await knownSlugs())];
@@ -195,8 +242,9 @@ export async function sweep(
     result.prunedImageTags.push(...(await pruneProjectImages(slug, retention.imagesPerProject)));
   }
 
-  // 2. Orphans, only when asked.
-  if (options.removeOrphans) {
+  // 2. Orphans. The ones that hold no data on the deep pass; volumes too only
+  // when a human asked for exactly that.
+  if (options.removeOrphans || options.deep) {
     const orphans = await findOrphans();
 
     for (const name of orphans.containers) {
@@ -204,15 +252,28 @@ export async function sweep(
     }
     await removeImages(orphans.images);
     result.images.push(...orphans.images);
-    result.volumes.push(...(await removeVolumes(orphans.volumes)));
+    if (options.removeOrphans) {
+      result.volumes.push(...(await removeVolumes(orphans.volumes)));
+    }
     for (const name of orphans.networks) {
       if (await dockerTry(["network", "rm", name])) result.networks.push(name);
     }
   }
 
-  // 3. Dangling images we produced, then build cache.
-  result.reclaimedBytes += await pruneDanglingOwned();
-  result.reclaimedBytes += await pruneBuildCache(retention.buildCacheHours);
+  // 3. Images with no tag — ours on the routine pass, all of them on the deep
+  // one — then, when asked, every image nothing uses. After the orphans, so
+  // the layers an orphaned image was holding go in the same pass.
+  reported += await pruneDangling(options.deep ?? false);
+  if (options.unusedImages) {
+    result.unusedImages.push(...(await removeUnusedImages()));
+  }
+
+  // 4. Build cache, by age; zero hours is all of it.
+  reported += await pruneBuildCache(retention.buildCacheHours);
+
+  const after = before === null ? null : await dockerFootprint();
+  const measured = before !== null && after !== null ? Math.max(0, before - after) : 0;
+  result.reclaimedBytes = Math.max(measured, reported);
 
   // 4. Build logs whose deployment row is gone. Deployments cascade away with
   // their project, but the log files sit outside the database and would

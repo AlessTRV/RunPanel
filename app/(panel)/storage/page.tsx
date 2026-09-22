@@ -9,6 +9,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { SettingToggle } from "@/components/ui/SettingToggle";
 import { SkeletonBlock } from "@/components/ui/Skeletons";
 import { formatBytes } from "@/lib/format";
 
@@ -56,6 +57,14 @@ export default function StoragePage() {
   const [cleaning, setCleaning] = useState(false);
   const [confirmOrphans, setConfirmOrphans] = useState(false);
   const [keepImages, setKeepImages] = useState<number | null>(null);
+  /**
+   * What the button takes besides the garbage nobody needs. All of the build
+   * cache by default — it is only ever cache — and images nothing uses only
+   * when asked, because some of those may be the operator's own and unpushed.
+   */
+  const [allCache, setAllCache] = useState(true);
+  const [unusedImages, setUnusedImages] = useState(false);
+  const [confirmUnused, setConfirmUnused] = useState(false);
 
   const load = useCallback((signal?: AbortSignal) => {
     // State is set from the promise callbacks, never synchronously in the
@@ -82,16 +91,23 @@ export default function StoragePage() {
     return () => controller.abort();
   }, [load]);
 
-  async function runSweep(removeOrphans: boolean) {
+  async function runSweep(mode: "clean" | "orphans") {
     setCleaning(true);
     try {
       const res = await fetch("/api/storage", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          removeOrphans,
-          ...(keepImages != null && data
-            ? { retention: { imagesPerProject: keepImages, buildCacheHours: data.retention.buildCacheHours } }
+          removeOrphans: mode === "orphans",
+          deep: mode === "clean",
+          unusedImages: mode === "clean" && unusedImages,
+          ...(data
+            ? {
+                retention: {
+                  imagesPerProject: keepImages ?? data.retention.imagesPerProject,
+                  buildCacheHours: mode === "clean" && allCache ? 0 : data.retention.buildCacheHours,
+                },
+              }
             : {}),
         }),
       });
@@ -106,9 +122,14 @@ export default function StoragePage() {
           result.containers.length +
           result.images.length +
           result.volumes.length +
-          result.networks.length;
+          result.networks.length +
+          (result.unusedImages?.length ?? 0);
         toast.success(
-          `Recuperati ${formatBytes(result.reclaimedBytes)} · ${removed} risorse rimosse`
+          result.reclaimedBytes > 0
+            ? `Liberati ${formatBytes(result.reclaimedBytes)} · ${removed} risorse rimosse`
+            : removed > 0
+              ? `${removed} risorse rimosse, spazio non misurabile`
+              : "Niente da togliere: Docker è già pulito"
         );
       }
       await load();
@@ -166,7 +187,12 @@ export default function StoragePage() {
         title="Storage"
         description="Immagini, volumi e cache che RunPanel possiede su questo host"
         actions={
-          <Button variant="secondary" size="sm" isPending={cleaning} onPress={() => runSweep(false)}>
+          <Button
+            variant="secondary"
+            size="sm"
+            isPending={cleaning}
+            onPress={() => (unusedImages ? setConfirmUnused(true) : void runSweep("clean"))}
+          >
             <Icon icon="solar:broom-linear" width={16} aria-hidden />
             Pulisci ora
           </Button>
@@ -228,6 +254,36 @@ export default function StoragePage() {
               </li>
             ))}
           </ul>
+        </Panel>
+
+        <Panel className="space-y-3">
+          <PanelHeader
+            title="Cosa toglie Pulisci ora"
+            description="Solo cose che si possono ricreare: nessun volume, nessun dato"
+          />
+          <ul className="text-muted list-disc space-y-1 pl-5 text-sm">
+            <li>Le versioni vecchie delle immagini dei progetti, oltre quelle da tenere qui sotto.</li>
+            <li>
+              Le immagini senza nome che nessun container usa, di chiunque siano: sono gli avanzi
+              delle build, compose compreso.
+            </li>
+            <li>
+              Container, immagini e network orfani di RunPanel, anche quelli costruiti da compose per
+              un progetto eliminato. I volumi orfani restano: si tolgono solo dal pannello qui sotto.
+            </li>
+          </ul>
+          <SettingToggle
+            label="Tutta la cache di build"
+            description="Libera più spazio. La prossima build di ogni progetto riparte da zero e scarica di nuovo le dipendenze. Spento, toglie solo quella più vecchia di una settimana."
+            isSelected={allCache}
+            onChange={setAllCache}
+          />
+          <SettingToggle
+            label="Anche le immagini che nessun container usa"
+            description="Comprese quelle non create da RunPanel: le immagini dei database di versioni vecchie, le immagini di base, quelle di altri progetti Docker sulla macchina. Si riscaricano o si ricostruiscono quando servono; un'immagine costruita a mano e mai pubblicata andrebbe persa."
+            isSelected={unusedImages}
+            onChange={setUnusedImages}
+          />
         </Panel>
 
         <Panel>
@@ -354,7 +410,23 @@ export default function StoragePage() {
             il cui progetto o servizio non esiste più, e non sono recuperabili.
           </>
         }
-        onConfirm={() => runSweep(true)}
+        onConfirm={() => runSweep("orphans")}
+      />
+
+      <ConfirmDialog
+        isOpen={confirmUnused}
+        onOpenChange={setConfirmUnused}
+        destructive
+        title="Togliere anche le immagini non usate?"
+        confirmLabel="Pulisci"
+        description={
+          <>
+            Verranno eliminate tutte le immagini che nessun container usa, anche quelle che RunPanel non
+            ha creato. Le versioni dei progetti tenute per il rollback restano. Un&apos;immagine
+            costruita a mano e mai pubblicata su un registry non si potrà riscaricare.
+          </>
+        }
+        onConfirm={() => runSweep("clean")}
       />
     </>
   );

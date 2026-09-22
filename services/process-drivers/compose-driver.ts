@@ -49,8 +49,10 @@ export const composeDriver: IProcessDriver = {
   },
 
   async remove(slug: string): Promise<void> {
-    // Containers and networks go; named volumes stay, because they are the data.
-    await composeDown(contextFor(slug));
+    // Containers, networks and the images compose built go; named volumes
+    // stay, because they are the data. The images used to stay too, carrying
+    // compose's labels rather than ours, so no clean ever found them.
+    await composeDown(contextFor(slug), { removeImages: true });
     const { removeComposeOverride } = await import("../compose-network");
     removeComposeOverride(slug);
   },
