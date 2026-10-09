@@ -79,7 +79,10 @@ function truncateLogs(slug: string): void {
 /** Run a command through an explicit shell to avoid ENOENT on Windows */
 function shellExec(command: string, options: Record<string, unknown> = {}) {
   const shell = getShellPath();
-  const args = isWindows ? ["/c", command] : ["-c", command];
+  // `/s` plus an outer pair of quotes: cmd strips exactly those, so a quoted
+  // pm2 path and a quoted ecosystem path both survive. Without them cmd
+  // stripped the first and last quote of the line and broke both.
+  const args = isWindows ? ["/d", "/s", "/c", `"${command}"`] : ["-c", command];
   // See the note in `run-command.ts`: Node's default quoting is wrong for
   // cmd.exe. It bites here whenever the pm2 binary is vendored, because then
   // `resolvePm2Command()` returns a quoted path and every pm2 call carries a
