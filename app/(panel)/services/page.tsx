@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { useResource } from "@/lib/hooks/useResource";
 import { usePollInterval } from "@/lib/hooks/usePollingInterval";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { LoadError } from "@/components/ui/LoadError";
 import { LinkButton } from "@/components/ui/LinkButton";
 import { Panel } from "@/components/ui/Panel";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -107,7 +108,7 @@ const ServiceRow = memo(function ServiceRow({
 export default function ServicesPage() {
   const poll5000 = usePollInterval(5000);
   const [search, setSearch] = useState("");
-  const { data, loading, refresh } = useResource<Service[]>("/api/services", { intervalMs: poll5000 });
+  const { data, loading, error: loadError, refresh } = useResource<Service[]>("/api/services", { intervalMs: poll5000 });
 
   // Names only, and without polling: a service's project does not change while
   // the page is open, but "which project is this database attached to" is the
@@ -187,7 +188,9 @@ export default function ServicesPage() {
         </div>
       )}
 
-      {filtered.length === 0 ? (
+      {!data && loadError ? (
+        <LoadError what="i servizi" error={loadError} onRetry={() => void refresh()} />
+      ) : filtered.length === 0 ? (
         <Panel>
           <EmptyState
             icon="solar:database-linear"

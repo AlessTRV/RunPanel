@@ -1,6 +1,7 @@
 "use client";
 
 import { Button } from "@heroui/react";
+import { LoadError } from "@/components/ui/LoadError";
 import { formatRelative } from "@/lib/format";
 import { Icon } from "@iconify/react";
 import { toast } from "sonner";
@@ -48,7 +49,7 @@ function describeDevice(userAgent: string | null): string {
  * them at once.
  */
 export function SessionList() {
-  const { data, loading, refresh } = useResource<{ sessions: Session[] }>("/api/sessions");
+  const { data, loading, error: loadError, refresh } = useResource<{ sessions: Session[] }>("/api/sessions");
   const sessions = data?.sessions ?? [];
 
   async function revoke(id: string) {
@@ -70,6 +71,10 @@ export function SessionList() {
         ))}
       </div>
     );
+  }
+
+  if (!data && loadError) {
+    return <LoadError what="le sessioni" error={loadError} onRetry={() => void refresh()} />;
   }
 
   if (sessions.length === 0) {

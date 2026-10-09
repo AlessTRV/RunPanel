@@ -1,7 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Button, Modal } from "@heroui/react";
+import { toast } from "sonner";
+import { MSG } from "@/lib/copy";
 
 /**
  * The dialog that asks for something, rather than asking whether.
@@ -47,11 +49,23 @@ export function FormDialog({
   destructive?: boolean;
   /** For a dialog that holds a list or a table rather than a couple of fields. */
   wide?: boolean;
-  onSubmit: () => void | Promise<void>;
+  /** Return `false` to keep the dialog, and what was typed, after a failure. */
+  onSubmit: () => void | boolean | Promise<void | boolean>;
   children: React.ReactNode;
 }) {
+  // A ref rather than state: the body owns `pending`, and the backdrop only
+  // needs to read it at the moment it is asked to close.
+  const busyRef = useRef(false);
+
   return (
-    <Modal.Backdrop isOpen={isOpen} onOpenChange={onOpenChange}>
+    <Modal.Backdrop
+      isOpen={isOpen}
+      onOpenChange={(open) => {
+        // Esc and backdrop must not close a dialog whose submit is running.
+        if (!open && busyRef.current) return;
+        onOpenChange(open);
+      }}
+    >
       <Modal.Container>
         <Modal.Dialog className={wide ? "max-w-2xl" : undefined}>
           <DialogBody
@@ -63,6 +77,7 @@ export function FormDialog({
             destructive={destructive}
             onSubmit={onSubmit}
             onOpenChange={onOpenChange}
+            busyRef={busyRef}
           >
             {children}
           </DialogBody>
@@ -86,6 +101,7 @@ function DialogBody({
   destructive,
   onSubmit,
   onOpenChange,
+  busyRef,
   children,
 }: {
   title: string;
@@ -94,18 +110,27 @@ function DialogBody({
   cancelLabel: string;
   isSubmitDisabled: boolean;
   destructive: boolean;
-  onSubmit: () => void | Promise<void>;
+  /** Return `false` to keep the dialog, and what was typed, after a failure. */
+  onSubmit: () => void | boolean | Promise<void | boolean>;
   onOpenChange: (open: boolean) => void;
+  busyRef: React.RefObject<boolean>;
   children: React.ReactNode;
 }) {
   const [pending, setPending] = useState(false);
 
   async function handleSubmit() {
     setPending(true);
+    busyRef.current = true;
     try {
-      await onSubmit();
+      // `false` means the submit failed and said so itself: keep the input.
+      if ((await onSubmit()) === false) return;
       onOpenChange(false);
+    } catch (err) {
+      // Callers that already reported their failure throw to stay open; only a
+      // fetch that never reached the panel (a TypeError) is left to say here.
+      if (err instanceof TypeError) toast.error(MSG.unreachable);
     } finally {
+      busyRef.current = false;
       setPending(false);
     }
   }

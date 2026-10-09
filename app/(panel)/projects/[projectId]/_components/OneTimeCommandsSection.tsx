@@ -90,7 +90,8 @@ export function OneTimeCommandsSection({
   runtimeType: string;
   queued: OneTimeCommand[];
   isDeploying: boolean;
-  onChanged: () => void;
+  /** Con la coda appena salvata quando c'è, senza per chiedere di rileggere il progetto. */
+  onChanged: (queued?: OneTimeCommand[]) => void;
 }) {
   const [rows, setRows] = useState<Row[]>(() => queued.map(toRow));
   const [error, setError] = useState<string | null>(null);
@@ -107,8 +108,14 @@ export function OneTimeCommandsSection({
   const stored = JSON.stringify(queued);
   const [baseline, setBaseline] = useState(stored);
   if (stored !== baseline) {
+    // Righe modificate rispetto alla coda di prima: non si toccano, un deploy
+    // che prende in carico la coda non deve cancellare quello che stai
+    // scrivendo. Il salvataggio poi risponde 409 se la coda è cambiata.
+    const edited =
+      JSON.stringify(rows.filter((row) => row.command.trim()).map(toStored)) !==
+      JSON.stringify((JSON.parse(baseline) as OneTimeCommand[]).map(toRow).map(toStored));
     setBaseline(stored);
-    setRows(queued.map(toRow));
+    if (!edited) setRows(queued.map(toRow));
   }
 
   // La cronologia costa, e nessuno la guarda finchè non la apre.
@@ -155,11 +162,17 @@ export function OneTimeCommandsSection({
 
       if (!res.ok) {
         setError(data.details?.[0]?.message ?? data.error ?? MSG.saveFailed);
+        if (data.code === "queue-changed") {
+          // Le righe tengono id che un deploy ha già preso: si riparte dalla
+          // coda attuale, o ogni salvataggio risponderebbe di nuovo 409.
+          setRows(queued.map(toRow));
+          onChanged();
+        }
         return;
       }
       setError(null);
       toast.success("Coda salvata");
-      onChanged();
+      onChanged(Array.isArray(data.queued) ? (data.queued as OneTimeCommand[]) : undefined);
     } catch {
       setError(MSG.saveFailed);
     } finally {

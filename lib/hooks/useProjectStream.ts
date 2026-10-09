@@ -11,7 +11,9 @@ export type StreamEvent =
   | { type: "process:reset" }
   | { type: "process:status"; status: string; running: boolean; pid?: number; uptime?: number }
   | { type: "terminal:output"; text: string }
-  | { type: "terminal:closed"; code: number | null };
+  | { type: "terminal:closed"; code: number | null }
+  /** A files move or a mount apply moved on: the project row changed. */
+  | { type: "mount:phase"; phase: string; error?: string };
 
 /**
  * Subscribes to a project's event stream.

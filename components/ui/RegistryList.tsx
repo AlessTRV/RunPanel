@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { LoadError } from "@/components/ui/LoadError";
 import { Button, Input, Label, TextField } from "@heroui/react";
 import { Icon } from "@iconify/react";
 import { DeleteButton } from "./DangerAction";
@@ -21,7 +22,7 @@ interface Registry {
  * the host user's `~/.docker` and affect everything else they run.
  */
 export function RegistryList() {
-  const { data, loading, refresh } = useResource<{ registries: Registry[]; dockerHub: string }>(
+  const { data, loading, error: loadError, refresh } = useResource<{ registries: Registry[]; dockerHub: string }>(
     "/api/registries"
   );
 
@@ -76,7 +77,9 @@ export function RegistryList() {
 
   return (
     <div className="space-y-3">
-      {registries.length === 0 ? (
+      {!data && loadError ? (
+        <LoadError what="i registry" error={loadError} onRetry={() => void refresh()} />
+      ) : registries.length === 0 ? (
         <p className="text-muted text-sm">
           Nessun registry configurato. Le immagini pubbliche funzionano comunque.
         </p>

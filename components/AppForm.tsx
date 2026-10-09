@@ -8,6 +8,7 @@ import { Icon } from "@iconify/react";
 import { toast } from "sonner";
 import { useResource } from "@/lib/hooks/useResource";
 import { Segmented } from "@/components/ui/Segmented";
+import { LoadError } from "@/components/ui/LoadError";
 import { InfoTip } from "@/components/ui/Tooltip";
 import { formatRelative } from "@/lib/format";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
@@ -114,7 +115,7 @@ export function AppForm({
   const presets = presetData?.presets ?? [];
   const selectedPreset = presets.find((preset) => preset.id === presetId) ?? null;
 
-  const { data: repoData, loading: reposLoading } = useResource<{
+  const { data: repoData, loading: reposLoading, error: reposError, refresh: refreshRepos } = useResource<{
     connected?: boolean;
     repos?: GhRepo[];
   }>("/api/github/repos");
@@ -308,6 +309,10 @@ export function AppForm({
                   {manualUrl ? "Nascondi" : "Oppure incolla un URL"}
                 </button>
               </div>
+            ) : reposError && !repoData ? (
+              // A failed list (rate limit, network) is not "no account": the
+              // operator must not be sent to reconnect GitHub over it.
+              <LoadError what="i repository" error={reposError} onRetry={() => void refreshRepos()} />
             ) : (
               <div className="border-border rounded-[var(--radius)] border border-dashed px-3 py-4">
                 <p className="text-foreground text-sm">Nessun account GitHub collegato</p>

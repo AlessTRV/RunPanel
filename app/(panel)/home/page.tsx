@@ -369,7 +369,8 @@ export default function HomePage() {
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
       toast.error(data.error ?? (isRename ? "Rinomina non riuscita" : "Creazione non riuscita"));
-      return;
+      // Keeps the dialog open on what was typed.
+      return false;
     }
     await refreshFolders();
   }
@@ -396,7 +397,10 @@ export default function HomePage() {
     ? (metrics.disk.used / metrics.disk.total) * 100
     : undefined;
 
+  // Not "nothing" when the list simply failed to arrive: that showed the
+  // create-your-first-project invitation next to the error.
   const nothingAtAll =
+    !(error && !projects) &&
     grouped.folders.length === 0 && grouped.rootProjects.length === 0 && grouped.looseServices.length === 0;
   const hasFolders = grouped.folders.length > 0;
 

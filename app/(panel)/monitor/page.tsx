@@ -6,6 +6,7 @@ import { Icon } from "@iconify/react";
 import { useResource } from "@/lib/hooks/useResource";
 import { usePollInterval } from "@/lib/hooks/usePollingInterval";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { LoadError } from "@/components/ui/LoadError";
 import { Panel } from "@/components/ui/Panel";
 import { StatTile } from "@/components/ui/StatTile";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -150,7 +151,7 @@ export default function MonitorPage() {
   // Polls, but stops while the tab is hidden — this endpoint inspects
   // containers, so an idle background tab was doing real work on the host
   // every three seconds forever.
-  const { data, loading } = useResource<MonitorData>("/api/monitor", { intervalMs: poll3000 });
+  const { data, loading, error: loadError, refresh } = useResource<MonitorData>("/api/monitor", { intervalMs: poll3000 });
 
   const toggle = useCallback((id: string) => {
     setCollapsed((prev) => {
@@ -162,7 +163,9 @@ export default function MonitorPage() {
   }, []);
 
   if (loading && !data) return <PageSkeleton />;
-  if (!data) return null;
+  if (!data) {
+    return <LoadError what="il monitor" error={loadError ?? "Nessuna risposta"} onRetry={() => void refresh()} />;
+  }
 
   const memoryPercent = data.server.memory.total
     ? (data.server.memory.used / data.server.memory.total) * 100

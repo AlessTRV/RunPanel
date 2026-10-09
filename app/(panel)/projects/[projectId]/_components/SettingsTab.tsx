@@ -103,9 +103,12 @@ interface Preset {
 export function SettingsTab({
   project,
   onProjectChange,
+  onRefresh,
 }: {
   project: Project;
   onProjectChange: (project: Project) => void;
+  /** Re-read the project from the server, after an action that changed it there. */
+  onRefresh: () => void;
 }) {
   const router = useRouter();
   const [contract, setContract] = useState<DeployContract>(() =>
@@ -493,7 +496,7 @@ export function SettingsTab({
         runtimeType={runtimeType}
         queued={project.oneTimeCommands ?? []}
         isDeploying={project.status === "deploying"}
-        onChanged={() => onProjectChange({ ...project })}
+        onChanged={(queued) => (queued ? onProjectChange({ ...project, oneTimeCommands: queued }) : onRefresh())}
       />
 
       {/*
@@ -738,7 +741,7 @@ export function SettingsTab({
           <MountsSection
             projectId={project.id}
             mounts={project.mounts ?? []}
-            onApplied={() => onProjectChange({ ...project })}
+            onApplied={onRefresh}
           />
         </Section>
       )}
@@ -754,7 +757,7 @@ export function SettingsTab({
           location={project.repo_location}
           repoPath={project.repo_path}
           move={project.repoMove}
-          onChanged={() => onProjectChange({ ...project })}
+          onChanged={onRefresh}
         />
       )}
 

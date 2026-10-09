@@ -6,6 +6,7 @@ import { Icon } from "@iconify/react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { LoadError } from "@/components/ui/LoadError";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
@@ -54,6 +55,7 @@ interface StorageData {
 export default function StoragePage() {
   const [data, setData] = useState<StorageData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [cleaning, setCleaning] = useState(false);
   const [confirmOrphans, setConfirmOrphans] = useState(false);
   const [keepImages, setKeepImages] = useState<number | null>(null);
@@ -71,16 +73,17 @@ export default function StoragePage() {
     // effect body — that is what turns a fetch-on-mount into cascading renders.
     return fetch("/api/storage", { signal })
       .then((res) => {
-        if (!res.ok) throw new Error("request failed");
+        if (!res.ok) throw new Error(`Il server ha risposto ${res.status}`);
         return res.json();
       })
       .then((json: StorageData) => {
         setData(json);
+        setLoadError(null);
         setLoading(false);
       })
       .catch((err: unknown) => {
         if (err instanceof DOMException && err.name === "AbortError") return;
-        toast.error("Impossibile leggere lo stato dello storage");
+        setLoadError(err instanceof Error ? err.message : "Errore di rete");
         setLoading(false);
       });
   }, []);
@@ -158,6 +161,11 @@ export default function StoragePage() {
         </div>
       </>
     );
+  }
+
+  // A failed read is not a verdict on Docker: say what failed.
+  if (!data && loadError) {
+    return <LoadError what="lo stato dello storage" error={loadError} onRetry={() => void load()} />;
   }
 
   if (!data?.dockerAvailable) {

@@ -5,6 +5,7 @@ import { Button } from "@heroui/react";
 import { Icon } from "@iconify/react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { LoadError } from "@/components/ui/LoadError";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { Section } from "@/components/ui/Section";
 import { Hint, FieldHint } from "@/components/ui/Hint";
@@ -164,6 +165,9 @@ export default function UpdatesPage() {
     }
   }
 
+  if (!data && error) {
+    return <LoadError what="lo stato degli aggiornamenti" error={error} onRetry={() => void refresh()} />;
+  }
   if (!data) return <PageSkeleton />;
 
   const { check, checkout, run, canUpdate, blocker } = data;

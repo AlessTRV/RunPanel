@@ -91,11 +91,11 @@ export function RestoreDialog({
   async function submit() {
     if (selected.length === 0) {
       toast.error("Scegli almeno un elemento da ripristinare");
-      return;
+      return false;
     }
     if (!confirmed) {
       toast.error(`Per confermare, scrivi esattamente: ${requiredName}`);
-      return;
+      return false;
     }
 
     const res = await fetch("/api/backups/restore", {

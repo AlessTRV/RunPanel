@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { LoadError } from "@/components/ui/LoadError";
 import { Button, Input, Label, TextField } from "@heroui/react";
 import { Icon } from "@iconify/react";
 import { toast } from "sonner";
@@ -38,7 +39,7 @@ interface Chat {
  * draw the difference between "connect" and "replace".
  */
 export function NotificationSettings() {
-  const { data, loading, refresh } = useResource<Config>("/api/notifications");
+  const { data, loading, error: loadError, refresh } = useResource<Config>("/api/notifications");
 
   const [token, setToken] = useState("");
   const [chatId, setChatId] = useState<string | null>(null);
@@ -46,6 +47,9 @@ export function NotificationSettings() {
   const [busy, setBusy] = useState<"test" | "chats" | null>(null);
   const [chats, setChats] = useState<Chat[] | null>(null);
 
+  if (!data && loadError) {
+    return <LoadError what="le notifiche" error={loadError} onRetry={() => void refresh()} />;
+  }
   if (loading || !data) return <SkeletonBlock className="h-40" />;
 
   // Local edit wins until it is saved; otherwise show what the panel holds.

@@ -7,6 +7,7 @@ import { Button } from "@heroui/react";
 import { Icon } from "@iconify/react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { LoadError } from "@/components/ui/LoadError";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { LinkButton } from "@/components/ui/LinkButton";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -242,7 +243,9 @@ export default function BackupsPage() {
             />
           </div>
 
-          {policyList.length === 0 ? (
+          {!policies.data && policies.error ? (
+            <LoadError what="le pianificazioni" error={policies.error} onRetry={() => void policies.refresh()} />
+          ) : policyList.length === 0 ? (
             <EmptyState
               icon="solar:calendar-linear"
               title="Nessun backup pianificato"
@@ -336,7 +339,9 @@ export default function BackupsPage() {
             />
           </div>
 
-          {runList.length === 0 ? (
+          {!runs.data && runs.error ? (
+            <LoadError what="la cronologia" error={runs.error} onRetry={() => void runs.refresh()} />
+          ) : runList.length === 0 ? (
             <EmptyState
               icon="solar:archive-linear"
               title="Nessun backup eseguito"

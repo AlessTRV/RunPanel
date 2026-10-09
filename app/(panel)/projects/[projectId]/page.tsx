@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { Input, Label, TextField } from "@heroui/react";
 import { toast } from "sonner";
+import { MSG } from "@/lib/copy";
 import { useProjectStream } from "@/lib/hooks/useProjectStream";
 import { useResource } from "@/lib/hooks/useResource";
 import { usePollInterval } from "@/lib/hooks/usePollingInterval";
@@ -19,6 +20,7 @@ import { ProjectStats } from "./_components/ProjectStats";
 import { LogsTab } from "./_components/LogsTab";
 import { DeploymentsTab } from "./_components/DeploymentsTab";
 import { EnvTab } from "./_components/EnvTab";
+import { LoadError } from "@/components/ui/LoadError";
 import { TerminalTab } from "./_components/TerminalTab";
 import { SettingsTab } from "./_components/SettingsTab";
 import { VersionDialog } from "./_components/VersionDialog";
@@ -76,14 +78,23 @@ export default function ProjectDetailPage() {
 
   const prevStatus = useRef<string | undefined>(undefined);
 
+  const [loadError, setLoadError] = useState<string | null>(null);
   const refreshProject = useCallback(
     (signal?: AbortSignal) =>
       fetch(`/api/projects/${projectId}`, { signal })
         .then((res) => {
-          if (!res.ok) throw new Error("not found");
+          // Only a 404 means the project is gone. Anything else (a 500, a
+          // dropped connection mid-deploy) keeps the page where it is.
+          if (res.status === 404) {
+            router.push("/home");
+            return null;
+          }
+          if (!res.ok) throw new Error(`Il server ha risposto ${res.status}`);
           return res.json();
         })
-        .then((p: Project) => {
+        .then((p: Project | null) => {
+          if (!p) return;
+          setLoadError(null);
           setProject(p);
           setRenameValue(p.name);
           prevStatus.current = p.status;
@@ -91,7 +102,7 @@ export default function ProjectDetailPage() {
         })
         .catch((err: unknown) => {
           if (err instanceof DOMException && err.name === "AbortError") return;
-          router.push("/home");
+          setLoadError(err instanceof Error ? err.message : MSG.unreachable);
         }),
     [projectId, router]
   );
@@ -122,6 +133,10 @@ export default function ProjectDetailPage() {
         break;
       case "terminal:closed":
         setShellActive(false);
+        break;
+      case "mount:phase":
+        // A move of the files or a mount apply changed the row on the server.
+        void refreshProject();
         break;
       case "deploy:status": {
         const previous = prevStatus.current;
@@ -171,7 +186,7 @@ export default function ProjectDetailPage() {
     [deploymentsData]
   );
 
-  const { data: envData, loading: envLoading } = useResource<EnvVar[]>(
+  const { data: envData, loading: envLoading, error: envError, refresh: refreshEnv } = useResource<EnvVar[]>(
     activeTab === "env" ? `/api/projects/${projectId}/env?reveal=true` : null
   );
 
@@ -321,6 +336,12 @@ export default function ProjectDetailPage() {
     ];
   }, [project]);
 
+  // A failed first load says so; a failed refresh keeps the page it has.
+  if (!project && loadError) {
+    return (
+      <LoadError what="il progetto" error={loadError} onRetry={() => void refreshProject()} className="p-4" />
+    );
+  }
   if (loading || !project) return <PageSkeleton />;
 
   return (
@@ -358,7 +379,13 @@ export default function ProjectDetailPage() {
         />
       )}
 
-      {activeTab === "env" && (
+      {/* Never mount the editor over a failed load: it would start empty, and
+          saving replaces the whole set, which would delete every variable. */}
+      {activeTab === "env" && envError && !envData && (
+        <LoadError what="le variabili" error={envError} onRetry={() => void refreshEnv()} />
+      )}
+
+      {activeTab === "env" && !(envError && !envData) && (
         <EnvTab
           // Keyed on whether the data has arrived, so the editable copy is
           // seeded by React remounting the component rather than by an effect
@@ -383,7 +410,7 @@ export default function ProjectDetailPage() {
       )}
 
       {activeTab === "settings" && (
-        <SettingsTab project={project} onProjectChange={setProject} />
+        <SettingsTab project={project} onProjectChange={setProject} onRefresh={() => void refreshProject()} />
       )}
 
       {/*
@@ -415,6 +442,7 @@ export default function ProjectDetailPage() {
           } else {
             const data = await res.json().catch(() => ({}));
             toast.error(data.error ?? "Rinomina non riuscita");
+            return false;
           }
         }}
       >

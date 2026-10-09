@@ -6,6 +6,7 @@ import { Icon } from "@iconify/react";
 import { toast } from "sonner";
 import { MSG } from "@/lib/copy";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { LoadError } from "@/components/ui/LoadError";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { Section } from "@/components/ui/Section";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -28,7 +29,7 @@ const METHOD_LABELS: Record<string, string> = {
 
 export default function AutostartPage() {
   const poll15000 = usePollInterval(15000);
-  const { data, loading, refresh } = useResource<AutostartData>("/api/autostart", {
+  const { data, loading, error: loadError, refresh } = useResource<AutostartData>("/api/autostart", {
     intervalMs: poll15000,
   });
 
@@ -152,6 +153,15 @@ export default function AutostartPage() {
     } finally {
       setBusy(null);
     }
+  }
+
+  if (!data && loadError) {
+    return (
+      <>
+        <PageHeader title="Avvio automatico" />
+        <LoadError what="lo stato dell'avvio automatico" error={loadError} onRetry={() => void refresh()} />
+      </>
+    );
   }
 
   if (loading && !data) {

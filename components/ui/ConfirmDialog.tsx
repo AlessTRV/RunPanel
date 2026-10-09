@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import { AlertDialog, Button } from "@heroui/react";
+import { toast } from "sonner";
+import { MSG } from "@/lib/copy";
 
 /**
  * Confirmation for destructive actions.
@@ -31,15 +33,21 @@ export function ConfirmDialog({
   confirmLabel?: string;
   cancelLabel?: string;
   destructive?: boolean;
-  onConfirm: () => void | Promise<void>;
+  /** Return `false` to keep the dialog open after a failure it already reported. */
+  onConfirm: () => void | boolean | Promise<void | boolean>;
 }) {
   const [pending, setPending] = useState(false);
 
   async function handleConfirm() {
     setPending(true);
     try {
-      await onConfirm();
+      // `false` means the action failed and said so itself: stay open.
+      if ((await onConfirm()) === false) return;
       onOpenChange(false);
+    } catch (err) {
+      // Callers that already reported their failure throw to stay open; only a
+      // fetch that never reached the panel (a TypeError) is left to say here.
+      if (err instanceof TypeError) toast.error(MSG.unreachable);
     } finally {
       setPending(false);
     }
@@ -67,7 +75,8 @@ export function ConfirmDialog({
           </AlertDialog.Header>
           {description && (
             <AlertDialog.Body>
-              <p className="text-muted text-sm">{description}</p>
+              {/* A div, not a p: callers put labels and controls in here. */}
+              <div className="text-muted text-sm">{description}</div>
             </AlertDialog.Body>
           )}
           <AlertDialog.Footer className="justify-end gap-2">

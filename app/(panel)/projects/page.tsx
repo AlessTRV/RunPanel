@@ -7,6 +7,7 @@ import { Icon } from "@iconify/react";
 import { useResource } from "@/lib/hooks/useResource";
 import { usePollInterval } from "@/lib/hooks/usePollingInterval";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { LoadError } from "@/components/ui/LoadError";
 import { LinkButton } from "@/components/ui/LinkButton";
 import { Panel } from "@/components/ui/Panel";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -71,7 +72,7 @@ const ProjectRow = memo(function ProjectRow({ project }: { project: Project }) {
 export default function ProjectsPage() {
   const poll5000 = usePollInterval(5000);
   const [search, setSearch] = useState("");
-  const { data, loading } = useResource<Project[]>("/api/projects", { intervalMs: poll5000 });
+  const { data, loading, error: loadError, refresh } = useResource<Project[]>("/api/projects", { intervalMs: poll5000 });
 
   const projects = useMemo(() => (Array.isArray(data) ? data : []), [data]);
 
@@ -109,7 +110,9 @@ export default function ProjectsPage() {
         </div>
       )}
 
-      {filtered.length === 0 ? (
+      {!data && loadError ? (
+        <LoadError what="i progetti" error={loadError} onRetry={() => void refresh()} />
+      ) : filtered.length === 0 ? (
         <Panel>
           <EmptyState
             icon="solar:widget-2-linear"

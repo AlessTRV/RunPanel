@@ -3,6 +3,7 @@
 import { Button } from "@heroui/react";
 import { Icon } from "@iconify/react";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { LoadError } from "@/components/ui/LoadError";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { CheckList, type Check } from "@/components/ui/CheckList";
 import { Hint } from "@/components/ui/Hint";
@@ -23,13 +24,23 @@ interface DiagnosticsData {
 export default function DiagnosticsPage() {
   const poll30000 = usePollInterval(30_000);
 
-  const { data, loading, refresh, refreshing } = useResource<DiagnosticsData>("/api/diagnostics", {
+  const { data, loading, error: loadError, refresh, refreshing } = useResource<DiagnosticsData>("/api/diagnostics", {
     intervalMs: poll30000,
     // Polling takes the 30s cache — the checks shell out to docker, pm2 and
     // systemctl, and this page is not the only one asking. "Ricontrolla" means
     // run them again, so it asks a different question.
     refreshUrl: "/api/diagnostics?fresh=1",
   });
+
+  // Without data there is no verdict: "Tutto in ordine" over zero checks lied.
+  if (!data && loadError) {
+    return (
+      <>
+        <PageHeader title="Diagnostica" />
+        <LoadError what="la diagnostica" error={loadError} onRetry={() => void refresh()} />
+      </>
+    );
+  }
 
   if (loading && !data) {
     return (

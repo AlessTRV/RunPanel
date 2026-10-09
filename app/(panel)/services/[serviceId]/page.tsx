@@ -11,6 +11,7 @@ import { usePollInterval } from "@/lib/hooks/usePollingInterval";
 import { useLineBuffer } from "@/lib/hooks/useLineBuffer";
 import { useServiceStream, type ConsoleMode, type MountApply } from "@/lib/hooks/useServiceStream";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { LoadError } from "@/components/ui/LoadError";
 import { FormDialog } from "@/components/ui/FormDialog";
 import { Code, FieldHint, Hint } from "@/components/ui/Hint";
 import { Panel } from "@/components/ui/Panel";
@@ -62,7 +63,7 @@ export default function ServiceDetailPage() {
   const searchParams = useSearchParams();
   const serviceId = params.serviceId as string;
 
-  const { data: service, loading, refresh } = useResource<Service>(
+  const { data: service, loading, error: loadError, refresh } = useResource<Service>(
     `/api/services/${serviceId}`,
     { intervalMs: poll5000 }
   );
@@ -212,6 +213,17 @@ export default function ServiceDetailPage() {
   }
 
   if (loading && !service) return <PageSkeleton />;
+
+  // Only a 404 means it is gone. Anything else must not invite the operator
+  // to recreate a service that still exists.
+  if (!service && loadError && !loadError.includes("404")) {
+    return (
+      <>
+        <PageHeader title="Servizio" />
+        <LoadError what="il servizio" error={loadError} onRetry={() => void refresh()} />
+      </>
+    );
+  }
 
   if (!service) {
     return (
