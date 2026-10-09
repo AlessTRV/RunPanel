@@ -301,9 +301,16 @@ async function runDeploy(
         }
       }
 
-      appendLog("\n--- Cleaning build artifacts ---");
+      // An uploaded project has no remote to get these back from: its dist/ or
+      // build/ may be the prebuilt site itself, and deleting it is final.
+      const cleanDirs = project.source_type === "upload" ? [] : (REBUILD_CLEAN_DIRS[project.runtime_type] ?? []);
+      appendLog(
+        project.source_type === "upload"
+          ? "\n--- Build artifacts kept: an uploaded project has no other copy of them ---"
+          : "\n--- Cleaning build artifacts ---"
+      );
       const cleanDir = getRepoPath(project.slug);
-      for (const dir of REBUILD_CLEAN_DIRS[project.runtime_type] ?? []) {
+      for (const dir of cleanDirs) {
         const fullPath = path.join(cleanDir, dir);
         if (fs.existsSync(fullPath)) {
           try {
@@ -627,7 +634,10 @@ async function runDeploy(
       await runReleaseCommand(contract.commands.release, {
         runtimeType: project.runtime_type,
         slug: project.slug,
-        projectDir: buildResult.artifactDir,
+        // The repository, as the settings promise and the one-time phases use:
+        // a static build's artifactDir is dist/, where repo-relative paths and
+        // the written .env are not.
+        projectDir: getRepoPath(project.slug),
         image: buildResult.startCmd.replace(/^docker:/, ""),
         env: envVars,
         contract,
@@ -820,17 +830,15 @@ async function runDeploy(
     });
 
     // Record what is actually up, not what was up when the deploy began: a
-    // health check failure arrives with the new process already started, so the
-    // opening snapshot is what let the row say "stopped" about a live app.
-    // Windows only, for the same reason as above — it is the platform where the
-    // next rebuild is then unable to clean the directory that app is holding.
+    // health check failure arrives with the new process already started, and
+    // the pipeline may itself have stopped the old instance (rebuild, or a
+    // start that failed after the stop). A row left at "error" with nothing
+    // running is one the reconciler never revisits.
     let stillRunning = wasRunning;
-    if (isWindows) {
-      try {
-        stillRunning = (await processManager.status(project.slug, project.runtime_type)).running;
-      } catch {
-        /* a driver that cannot answer leaves the opening snapshot standing */
-      }
+    try {
+      stillRunning = (await processManager.status(project.slug, project.runtime_type)).running;
+    } catch {
+      /* a driver that cannot answer leaves the opening snapshot standing */
     }
 
     // Running after a failed deploy is an error state — it is serving, but not

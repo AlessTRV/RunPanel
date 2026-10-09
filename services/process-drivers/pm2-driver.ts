@@ -206,6 +206,11 @@ function invalidatePm2Cache(): void {
  * an app still listening on every interface — which would leave a way past the
  * gate. The env vars are set too, for everything that does read them.
  */
+/** Whether a start command uses syntax only a shell understands. */
+export function needsShell(cmd: string): boolean {
+  return /[&|;$`"'<>()*]/.test(cmd) || /(^|\s)[A-Za-z_][A-Za-z0-9_]*=/.test(cmd);
+}
+
 function resolveStartCmd(startCmd: string, cwd: string, port: number, bindHost?: string): string {
   const withFlags = (cmd: string): string => {
     const binary = cmd.split(/\s+/)[0];
@@ -239,7 +244,11 @@ function resolveStartCmd(startCmd: string, cwd: string, port: number, bindHost?:
       const pkg = JSON.parse(fs.readFileSync(path.join(cwd, "package.json"), "utf-8"));
       const script = pkg.scripts?.start as string | undefined;
       if (script && /^(next|vite|nuxt)\s+(start|preview|dev)/.test(script)) {
-        return `${pmRunMatch[1]} ${withFlags(script)}`;
+        // bun, yarn and pnpm run a local bin by name; npm has no such fallback
+        // (`npm next` is "Unknown command"), so it goes through npx, which
+        // must not download anything the project did not install.
+        const runner = pmRunMatch[1] === "npm" ? "npx --no" : pmRunMatch[1];
+        return `${runner} ${withFlags(script)}`;
       }
     } catch { /* fallback */ }
   }
@@ -312,8 +321,16 @@ export const pm2Driver: IProcessDriver = {
     // project a PATH with neither bun nor node on it.
     const systemPath = toolchainPath();
 
-    // Split command into binary and args: "bun next start -p 3002" → ["bun", "next", "start", "-p", "3002"]
-    const cmdParts = portAwareCmd.split(/\s+/);
+    // A plain command is split into binary and args and exec'd directly, so
+    // the app keeps the wrapper's pid: "bun next start -p 3002" → ["bun",
+    // "next", "start", "-p", "3002"]. Shell syntax (an env assignment, &&, a
+    // pipe, $VAR, quotes) cannot survive that split, so only then the command
+    // goes to a shell whole.
+    const cmdParts = needsShell(portAwareCmd)
+      ? isWindows
+        ? [process.env.ComSpec || "cmd.exe", "/d", "/s", "/c", `"${portAwareCmd}"`]
+        : ["/bin/sh", "-c", portAwareCmd]
+      : portAwareCmd.trim().split(/\s+/);
 
     // Secrets go into a 0600 sidecar the wrapper reads at startup, not inlined
     // into the wrapper source. The generated wrapper used to contain every
@@ -360,6 +377,9 @@ const child = execFile(${JSON.stringify(cmdParts[0])}, ${JSON.stringify(cmdParts
   env: process.env,
   maxBuffer: 50 * 1024 * 1024,
   windowsHide: true,
+  // A command handed to cmd.exe whole is parsed by cmd itself; Node's
+  // re-quoting would mangle any quotes in it.
+  windowsVerbatimArguments: ${JSON.stringify(cmdParts.length === 5 && cmdParts[1] === "/d")},
 });
 
 child.stdout.pipe(process.stdout);
@@ -428,7 +448,7 @@ child.on("error", (e) => { console.error("Process error:", e.message); process.e
     fs.writeFileSync(ecosystemFile, JSON.stringify(ecosystem, null, 2));
 
     const { stdout: pm2Out, stderr: pm2Err } = await shellExec(
-      `${resolvePm2Command()} start ${ecosystemFile}`, { env, timeout: 60_000 }
+      `${resolvePm2Command()} start "${ecosystemFile}"`, { env, timeout: 60_000 }
     );
     invalidatePm2Cache();
 
@@ -465,7 +485,7 @@ child.on("error", (e) => { console.error("Process error:", e.message); process.e
       } catch { /* ignore */ }
       truncateLogs(slug);
       const env = buildEnv();
-      await shellExec(`${pm2} start ${ecosystemFile}`, { env, timeout: 60_000 });
+      await shellExec(`${pm2} start "${ecosystemFile}"`, { env, timeout: 60_000 });
     } else {
       truncateLogs(slug);
       await shellExec(`${pm2} restart ${name}`, { timeout: 30_000 });

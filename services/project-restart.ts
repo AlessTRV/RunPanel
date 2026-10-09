@@ -10,6 +10,9 @@ import { composeNetworkMode, planComposeNetwork } from "./compose-network";
 import { projectEvents } from "./events";
 import { checkLoopbackLeak, forgetLeak, syncGate } from "./access";
 
+/** What a restart, stop or app delete answers while a deploy owns the project. */
+export const DEPLOYING_MESSAGE = "Un deploy è in corso su questo progetto: aspetta che finisca.";
+
 /**
  * Start a project again from its last successful build.
  *
@@ -35,6 +38,7 @@ export async function restartFromLastDeployment(
     .executeTakeFirst();
 
   if (!project) return { error: "Progetto non trovato" };
+  if (project.status === "deploying") return { error: DEPLOYING_MESSAGE };
 
   const lastDeploy = await db
     .selectFrom("deployments")
@@ -95,7 +99,9 @@ export async function restartFromLastDeployment(
   }
   await injectLinkedServiceEnv(project, injectionNetwork, envVars);
 
-  const port = project.port ?? 3000;
+  // Same rule as the deploy: a container project without a port publishes
+  // nothing. Falling back to 3000 here injected PORT=3000 and -p 3000:3000.
+  const port = project.port ?? (project.runtime_type === "docker" || project.runtime_type === "compose" ? 0 : 3000);
   const access = readAccess(project);
 
   // The gate holds the public port. It has to let go before the app can take it

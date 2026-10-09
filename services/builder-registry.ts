@@ -38,6 +38,14 @@ export async function buildProject(
   // at what is actually in the checkout.
   if (builder && runtimeType === "node" && !(await builder.detect(projectDir))) {
     const detected = await detectBuilder(projectDir);
+    // Docker and Compose builders produce an image the PM2 driver cannot run:
+    // the deploy would build for minutes and then crash-loop. Say so instead.
+    if (detected === dockerBuilder || detected === composeBuilder) {
+      throw new Error(
+        `Il repository ha ${detected === composeBuilder ? "un file compose" : "un Dockerfile"} ma niente package.json: ` +
+          `imposta il runtime del progetto su ${detected === composeBuilder ? "Compose" : "Docker"}.`
+      );
+    }
     if (detected) builder = detected;
   }
 
