@@ -9,6 +9,7 @@ import { Section } from "@/components/ui/Section";
 import { Segmented } from "@/components/ui/Segmented";
 import { Code, FieldHint } from "@/components/ui/Hint";
 import { AccentPicker } from "@/components/ui/AccentPicker";
+import { LoadError } from "@/components/ui/LoadError";
 import { SessionList } from "@/components/ui/SessionList";
 import { RegistryList } from "@/components/ui/RegistryList";
 import { NotificationSettings } from "@/components/ui/NotificationSettings";
@@ -73,11 +74,19 @@ export default function AccountPage() {
   // selection rendered with nothing picked at all.
   const [pollInterval, setPollInterval] = useState<PollInterval>(DEFAULT_POLL_INTERVAL);
   const [prefsSaving, setPrefsSaving] = useState(false);
+  // "Salva preferenze" sends every field, so it stays off until the stored
+  // values have arrived: saving the defaults would wipe the public URL and
+  // move the schedulers' zone.
+  const [prefsLoad, setPrefsLoad] = useState<"loading" | "ready" | string>("loading");
+  const [prefsAttempt, setPrefsAttempt] = useState(0);
 
   useEffect(() => {
     const controller = new AbortController();
     fetch("/api/settings", { signal: controller.signal })
-      .then((r) => r.json())
+      .then(async (r) => {
+        if (!r.ok) throw new Error(`Il server ha risposto ${r.status}`);
+        return r.json();
+      })
       .then((data) => {
         if (data.polling_interval) setPollingInterval(data.polling_interval);
         if (data.timezone) setTimezone(data.timezone);
@@ -90,10 +99,14 @@ export default function AccountPage() {
         if (isPollInterval(data.deploy_poll_interval)) {
           setPollInterval(data.deploy_poll_interval);
         }
+        setPrefsLoad("ready");
       })
-      .catch(() => {});
+      .catch((err: unknown) => {
+        if (controller.signal.aborted) return;
+        setPrefsLoad(err instanceof Error ? err.message : "Errore di rete");
+      });
     return () => controller.abort();
-  }, []);
+  }, [prefsAttempt]);
 
   async function changePassword() {
     if (newPassword !== confirmPassword) {
@@ -272,8 +285,24 @@ export default function AccountPage() {
             </FieldHint>
           </div>
 
+          {prefsLoad !== "loading" && prefsLoad !== "ready" && (
+            <LoadError
+              what="le preferenze salvate"
+              error={prefsLoad}
+              onRetry={() => {
+                setPrefsLoad("loading");
+                setPrefsAttempt((n) => n + 1);
+              }}
+            />
+          )}
+
           <div>
-            <Button variant="primary" isPending={prefsSaving} onPress={savePrefs}>
+            <Button
+              variant="primary"
+              isPending={prefsSaving}
+              isDisabled={prefsLoad !== "ready"}
+              onPress={savePrefs}
+            >
               Salva preferenze
             </Button>
           </div>

@@ -6,6 +6,8 @@ import { toast } from "sonner";
 import { Field } from "@/components/ui/Field";
 import { FieldHint } from "@/components/ui/Hint";
 import { SettingToggle } from "@/components/ui/SettingToggle";
+import { SkeletonBlock } from "@/components/ui/Skeletons";
+import { LoadError } from "@/components/ui/LoadError";
 import { MSG } from "@/lib/copy";
 import {
   PANEL_UPDATE_ALLOWED_SIGNERS_SETTING,
@@ -26,6 +28,10 @@ export function SignatureSettings() {
   const [signers, setSigners] = useState("");
   const [savedSigners, setSavedSigners] = useState("");
   const [loaded, setLoaded] = useState(false);
+  // Kept apart from `loaded`: a failed read must not show the toggle as off,
+  // because one click on it would then really turn the verification off.
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -33,7 +39,10 @@ export function SignatureSettings() {
     void (async () => {
       try {
         const res = await fetch("/api/settings");
-        if (!res.ok) return;
+        if (!res.ok) {
+          if (alive) setLoadError(`Il server ha risposto ${res.status}`);
+          return;
+        }
         // The endpoint returns the allowlisted settings as a flat object, not
         // wrapped: absent keys simply are not there.
         const body = (await res.json()) as Record<string, string | undefined>;
@@ -42,6 +51,9 @@ export function SignatureSettings() {
         setRequired(body[PANEL_UPDATE_REQUIRE_SIGNATURE_SETTING] === "1");
         setSigners(value);
         setSavedSigners(value);
+        setLoadError(null);
+      } catch {
+        if (alive) setLoadError(MSG.unreachable);
       } finally {
         if (alive) setLoaded(true);
       }
@@ -49,7 +61,7 @@ export function SignatureSettings() {
     return () => {
       alive = false;
     };
-  }, []);
+  }, [attempt]);
 
   async function saveRequired(next: boolean) {
     setRequired(next);
@@ -92,7 +104,20 @@ export function SignatureSettings() {
     }
   }
 
-  if (!loaded) return null;
+  if (!loaded) return <SkeletonBlock className="h-16" />;
+
+  if (loadError) {
+    return (
+      <LoadError
+        what="le impostazioni della firma"
+        error={loadError}
+        onRetry={() => {
+          setLoaded(false);
+          setAttempt((n) => n + 1);
+        }}
+      />
+    );
+  }
 
   return (
     <div className="space-y-4">

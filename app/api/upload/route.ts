@@ -4,6 +4,7 @@ import { config } from "@/lib/config";
 import { getDb } from "@/lib/db";
 import { isValidSlug } from "@/lib/utils";
 import { extractProjectArchive } from "@/services/project-archive";
+import crypto from "crypto";
 import fs from "fs";
 import path from "path";
 
@@ -46,12 +47,16 @@ export async function POST(request: NextRequest) {
   const db = await getDb();
   const project = await db
     .selectFrom("projects")
-    .select("id")
+    .select(["id", "status"])
     .where("slug", "=", projectSlug)
     .executeTakeFirst();
 
   if (!project) {
     return NextResponse.json({ error: "Progetto non trovato" }, { status: 404 });
+  }
+  // The swap below renames the checkout a running build is using as its cwd.
+  if (project.status === "deploying") {
+    return NextResponse.json({ error: "Un deploy è in corso: carica la nuova versione quando finisce." }, { status: 409 });
   }
 
   if (!file.name.endsWith(".zip")) {
@@ -83,22 +88,47 @@ export async function POST(request: NextRequest) {
   await fs.promises.mkdir(config.uploadsDir, { recursive: true });
   await fs.promises.writeFile(zipPath, Buffer.from(await file.arrayBuffer()));
 
+  // Extracted next to the live checkout and swapped in only once it is
+  // complete: a broken archive used to leave the project with no files at all.
+  // Resolved first, because a moved project's `repos/<slug>` is a link to
+  // where the files really are, and the link has to keep pointing there.
+  const liveDir = await fs.promises.realpath(destDir).catch(() => destDir);
+  const suffix = crypto.randomBytes(4).toString("hex");
+  const stagingDir = `${liveDir}.upload-${suffix}`;
+  const oldDir = `${liveDir}.old-${suffix}`;
+
   try {
-    await fs.promises.rm(destDir, { recursive: true, force: true });
-    await fs.promises.mkdir(destDir, { recursive: true });
+    await fs.promises.mkdir(stagingDir, { recursive: true });
 
     // Entry names, symlinks and the decompressed total are all checked here
     // rather than left to whichever extractor happened to be on the host.
-    await extractProjectArchive(zipPath, destDir);
-    await flattenSingleRoot(destDir);
+    await extractProjectArchive(zipPath, stagingDir);
+    await flattenSingleRoot(stagingDir);
+  } catch (err: unknown) {
+    await fs.promises.rm(stagingDir, { recursive: true, force: true }).catch(() => {});
+    await fs.promises.rm(zipPath, { force: true }).catch(() => {});
+    const message = err instanceof Error ? err.message : "Extraction failed";
+    return NextResponse.json(
+      { error: `ZIP non estratto, la versione attuale resta com'era: ${message}` },
+      { status: 400 }
+    );
+  }
 
+  try {
+    const hadLive = fs.existsSync(liveDir);
+    if (hadLive) await fs.promises.rename(liveDir, oldDir);
+    try {
+      await fs.promises.rename(stagingDir, liveDir);
+    } catch (err) {
+      if (hadLive) await fs.promises.rename(oldDir, liveDir).catch(() => {});
+      throw err;
+    }
+    await fs.promises.rm(oldDir, { recursive: true, force: true }).catch(() => {});
     return NextResponse.json({ success: true, path: destDir });
   } catch (err: unknown) {
-    // A rejected archive leaves a half-written tree behind, and the next deploy
-    // would build it.
-    await fs.promises.rm(destDir, { recursive: true, force: true }).catch(() => {});
-    const message = err instanceof Error ? err.message : "Extraction failed";
-    return NextResponse.json({ error: `Failed to extract ZIP: ${message}` }, { status: 400 });
+    await fs.promises.rm(stagingDir, { recursive: true, force: true }).catch(() => {});
+    const message = err instanceof Error ? err.message : "Swap failed";
+    return NextResponse.json({ error: `Sostituzione dei file non riuscita: ${message}` }, { status: 500 });
   } finally {
     await fs.promises.rm(zipPath, { force: true }).catch(() => {});
   }

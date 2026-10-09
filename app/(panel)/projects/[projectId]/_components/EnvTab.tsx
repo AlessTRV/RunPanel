@@ -14,6 +14,7 @@ import { BuildEnvHint, ManagedEnvHint, ServiceLinkHint } from "@/components/Depl
 import { InfoTip } from "@/components/ui/Tooltip";
 import { ServiceLink } from "@/components/ServiceLink";
 import { StickySaveBar } from "@/components/ui/StickySaveBar";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import type { EnvVar } from "./types";
 
 interface LinkedService {
@@ -73,6 +74,7 @@ export function EnvTab({
     JSON.stringify(initialVars.map((v) => ({ key: v.key, value: v.value })))
   );
   const [saving, setSaving] = useState(false);
+  const [confirmClear, setConfirmClear] = useState(false);
   const dirty = JSON.stringify(vars) !== saved;
   // A real file input instead of one created with document.createElement, so
   // the control is part of the tree and keyboard-reachable.
@@ -114,9 +116,15 @@ export function EnvTab({
       .filter((v) => v.key.trim())
       .map((v) => ({ key: v.key.trim(), value: v.value }));
     if (valid.length === 0) {
-      toast.error("Nessuna variabile da salvare");
+      // Emptying the set is allowed, but it deletes every stored variable.
+      if ((JSON.parse(saved) as EnvVar[]).length > 0) setConfirmClear(true);
+      else toast.error("Nessuna variabile da salvare");
       return;
     }
+    await send(valid);
+  }
+
+  async function send(valid: EnvVar[]) {
     setSaving(true);
     try {
       const res = await fetch(`/api/projects/${projectId}/env`, {
@@ -272,6 +280,16 @@ export function EnvTab({
         onReset={reset}
         message={changes === 1 ? "1 modifica non salvata" : `${changes} modifiche non salvate`}
         saveLabel="Salva variabili"
+      />
+
+      <ConfirmDialog
+        isOpen={confirmClear}
+        onOpenChange={setConfirmClear}
+        title="Eliminare tutte le variabili?"
+        description="Il progetto resterà senza variabili d'ambiente. Si applica al prossimo deploy o riavvio."
+        confirmLabel="Elimina tutte"
+        destructive
+        onConfirm={() => send([])}
       />
 
       {/* Reference rather than instructions: kept under the editor so the thing

@@ -222,12 +222,16 @@ export default function BackupRunPage({ params }: { params: Promise<{ runId: str
         </Panel>
       </div>
 
-      <RestoreDialog
-        runId={data.id}
-        artifacts={data.artifacts}
-        isOpen={restoreOpen}
-        onOpenChange={setRestoreOpen}
-      />
+      {/* Mounted only while open: choices, "skip the safety backup" and the
+          typed confirmation must not survive a Cancel. */}
+      {restoreOpen && (
+        <RestoreDialog
+          runId={data.id}
+          artifacts={data.artifacts}
+          isOpen={restoreOpen}
+          onOpenChange={setRestoreOpen}
+        />
+      )}
     </>
   );
 }

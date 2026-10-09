@@ -202,11 +202,14 @@ export function AccessSection({
       : access.allow.length === 0
         ? `Solo questa macchina${gate.running ? "" : " · gate non attivo"}`
         : `${access.allow.length} ${access.allow.length === 1 ? "rete consentita" : "reti consentite"}${gate.running ? "" : " · gate non attivo"}`;
+  // The toggle sits in the header and works with the section closed, where the
+  // Save button is not visible: say so, or a flipped switch reads as applied.
+  const summaryWithDraft = dirty && !unavailable ? `${summary} · modifica non salvata, apri per salvare` : summary;
 
   return (
     <Section
       title="Chi può collegarsi"
-      summary={summary}
+      summary={summaryWithDraft}
       actions={
         <SettingToggle
           label="Limita"

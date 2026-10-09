@@ -7,6 +7,8 @@ import { toast } from "sonner";
 import { Section } from "@/components/ui/Section";
 import { Field } from "@/components/ui/Field";
 import { Code, FieldHint, Hint } from "@/components/ui/Hint";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { MSG } from "@/lib/copy";
 import { NATIVE_PATH_RULE, nativePathSchema } from "@/lib/validation";
 
 /**
@@ -49,6 +51,7 @@ export function RepoPathSection({
   const [value, setValue] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [confirmRemove, setConfirmRemove] = useState(false);
 
   const inFlight = move !== null && RUNNING.includes(move.phase);
 
@@ -75,14 +78,18 @@ export function RepoPathSection({
   }
 
   async function removePrevious() {
-    const res = await fetch(`/api/projects/${projectId}/repo-path`, { method: "DELETE" });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      toast.error(data.error ?? "Eliminazione non riuscita");
-      return;
+    try {
+      const res = await fetch(`/api/projects/${projectId}/repo-path`, { method: "DELETE" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(data.error ?? "Eliminazione non riuscita");
+        return;
+      }
+      toast.success(`Eliminata ${data.removed}`);
+      onChanged();
+    } catch {
+      toast.error(MSG.unreachable);
     }
-    toast.success(`Eliminata ${data.removed}`);
-    onChanged();
   }
 
   return (
@@ -125,10 +132,19 @@ export function RepoPathSection({
               eliminala.
               {move.leftBehind.includes(".prima-dello-spostamento") ? (
                 <div className="mt-2">
-                  <Button variant="danger" size="sm" onPress={removePrevious}>
+                  <Button variant="danger" size="sm" onPress={() => setConfirmRemove(true)}>
                     <Icon icon="solar:trash-bin-trash-linear" width={16} aria-hidden />
                     Elimina la copia precedente
                   </Button>
+                  <ConfirmDialog
+                    isOpen={confirmRemove}
+                    onOpenChange={setConfirmRemove}
+                    title="Eliminare la copia precedente?"
+                    description={`La cartella ${move.leftBehind} viene cancellata. Non è recuperabile.`}
+                    confirmLabel="Elimina"
+                    destructive
+                    onConfirm={removePrevious}
+                  />
                 </div>
               ) : (
                 <>

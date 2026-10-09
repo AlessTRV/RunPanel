@@ -146,6 +146,14 @@ export async function hasClaimed(projectId: string): Promise<boolean> {
 
 // --- writing -----------------------------------------------------------------
 
+/** The queue moved under the editor; the caller answers 409 and the page reloads it. */
+export class QueueChangedError extends Error {
+  constructor() {
+    super("La coda è cambiata nel frattempo (un deploy l'ha presa in carico): ricarica e riprova.");
+    this.name = "QueueChangedError";
+  }
+}
+
 /**
  * Replace a project's queue with the list the editor sent.
  *
@@ -193,6 +201,10 @@ export async function replaceQueue(
     for (const [index, input] of inputs.entries()) {
       const previous = input.id ? byId.get(input.id) : undefined;
       const label = input.label?.trim() ? input.label.trim() : null;
+
+      // An id the editor had, that is no longer queued: a deploy claimed or
+      // ran it since the page loaded. Inserting it afresh would run it twice.
+      if (input.id && !previous) throw new QueueChangedError();
 
       if (previous) {
         kept.add(previous.id);

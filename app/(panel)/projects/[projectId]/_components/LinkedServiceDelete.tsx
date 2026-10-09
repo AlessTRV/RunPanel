@@ -51,6 +51,9 @@ export function LinkedServiceDelete({
       <span className="ml-auto shrink-0">
         <DeleteButton
           label={`Elimina ${serviceDisplayName(service)}`}
+          // Cancel must disarm it: reopening should never find "delete the
+          // volume" already ticked.
+          onClose={() => setDeleteData(false)}
           confirm={{
             title: `Eliminare "${serviceDisplayName(service)}"?`,
             confirmLabel: "Elimina",

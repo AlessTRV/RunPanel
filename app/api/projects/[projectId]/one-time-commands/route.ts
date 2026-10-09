@@ -8,6 +8,7 @@ import {
   hasClaimed,
   historyForProject,
   queuedForProject,
+  QueueChangedError,
   replaceQueue,
 } from "@/services/one-time-commands";
 
@@ -141,8 +142,15 @@ export async function PUT(request: NextRequest, { params }: Params) {
     );
   }
 
-  const queued = await replaceQueue(projectId, project.runtime_type, parsed.data.commands);
-  return NextResponse.json({ queued });
+  try {
+    const queued = await replaceQueue(projectId, project.runtime_type, parsed.data.commands);
+    return NextResponse.json({ queued });
+  } catch (err) {
+    if (err instanceof QueueChangedError) {
+      return NextResponse.json({ error: err.message, code: "queue-changed" }, { status: 409 });
+    }
+    throw err;
+  }
 }
 
 /** Empty the history. The queue and anything in flight are left alone. */

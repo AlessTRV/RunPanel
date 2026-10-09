@@ -102,6 +102,7 @@ export function DeleteButton({
   isDisabled = false,
   icon = "solar:trash-bin-trash-linear",
   className,
+  onClose,
 }: {
   /** Accessible name — the button shows only an icon. */
   label: string;
@@ -110,8 +111,14 @@ export function DeleteButton({
   isDisabled?: boolean;
   icon?: string;
   className?: string;
+  /** Called whenever the dialog closes, confirmed or not: reset qualifying controls here. */
+  onClose?: () => void;
 }) {
   const [asking, setAsking] = useState(false);
+  const setOpen = (open: boolean) => {
+    setAsking(open);
+    if (!open) onClose?.();
+  };
 
   return (
     <>
@@ -129,7 +136,7 @@ export function DeleteButton({
 
       <ConfirmDialog
         isOpen={asking}
-        onOpenChange={setAsking}
+        onOpenChange={setOpen}
         title={confirm.title}
         description={confirm.description}
         confirmLabel={confirm.confirmLabel ?? "Elimina"}
