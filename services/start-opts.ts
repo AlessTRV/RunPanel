@@ -3,6 +3,8 @@ import type { ProjectsTable } from "@/lib/db/schema";
 import type { StartOpts } from "./process-drivers/types";
 import { writeEnvFile } from "./env-file";
 import { mountStringSchema } from "@/lib/validation";
+import { parseMountString } from "@/lib/mount";
+import { reachesDataDir } from "./data-dir-guard";
 
 /**
  * The arguments a project's process is started with, in one place.
@@ -66,11 +68,16 @@ export function buildStartOpts(ctx: {
   */
   const mounts: string[] = [];
   for (const mount of contract.docker.mounts) {
-    if (mountStringSchema.safeParse(mount).success) {
-      mounts.push(mount);
+    if (!mountStringSchema.safeParse(mount).success) {
+      ctx.onLog?.(`Mount ignorato, non è una mappatura valida: ${mount}`);
       continue;
     }
-    ctx.onLog?.(`Mount ignorato, non è una mappatura valida: ${mount}`);
+    const source = parseMountString(mount)?.source ?? "";
+    if (reachesDataDir(source)) {
+      ctx.onLog?.(`Mount ignorato, raggiunge la cartella dati del pannello: ${mount}`);
+      continue;
+    }
+    mounts.push(mount);
   }
 
   // Only the container runtime gets the file as a mount. A native process reads

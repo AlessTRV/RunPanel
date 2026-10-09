@@ -1,5 +1,8 @@
 import type { DeployContract } from "@/lib/deploy-contract";
+import { mountStringSchema } from "@/lib/validation";
+import { parseMountString } from "@/lib/mount";
 import { docker } from "./docker/cli";
+import { reachesDataDir } from "./data-dir-guard";
 import { labelArgs, networkName } from "./docker/labels";
 import { ensureProjectNetwork } from "./docker-network";
 import { runCommand } from "./builders/run-command";
@@ -85,7 +88,16 @@ export async function runReleaseCommand(command: string, opts: ReleaseOptions): 
   }
   args.push("--add-host=host.docker.internal:host-gateway");
 
-  for (const mount of opts.contract.docker.mounts) args.push("-v", mount);
+  // Same recheck as buildStartOpts: a contract from a restored backup or a
+  // hand-edited column never went through the mount editor.
+  for (const mount of opts.contract.docker.mounts) {
+    const source = mountStringSchema.safeParse(mount).success ? parseMountString(mount)?.source : null;
+    if (!source || reachesDataDir(source)) {
+      opts.onLog(`Mount ignorato nel release command: ${mount}`);
+      continue;
+    }
+    args.push("-v", mount);
+  }
   for (const [key, value] of Object.entries(opts.env)) args.push("-e", `${key}=${value}`);
 
   args.push(opts.image, "sh", "-c", script);

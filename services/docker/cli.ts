@@ -62,10 +62,18 @@ export async function docker(args: string[], opts: DockerOptions = {}) {
     });
     return { stdout: stdout.toString(), stderr: stderr.toString() };
   } catch (err: unknown) {
-    const e = err as { stderr?: string; message?: string; code?: number };
+    const e = err as { stderr?: string; code?: number | string; killed?: boolean; signal?: string | null };
     const stderr = (e.stderr ?? "").toString().trim();
+    // Never fall back to e.message: execFile builds it as "Command failed:
+    // docker <argv>", and the argv carries `-e KEY=<decrypted value>`. The
+    // message lands in deploy logs, error_message and Telegram alerts.
+    const reason = e.killed
+      ? `interrotto (${e.signal ?? "timeout"})`
+      : e.code !== undefined
+        ? `codice ${e.code}`
+        : "errore sconosciuto";
     throw new DockerError(
-      stderr || e.message || `docker ${args[0]} failed`,
+      stderr || `docker ${args[0]} fallito: ${reason}`,
       args,
       stderr,
       typeof e.code === "number" ? e.code : null

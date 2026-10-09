@@ -1,6 +1,7 @@
 import fs from "fs";
 import { parseContractJson } from "@/lib/deploy-contract";
 import { resolveInside } from "@/lib/fs-safe";
+import { isPanelEnvFile } from "../env-file";
 import path from "path";
 import crypto from "crypto";
 import { decrypt, encrypt } from "@/lib/crypto";
@@ -238,7 +239,10 @@ export async function exportProjectRepo(
       const absolute = path.join(dir, entry.name);
       const rel = relative ? `${relative}/${entry.name}` : entry.name;
 
-      if (envFileAbsolute && absolute === envFileAbsolute) {
+      // The configured path, plus anything carrying the deploy's marker: an
+      // env file enabled by the repository's runpanel.json, or left behind
+      // after the setting changed, is not described by builder_config.
+      if ((envFileAbsolute && absolute === envFileAbsolute) || (entry.isFile() && /env/i.test(entry.name) && isPanelEnvFile(absolute))) {
         skipped++;
         continue;
       }

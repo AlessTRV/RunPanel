@@ -76,6 +76,15 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
+  } else if (data.uploadId) {
+    // An uploaded archive has no catalogue rows to name the target from, so
+    // the confirmation is the archive's own id. Still typed, still checked here.
+    if (data.confirm.trim() !== data.uploadId) {
+      return NextResponse.json(
+        { error: `Per confermare devi scrivere esattamente: ${data.uploadId}` },
+        { status: 400 }
+      );
+    }
   }
 
   try {

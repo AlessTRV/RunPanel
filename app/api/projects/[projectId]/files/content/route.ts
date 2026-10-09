@@ -73,17 +73,25 @@ export async function GET(request: NextRequest, { params }: Params) {
       fs.mkdirSync(tmpDir, { recursive: true });
       const tmpFile = path.join(tmpDir, `${project.slug}-${Date.now()}`);
 
-      await exec("docker", ["cp", `${containerName}:${filePath}`, tmpFile], { timeout: 10_000 });
+      try {
+        // -L copies what a link in the container points at, never the link
+        // itself: an absolute link would land on the host and be followed
+        // there (/proc/self/environ, /dev/zero).
+        await exec("docker", ["cp", "-L", `${containerName}:${filePath}`, tmpFile], { timeout: 10_000 });
 
-      const stat = fs.statSync(tmpFile);
-      if (stat.size > MAX_FILE_SIZE) {
-        fs.rmSync(tmpFile);
-        return NextResponse.json({ error: "File troppo grande per l'editor (massimo 1 MB)" }, { status: 400 });
+        const stat = fs.lstatSync(tmpFile);
+        if (!stat.isFile()) {
+          return NextResponse.json({ error: "Non è un file normale" }, { status: 400 });
+        }
+        if (stat.size > MAX_FILE_SIZE) {
+          return NextResponse.json({ error: "File troppo grande per l'editor (massimo 1 MB)" }, { status: 400 });
+        }
+
+        const content = fs.readFileSync(tmpFile, "utf-8");
+        return NextResponse.json({ content, path: filePath });
+      } finally {
+        fs.rmSync(tmpFile, { recursive: true, force: true });
       }
-
-      const content = fs.readFileSync(tmpFile, "utf-8");
-      fs.rmSync(tmpFile);
-      return NextResponse.json({ content, path: filePath });
     }
 
     // Local
@@ -123,9 +131,9 @@ export async function PUT(request: NextRequest, { params }: Params) {
   } catch {
     return NextResponse.json({ error: "Richiesta non valida" }, { status: 400 });
   }
-  const { path: filePath, content } = body as { path?: string; content?: string };
+  const { path: filePath, content } = (body ?? {}) as { path?: unknown; content?: unknown };
 
-  if (!filePath || !isPathShapeSafe(filePath) || typeof content !== "string") {
+  if (typeof filePath !== "string" || !filePath || !isPathShapeSafe(filePath) || typeof content !== "string") {
     return NextResponse.json({ error: "Percorso o contenuto non validi" }, { status: 400 });
   }
 
@@ -155,9 +163,12 @@ export async function PUT(request: NextRequest, { params }: Params) {
       fs.mkdirSync(tmpDir, { recursive: true });
       const tmpFile = path.join(tmpDir, `${project.slug}-${Date.now()}`);
 
-      fs.writeFileSync(tmpFile, content, "utf-8");
-      await exec("docker", ["cp", tmpFile, `${containerName}:${filePath}`], { timeout: 10_000 });
-      fs.rmSync(tmpFile);
+      try {
+        fs.writeFileSync(tmpFile, content, "utf-8");
+        await exec("docker", ["cp", tmpFile, `${containerName}:${filePath}`], { timeout: 10_000 });
+      } finally {
+        fs.rmSync(tmpFile, { force: true });
+      }
 
       return NextResponse.json({ success: true });
     }

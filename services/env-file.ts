@@ -76,6 +76,28 @@ export function removeEnvFile(slug: string): void {
  * For native runtimes there is nothing to mount — the app reads a file from its
  * own working directory, so put one there.
  */
+/**
+ * First line of every env file the deploy writes into a checkout. Backups
+ * recognise the file by it, so a stale file or one enabled by the repository's
+ * own runpanel.json is still kept out of the archive.
+ */
+export const ENV_FILE_MARKER = "# Written by RunPanel: project variables in clear. Not part of the repository.";
+
+/** True when the file at `absolutePath` starts with `ENV_FILE_MARKER`. */
+export function isPanelEnvFile(absolutePath: string): boolean {
+  let fd: number | null = null;
+  try {
+    fd = fs.openSync(absolutePath, "r");
+    const head = Buffer.alloc(Buffer.byteLength(ENV_FILE_MARKER));
+    const read = fs.readSync(fd, head, 0, head.length, 0);
+    return read === head.length && head.toString("utf8") === ENV_FILE_MARKER;
+  } catch {
+    return false;
+  } finally {
+    if (fd !== null) fs.closeSync(fd);
+  }
+}
+
 export function writeEnvFileInto(repoDir: string, relativePath: string, envVars: Record<string, string>): string {
   // Never let a configured path escape the project directory. This wrote every
   // one of the project's decrypted variables, and the check used to be a bare
@@ -120,7 +142,7 @@ export function writeEnvFileInto(repoDir: string, relativePath: string, envVars:
   }
 
   try {
-    fs.writeFileSync(fd, `${body}\n`);
+    fs.writeFileSync(fd, `${ENV_FILE_MARKER}\n${body}\n`);
     // The mode above applies only when the file is created, so enforce it on a
     // rewrite too. This is the chmod `writeEnvFile` does and this one did not,
     // which left an already-tracked .env at 0644 with real secrets in it.

@@ -1,5 +1,6 @@
 import path from "path";
 import { config } from "@/lib/config";
+import { reachesDataDir } from "./data-dir-guard";
 import { getDb, nowIso } from "@/lib/db";
 import type { ServicesTable } from "@/lib/db/schema";
 import { generateId } from "@/lib/utils";
@@ -174,9 +175,9 @@ export function assertMountable(candidate: string): void {
   const parsed = hostPathSchema.safeParse(candidate);
   if (!parsed.success) throw new Error(parsed.error.issues[0]?.message ?? "Percorso non valido");
 
-  const target = parsed.data;
-  const own = config.dataDir.replace(/\\/g, "/").replace(/\/+$/, "");
-  if (own && (target === own || target.startsWith(`${own}/`))) {
+  // Equal, below, or above: a bind of a parent directory reaches the data dir
+  // through it just the same.
+  if (reachesDataDir(parsed.data)) {
     throw new Error(
       "È la cartella dati del pannello: contiene la chiave che decifra ogni credenziale salvata."
     );
