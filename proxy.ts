@@ -19,10 +19,40 @@ import { SESSION_COOKIE, isSessionTokenValid } from "@/lib/auth";
  * at all. Setting `runtime` here is an error, so it is not set.
  */
 export async function proxy(request: NextRequest) {
+  if (isCrossOriginWrite(request)) {
+    return NextResponse.json({ error: "Richiesta da un'origine diversa rifiutata" }, { status: 403 });
+  }
+
   const token = request.cookies.get(SESSION_COOKIE)?.value;
   if (await isSessionTokenValid(token)) return NextResponse.next();
 
   return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+}
+
+const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+
+/**
+ * The session cookie is SameSite=Lax, which stops other *sites* but not other
+ * origins on the same host: an app this panel deployed on another port is
+ * same-site, and its pages could send blind state-changing requests carrying
+ * the operator's cookie. Browsers tell us where a request came from; anything
+ * that is not this exact origin gets no write. Clients that send neither header
+ * (curl, the test harness) are not browsers and carry no ambient cookie risk.
+ */
+function isCrossOriginWrite(request: NextRequest): boolean {
+  if (SAFE_METHODS.has(request.method)) return false;
+
+  const site = request.headers.get("sec-fetch-site");
+  if (site) return site !== "same-origin" && site !== "none";
+
+  const origin = request.headers.get("origin");
+  if (!origin) return false;
+  const host = request.headers.get("x-forwarded-host") ?? request.headers.get("host");
+  try {
+    return new URL(origin).host !== host;
+  } catch {
+    return true;
+  }
 }
 
 export const config = {

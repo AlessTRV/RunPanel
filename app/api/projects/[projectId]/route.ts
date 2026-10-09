@@ -229,13 +229,22 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   const currentAccess = readAccess(project);
   let restartNeeded = false;
 
-  if (access) {
-    const wantsRestriction = access.mode === "restricted";
+  // Checked against the state this request leaves behind, not only when
+  // `access` is in the body: switching a restricted project to compose or to
+  // network: host in a later PATCH must be refused just the same.
+  // Only when the body touches one of them, so a row already in an
+  // inconsistent state can still be renamed.
+  const wantsRestriction = (access?.mode ?? currentAccess.mode) === "restricted";
+  const shapeTouched =
+    access !== undefined || runtimeType !== undefined || port !== undefined || updates.builder_config !== undefined;
+  if (wantsRestriction && shapeTouched) {
     const runtime = runtimeType ?? project.runtime_type;
+    const effectiveConfig =
+      typeof updates.builder_config === "string" ? updates.builder_config : project.builder_config;
 
     // Two shapes the panel cannot honestly restrict, refused up front rather
     // than accepted and quietly not enforced.
-    if (wantsRestriction && runtime === "compose") {
+    if (runtime === "compose") {
       return NextResponse.json(
         {
           error:
@@ -245,7 +254,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       );
     }
 
-    if (wantsRestriction && parseContractJson(project.builder_config).docker.network === "host") {
+    if (parseContractJson(effectiveConfig).docker.network === "host") {
       return NextResponse.json(
         {
           error:
@@ -255,13 +264,15 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       );
     }
 
-    if (wantsRestriction && !(port ?? project.port)) {
+    if (!(port !== undefined ? port : project.port)) {
       return NextResponse.json(
         { error: "Senza una porta configurata non c'è niente da limitare." },
         { status: 409 }
       );
     }
+  }
 
+  if (access) {
     updates.access_mode = access.mode;
     updates.access_allow = JSON.stringify(access.allow);
     // Allocated once and kept for as long as the target stays restricted, so
@@ -345,6 +356,10 @@ export async function PATCH(request: NextRequest, { params }: Params) {
 
   return NextResponse.json({
     ...updated,
+    // Same shape as GET: the page replaces its project with this, and without
+    // the queue the one-time editor resynced to empty and its next save
+    // deleted every stored command.
+    oneTimeCommands: updated ? await queuedForProject(projectId, updated.runtime_type) : [],
     access: updated ? readAccess(updated) : currentAccess,
     gate: reportGate("project", projectId),
     // Saved either way — the columns describe what was asked for — but the app

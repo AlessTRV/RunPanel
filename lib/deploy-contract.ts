@@ -150,6 +150,14 @@ const legacySchema = z.object({
 
 type RawObject = Record<string, unknown>;
 
+/** Keys that reach an object's prototype chain when assigned or read. */
+const UNSAFE_KEYS: ReadonlySet<string> = new Set(["__proto__", "constructor", "prototype"]);
+
+/** JSON.parse reviver that drops prototype-reaching keys at every level. */
+export function safeJsonReviver(key: string, value: unknown): unknown {
+  return UNSAFE_KEYS.has(key) ? undefined : value;
+}
+
 function isPlainObject(value: unknown): value is RawObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -194,8 +202,11 @@ function deepMerge(base: RawObject, override: RawObject): RawObject {
   const out: RawObject = { ...base };
 
   for (const [key, value] of Object.entries(override)) {
-    if (value === undefined) continue;
-    const existing = out[key];
+    // JSON.parse keeps "__proto__" as an own key; assigning it here would run
+    // the setter and hand the repository the merged object's prototype, which
+    // the schema then reads panel-only fields from.
+    if (value === undefined || UNSAFE_KEYS.has(key)) continue;
+    const existing = Object.hasOwn(out, key) ? out[key] : undefined;
     out[key] =
       isPlainObject(existing) && isPlainObject(value) ? deepMerge(existing, value) : value;
   }
@@ -283,9 +294,15 @@ export function stripPanelOnlyFields(repoRaw: unknown): StrippedContract {
   const contract: RawObject = { ...repoRaw };
   const rejected: string[] = [];
 
+  for (const key of UNSAFE_KEYS) {
+    if (!Object.hasOwn(contract, key)) continue;
+    delete contract[key];
+    rejected.push(key);
+  }
+
   for (const [parent, child] of PANEL_ONLY_FIELDS) {
-    const branch = contract[parent];
-    if (!isPlainObject(branch) || !(child in branch)) continue;
+    const branch = Object.hasOwn(contract, parent) ? contract[parent] : undefined;
+    if (!isPlainObject(branch) || !Object.hasOwn(branch, child)) continue;
 
     const remaining = { ...branch };
     delete remaining[child];

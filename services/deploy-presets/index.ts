@@ -1,6 +1,6 @@
 import fs from "fs";
 import path from "path";
-import type { DeployContract } from "@/lib/deploy-contract";
+import { safeJsonReviver, type DeployContract } from "@/lib/deploy-contract";
 
 /**
  * Starting points, by SHAPE of application — never by project.
@@ -150,7 +150,7 @@ export function readRepoContract(repoDir: string): unknown | null {
   const file = path.join(repoDir, RUNPANEL_CONFIG_FILE);
   if (!fs.existsSync(file)) return null;
   try {
-    return JSON.parse(fs.readFileSync(file, "utf8"));
+    return JSON.parse(fs.readFileSync(file, "utf8"), safeJsonReviver);
   } catch {
     return null;
   }

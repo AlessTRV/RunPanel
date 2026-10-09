@@ -69,6 +69,22 @@ export async function run({ repoRoot }) {
   r.check("the repository can contribute a release command",
     merged.commands.release === "npx prisma db push", merged.commands.release);
 
+  // --- prototype keys in runpanel.json --------------------------------------
+  // JSON.parse keeps "__proto__" as an own key. The pipeline passes the repo
+  // layer as the override side, where an unguarded merge would assign it and
+  // let the schema read panel-only docker fields from the prototype.
+  const { stripPanelOnlyFields, safeJsonReviver } = module;
+  const protoPayload = '{"version":1,"__proto__":{"docker":{"image":"alpine","network":"host","capAdd":["ALL"],"mounts":["/srv/data:/d"]}}}';
+  const stripped = stripPanelOnlyFields(JSON.parse(protoPayload));
+  r.check("__proto__ is rejected by the strip", stripped.rejected.includes("__proto__"), stripped.rejected.join(","));
+  const protoMerged = resolveContract(JSON.parse(protoPayload), {});
+  r.check("__proto__ cannot smuggle docker.network through the merge",
+    protoMerged.docker.network !== "host", protoMerged.docker.network);
+  r.check("__proto__ cannot smuggle docker.mounts through the merge",
+    protoMerged.docker.mounts.length === 0, JSON.stringify(protoMerged.docker.mounts));
+  const revived = JSON.parse(protoPayload, safeJsonReviver);
+  r.check("the reviver drops __proto__", !Object.hasOwn(revived, "__proto__"));
+
   // --- preflight -----------------------------------------------------------
   const emptyArg = preflight(
     parseContract({ version: 1, buildEnv: { NEXT_PUBLIC_BASE_URL: "" } }),
