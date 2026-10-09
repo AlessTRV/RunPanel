@@ -82,15 +82,18 @@ export interface RunSummary {
  * user's applications are running on, and two of them at once turn a background
  * chore into an outage.
  */
-const globalRef = globalThis as typeof globalThis & { __runpanelBackupActive?: string | null };
+const globalRef = globalThis as typeof globalThis & {
+  __runpanelBackupActive?: string | null;
+  __runpanelRestoreActive?: string | null;
+};
 
 export function activeBackupRunId(): string | null {
   return globalRef.__runpanelBackupActive ?? null;
 }
 
 export class BackupBusyError extends Error {
-  constructor() {
-    super("Un backup è già in corso");
+  constructor(message = "Un backup è già in corso") {
+    super(message);
     this.name = "BackupBusyError";
   }
 }
@@ -109,17 +112,40 @@ export async function startBackup(
   request: RunRequest
 ): Promise<{ runId: string; done: Promise<RunSummary> }> {
   if (globalRef.__runpanelBackupActive) throw new BackupBusyError();
+  // A restore writes the very data a backup would read; only its own safety
+  // copy may run alongside it. Read through globalThis: restore.ts imports
+  // this module, so importing it back would be a cycle.
+  if (globalRef.__runpanelRestoreActive && request.trigger !== "pre-restore") {
+    throw new BackupBusyError("Un ripristino è in corso: il backup non parte finché non finisce");
+  }
 
-  const db = await getDb();
+  // Claimed before the first await, so two starts in the same tick (the
+  // scheduler and "Esegui ora") cannot both pass the check above. Released
+  // only by its owner, so a finishing run never clears another one's claim.
   const runId = generateId();
+  globalRef.__runpanelBackupActive = runId;
+  const release = () => {
+    if (globalRef.__runpanelBackupActive === runId) globalRef.__runpanelBackupActive = null;
+  };
+
+  // Anything that throws before the run exists must give the claim back.
+  let db: Awaited<ReturnType<typeof getDb>>;
+  let log: ReturnType<typeof backupLog>;
+  try {
+    db = await getDb();
+    log = backupLog(runId);
+  } catch (err) {
+    release();
+    throw err;
+  }
   const startedAt = new Date();
-  const log = backupLog(runId);
 
   const emit = (line: string) => {
     log.append(line);
     opsEvents.emit(runId, { type: "backup:log", line });
   };
 
+  // The flag is already up: a failed write must not leave it there forever.
   await db
     .insertInto("backup_runs")
     .values({
@@ -139,24 +165,15 @@ export async function startBackup(
       finished_at: null,
       heartbeat_at: startedAt.toISOString(),
     })
-    .execute();
+    .execute()
+    .catch((err: unknown) => {
+      release();
+      throw err;
+    });
 
   opsEvents.emit(runId, { type: "backup:status", status: "running" });
 
-  /*
-    Claimed only once the row exists.
-
-    Set before the INSERT, a write that failed left the flag up with nothing to
-    ever take it down: the only code that clears it is the `.finally` below, on a
-    promise that is never created. From there the panel refuses backups, restores
-    and its own updates until the process restarts. `startRestore` already does
-    it in this order, so this was a slip rather than a trade.
-  */
-  globalRef.__runpanelBackupActive = runId;
-
-  const done = execute({ runId, request, startedAt, emit, log }).finally(() => {
-    globalRef.__runpanelBackupActive = null;
-  });
+  const done = execute({ runId, request, startedAt, emit, log }).finally(release);
 
   return { runId, done };
 }

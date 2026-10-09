@@ -3,7 +3,7 @@ import { requireAuth } from "@/lib/auth-guard";
 import { getDb, nowIso } from "@/lib/db";
 import { controlActionSchema } from "@/lib/validation";
 import { processManager } from "@/services/process-manager";
-import { restartFromLastDeployment } from "@/services/project-restart";
+import { DEPLOYING_MESSAGE, restartFromLastDeployment } from "@/services/project-restart";
 
 type Params = { params: Promise<{ projectId: string }> };
 
@@ -33,6 +33,13 @@ export async function POST(request: NextRequest, { params }: Params) {
 
   if (!project) {
     return NextResponse.json({ error: "Progetto non trovato" }, { status: 404 });
+  }
+
+  // The deploy owns the process until it finishes: a stop or restart in the
+  // middle would race its own stop and start.
+  // Stop stays allowed: it is the way out of a deploy that hangs or crash-loops.
+  if (project.status === "deploying" && parsed.data.action !== "stop") {
+    return NextResponse.json({ error: DEPLOYING_MESSAGE }, { status: 409 });
   }
 
   const { action } = parsed.data;

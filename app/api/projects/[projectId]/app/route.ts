@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth-guard";
 import { getDb, nowIso } from "@/lib/db";
 import { processManager } from "@/services/process-manager";
+import { DEPLOYING_MESSAGE } from "@/services/project-restart";
 import { removeProjectImages } from "@/services/docker/images";
 import { removePm2Artifacts } from "@/services/process-drivers/pm2-driver";
 import { forgetRun } from "@/services/process-drivers/run-log";
@@ -27,6 +28,10 @@ export async function DELETE(_request: NextRequest, { params }: Params) {
 
   if (!project) {
     return NextResponse.json({ error: "Progetto non trovato" }, { status: 404 });
+  }
+
+  if (project.status === "deploying") {
+    return NextResponse.json({ error: DEPLOYING_MESSAGE }, { status: 409 });
   }
 
   const { slug, runtime_type: runtimeType } = project;

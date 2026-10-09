@@ -3,6 +3,7 @@ import path from "path";
 import { normalizeExcludeList } from "@/lib/backup-settings";
 import { decrypt, encrypt } from "@/lib/crypto";
 import { config } from "@/lib/config";
+import { resolveInside } from "@/lib/fs-safe";
 import { getDb, nowIso } from "@/lib/db";
 import type { ProjectsTable, ServicesTable } from "@/lib/db/schema";
 import { getEnv } from "@/lib/env";
@@ -65,6 +66,11 @@ export class RestoreBusyError extends Error {
 
 const globalRef = globalThis as typeof globalThis & { __runpanelRestoreActive?: string | null };
 
+/** The restore in progress, if any. What the panel update checks before it swaps. */
+export function activeRestoreId(): string | null {
+  return globalRef.__runpanelRestoreActive ?? null;
+}
+
 
 /** Where an artifact is unpacked before it is fed to an engine. */
 function restoreStaging(restoreId: string): string {
@@ -76,8 +82,18 @@ export async function startRestore(
 ): Promise<{ restoreId: string; done: Promise<void> }> {
   if (globalRef.__runpanelRestoreActive) throw new RestoreBusyError();
 
-  const db = await getDb();
+  // Claimed before the first await, so two starts cannot both pass the check;
+  // released only by its owner.
   const restoreId = generateId();
+  globalRef.__runpanelRestoreActive = restoreId;
+  const release = () => {
+    if (globalRef.__runpanelRestoreActive === restoreId) globalRef.__runpanelRestoreActive = null;
+  };
+
+  const db = await getDb().catch((err: unknown) => {
+    release();
+    throw err;
+  });
   const now = nowIso();
 
   await db
@@ -95,14 +111,15 @@ export async function startRestore(
       finished_at: null,
       heartbeat_at: now,
     })
-    .execute();
+    .execute()
+    .catch((err: unknown) => {
+      release();
+      throw err;
+    });
 
-  globalRef.__runpanelRestoreActive = restoreId;
   opsEvents.emit(restoreId, { type: "restore:status", status: "running" });
 
-  const done = execute(restoreId, request).finally(() => {
-    globalRef.__runpanelRestoreActive = null;
-  });
+  const done = execute(restoreId, request).finally(release);
 
   return { restoreId, done };
 }
@@ -720,12 +737,21 @@ async function restoreRepo(
   fs.mkdirSync(destination, { recursive: true });
 
   let written = 0;
+  let skipped = 0;
   for (const entry of entries) {
     const relative = entry.entryPath.slice(prefix.length);
     if (!relative || !isSafeEntryPath(relative)) continue;
-    await extractArchiveEntry(archive, entry.entryPath, path.join(destination, relative));
+    // The live checkout may hold links committed after the backup was taken;
+    // resolved for real, so a restored file is never written through one.
+    const target = resolveInside(destination, relative);
+    if (!target) {
+      skipped++;
+      continue;
+    }
+    await extractArchiveEntry(archive, entry.entryPath, target);
     written++;
   }
+  if (skipped > 0) emit(`  ${skipped} file saltati: il percorso esce dalla copia locale tramite un collegamento`);
 
   emit(`  ${written} file ripristinati in ${destination}`);
 }

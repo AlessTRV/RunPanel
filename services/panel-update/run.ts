@@ -17,6 +17,7 @@ import { redactGitSecrets } from "@/lib/redact";
 import { getGitHubToken, gitAuth, gitAuthWithConfig } from "../git-auth";
 import { probeAutostart } from "../autostart/probe";
 import { activeBackupRunId } from "../backup/runner";
+import { activeRestoreId } from "../backup/restore";
 import { verifySqlite } from "../backup/panel-store";
 import {
   cleanUntracked,
@@ -180,6 +181,18 @@ export async function startPanelUpdate(opts: StartOptions = {}): Promise<StartRe
   const runId = generateId();
   globalRef.__runpanelUpdateActive = runId;
 
+  // Everything up to the `.finally` that releases the flag can throw (git,
+  // the state file, the log dir). Without this the flag stayed up and the page
+  // said "in progress" until the panel restarted.
+  try {
+    return await beginUpdate(runId, opts);
+  } catch (err) {
+    if (globalRef.__runpanelUpdateActive === runId) globalRef.__runpanelUpdateActive = null;
+    throw err;
+  }
+}
+
+async function beginUpdate(runId: string, opts: StartOptions): Promise<StartResult> {
   const checkout = await readCheckout(panelRoot());
   const now = new Date().toISOString();
 
@@ -449,6 +462,16 @@ async function execute(base: Runner, opts: StartOptions): Promise<void> {
       writeState(dataDir, state);
       emitStatus(state);
       log.flush();
+      return;
+    }
+
+    // Checked again here: the build takes minutes, and a deploy, backup or
+    // restore that started meanwhile would be killed by the restart below.
+    const lateBlocker = await updateBlockers();
+    if (lateBlocker) {
+      fs.rmSync(staging, { recursive: true, force: true });
+      await rollbackSource(runner, "operazione partita durante la build");
+      finish("failed", `Aggiornamento annullato prima del riavvio. ${lateBlocker.reason}`);
       return;
     }
 
@@ -786,6 +809,9 @@ export interface UpdateBlocker {
 export async function updateBlockers(): Promise<UpdateBlocker | null> {
   if (activeBackupRunId()) {
     return { reason: "C'è un backup in corso: aspetta che finisca." };
+  }
+  if (activeRestoreId()) {
+    return { reason: "C'è un ripristino in corso: aspetta che finisca." };
   }
 
   const db = await getDb();
