@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAuth } from "@/lib/auth-guard";
+import { isDenied, requireProject } from "@/lib/auth-guard";
+import { requireHostFor } from "@/lib/host-guard";
+import { withAudit } from "@/lib/audit";
 import { getDb } from "@/lib/db";
 import { isPathShapeSafe, resolveInside } from "@/lib/fs-safe";
 import { getRepoPath } from "@/services/git-manager";
@@ -41,10 +43,9 @@ function isBinary(filePath: string): boolean {
 
 // GET: Read file content
 export async function GET(request: NextRequest, { params }: Params) {
-  const denied = await requireAuth();
-  if (denied) return denied;
-
   const { projectId } = await params;
+  const denied = await requireProject(projectId, "files");
+  if (isDenied(denied)) return denied;
   const filePath = request.nextUrl.searchParams.get("path");
 
   if (!filePath || !isPathShapeSafe(filePath)) {
@@ -120,70 +121,73 @@ export async function GET(request: NextRequest, { params }: Params) {
 
 // PUT: Write file content
 export async function PUT(request: NextRequest, { params }: Params) {
-  const denied = await requireAuth();
-  if (denied) return denied;
+  return withAudit(request, { category: "config", action: "project.files", scope: "project", scopeId: async () => (await params).projectId }, async () => {
+    const { projectId } = await params;
+    const denied = await requireProject(projectId, "files");
+    if (isDenied(denied)) return denied;
+    const noHost = requireHostFor(denied.principal, "modificare i file del progetto");
+    if (noHost) return noHost;
+    // A malformed body is a bad request, not a 500.
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json({ error: "Richiesta non valida" }, { status: 400 });
+    }
+    const { path: filePath, content } = (body ?? {}) as { path?: unknown; content?: unknown };
 
-  const { projectId } = await params;
-  // A malformed body is a bad request, not a 500.
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: "Richiesta non valida" }, { status: 400 });
-  }
-  const { path: filePath, content } = (body ?? {}) as { path?: unknown; content?: unknown };
+    if (typeof filePath !== "string" || !filePath || !isPathShapeSafe(filePath) || typeof content !== "string") {
+      return NextResponse.json({ error: "Percorso o contenuto non validi" }, { status: 400 });
+    }
 
-  if (typeof filePath !== "string" || !filePath || !isPathShapeSafe(filePath) || typeof content !== "string") {
-    return NextResponse.json({ error: "Percorso o contenuto non validi" }, { status: 400 });
-  }
+    if (isBinary(filePath)) {
+      return NextResponse.json({ error: "I file binari non si possono modificare dal pannello" }, { status: 400 });
+    }
 
-  if (isBinary(filePath)) {
-    return NextResponse.json({ error: "I file binari non si possono modificare dal pannello" }, { status: 400 });
-  }
+    if (content.length > MAX_FILE_SIZE) {
+      return NextResponse.json({ error: "Contenuto troppo grande: il massimo è 1 MB" }, { status: 400 });
+    }
 
-  if (content.length > MAX_FILE_SIZE) {
-    return NextResponse.json({ error: "Contenuto troppo grande: il massimo è 1 MB" }, { status: 400 });
-  }
+    const db = await getDb();
+    const project = await db
+      .selectFrom("projects")
+      .select(["slug", "runtime_type"])
+      .where("id", "=", projectId)
+      .executeTakeFirst();
 
-  const db = await getDb();
-  const project = await db
-    .selectFrom("projects")
-    .select(["slug", "runtime_type"])
-    .where("id", "=", projectId)
-    .executeTakeFirst();
+    if (!project) {
+      return NextResponse.json({ error: "Progetto non trovato" }, { status: 404 });
+    }
 
-  if (!project) {
-    return NextResponse.json({ error: "Progetto non trovato" }, { status: 404 });
-  }
+    try {
+      if (project.runtime_type === "docker") {
+        const containerName = `runpanel-${project.slug}`;
+        const tmpDir = config.tmpDir;
+        fs.mkdirSync(tmpDir, { recursive: true });
+        const tmpFile = path.join(tmpDir, `${project.slug}-${Date.now()}`);
 
-  try {
-    if (project.runtime_type === "docker") {
-      const containerName = `runpanel-${project.slug}`;
-      const tmpDir = config.tmpDir;
-      fs.mkdirSync(tmpDir, { recursive: true });
-      const tmpFile = path.join(tmpDir, `${project.slug}-${Date.now()}`);
+        try {
+          fs.writeFileSync(tmpFile, content, "utf-8");
+          await exec("docker", ["cp", tmpFile, `${containerName}:${filePath}`], { timeout: 10_000 });
+        } finally {
+          fs.rmSync(tmpFile, { force: true });
+        }
 
-      try {
-        fs.writeFileSync(tmpFile, content, "utf-8");
-        await exec("docker", ["cp", tmpFile, `${containerName}:${filePath}`], { timeout: 10_000 });
-      } finally {
-        fs.rmSync(tmpFile, { force: true });
+        return NextResponse.json({ success: true });
       }
 
+      // Local
+      const repoDir = getRepoPath(project.slug);
+      const fullPath = resolveInside(repoDir, filePath);
+      if (!fullPath) {
+        return NextResponse.json({ error: "Percorso non valido" }, { status: 400 });
+      }
+
+      fs.writeFileSync(fullPath, content, "utf-8");
       return NextResponse.json({ success: true });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to write file";
+      return NextResponse.json({ error: message }, { status: 500 });
     }
-
-    // Local
-    const repoDir = getRepoPath(project.slug);
-    const fullPath = resolveInside(repoDir, filePath);
-    if (!fullPath) {
-      return NextResponse.json({ error: "Percorso non valido" }, { status: 400 });
-    }
-
-    fs.writeFileSync(fullPath, content, "utf-8");
-    return NextResponse.json({ success: true });
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : "Failed to write file";
-    return NextResponse.json({ error: message }, { status: 500 });
-  }
+  });
 }

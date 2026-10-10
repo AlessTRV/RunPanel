@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAuth } from "@/lib/auth-guard";
+import { isDenied, requirePermission } from "@/lib/auth-guard";
+import { withAudit } from "@/lib/audit";
 import { autostartInstallSchema } from "@/lib/validation";
 import { install, planInstall, uninstall } from "@/services/autostart/install";
 
@@ -11,36 +12,38 @@ import { install, planInstall, uninstall } from "@/services/autostart/install";
  * the block of text the operator pastes into a terminal.
  */
 export async function POST(request: NextRequest) {
-  const denied = await requireAuth();
-  if (denied) return denied;
+  return withAudit(request, { category: "system", action: "autostart.host", scope: "permission", scopeId: "autostart" }, async () => {
+    const denied = await requirePermission("autostart");
+    if (isDenied(denied)) return denied;
 
-  // A malformed body is a bad request, not a 500.
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: "Richiesta non valida" }, { status: 400 });
-  }
+    // A malformed body is a bad request, not a 500.
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json({ error: "Richiesta non valida" }, { status: 400 });
+    }
 
-  const parsed = autostartInstallSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: "Dati non validi", details: parsed.error.issues },
-      { status: 400 }
-    );
-  }
+    const parsed = autostartInstallSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: "Dati non validi", details: parsed.error.issues },
+        { status: 400 }
+      );
+    }
 
-  const { action, method } = parsed.data;
+    const { action, method } = parsed.data;
 
-  if (action === "preview") {
-    return NextResponse.json({ installed: false, plan: await planInstall(method) });
-  }
+    if (action === "preview") {
+      return NextResponse.json({ installed: false, plan: await planInstall(method) });
+    }
 
-  if (action === "uninstall") {
-    const result = await uninstall();
-    return NextResponse.json(result);
-  }
+    if (action === "uninstall") {
+      const result = await uninstall();
+      return NextResponse.json(result);
+    }
 
-  const result = await install(method);
-  return NextResponse.json({ installed: result.ok, ...result });
+    const result = await install(method);
+    return NextResponse.json({ installed: result.ok, ...result });
+  });
 }

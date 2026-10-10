@@ -2,15 +2,15 @@ import crypto from "crypto";
 import bcrypt from "bcryptjs";
 import { cookies } from "next/headers";
 
-import { getSetting, setSetting, setSettingIfAbsent } from "./settings";
 import { getDb, rowCount } from "./db";
 import { generateId } from "./utils";
+import { authzEvents } from "@/services/events";
 
 export const SESSION_COOKIE = "runpanel_session";
 const SESSION_MAX_AGE = 60 * 60 * 24 * 7; // 7 days
 
 /** Only the hash is stored, so a database copy cannot be replayed as a cookie. */
-function hashToken(token: string): string {
+export function hashToken(token: string): string {
   return crypto.createHash("sha256").update(token).digest("hex");
 }
 
@@ -24,7 +24,31 @@ export async function verifyPassword(password: string, hash: string): Promise<bo
   return bcrypt.compare(password, hash);
 }
 
+/**
+ * Compared against when no account matched, so a wrong email costs the same
+ * bcrypt round as a wrong password and response time does not say which
+ * addresses exist.
+ */
+const DUMMY_HASH = bcrypt.hashSync("runpanel-no-such-user", 12);
+
+export async function verifyPasswordOrDummy(password: string, hash: string | null): Promise<boolean> {
+  const ok = await bcrypt.compare(password, hash ?? DUMMY_HASH);
+  return ok && hash !== null;
+}
+
 // --- Session ---
+
+export interface SessionUser {
+  id: string;
+  /** Null only for the owner migrated from the single password, until they set one. */
+  email: string | null;
+  isOwner: boolean;
+}
+
+export interface SessionInfo {
+  sessionId: string;
+  user: SessionUser;
+}
 
 function generateToken(): string {
   return crypto.randomBytes(32).toString("hex");
@@ -35,9 +59,10 @@ function generateToken(): string {
  *
  * The panel previously kept one `session_token` in the settings table, so
  * signing in anywhere signed you out everywhere else, and there was no way to
- * revoke one device without revoking all of them.
+ * revoke one device without revoking all of them. Each row now belongs to a
+ * user (migration 023).
  */
-export async function createSession(meta: { userAgent?: string; ip?: string } = {}): Promise<string> {
+export async function createSession(userId: string, meta: { userAgent?: string; ip?: string } = {}): Promise<string> {
   const token = generateToken();
   const now = new Date();
   const expiresAt = new Date(now.getTime() + SESSION_MAX_AGE * 1000).toISOString();
@@ -48,6 +73,7 @@ export async function createSession(meta: { userAgent?: string; ip?: string } = 
     .values({
       id: generateId(),
       token_hash: hashToken(token),
+      user_id: userId,
       user_agent: meta.userAgent?.slice(0, 255) ?? null,
       ip: meta.ip?.slice(0, 64) ?? null,
       created_at: now.toISOString(),
@@ -72,6 +98,51 @@ export async function createSession(meta: { userAgent?: string; ip?: string } = 
 }
 
 /**
+ * The session a cookie value names, with its user, or null.
+ *
+ * A session of a disabled account, or one no account owns (a row from before
+ * migration 023 on a store that had no password yet), is not a session.
+ */
+async function lookupSession(token: string, touch: boolean): Promise<SessionInfo | null> {
+  const db = await getDb();
+  const row = await db
+    .selectFrom("sessions")
+    .innerJoin("users", "users.id", "sessions.user_id")
+    .select([
+      "sessions.id as session_id",
+      "sessions.expires_at",
+      "sessions.last_seen_at",
+      "users.id as user_id",
+      "users.email",
+      "users.is_owner",
+      "users.disabled",
+    ])
+    .where("sessions.token_hash", "=", hashToken(token))
+    .executeTakeFirst();
+
+  if (!row || row.disabled === 1) return null;
+
+  if (new Date(row.expires_at) < new Date()) {
+    await db.deleteFrom("sessions").where("id", "=", row.session_id).execute();
+    return null;
+  }
+
+  // Throttled: without this every request would write a row.
+  if (touch && Date.now() - new Date(row.last_seen_at).getTime() > 60_000) {
+    await db
+      .updateTable("sessions")
+      .set({ last_seen_at: new Date().toISOString() })
+      .where("id", "=", row.session_id)
+      .execute();
+  }
+
+  return {
+    sessionId: row.session_id,
+    user: { id: row.user_id, email: row.email, isOwner: row.is_owner === 1 },
+  };
+}
+
+/**
  * Whether a cookie value names a live session, without recording a visit.
  *
  * Split out for `proxy.ts`, which runs before the route handlers and has a
@@ -80,60 +151,21 @@ export async function createSession(meta: { userAgent?: string; ip?: string } = 
  */
 export async function isSessionTokenValid(token: string | undefined | null): Promise<boolean> {
   if (!token) return false;
-
   try {
-    const db = await getDb();
-    const session = await db
-      .selectFrom("sessions")
-      .select(["id", "expires_at"])
-      .where("token_hash", "=", hashToken(token))
-      .executeTakeFirst();
-
-    if (!session) return false;
-    if (new Date(session.expires_at) < new Date()) {
-      await db.deleteFrom("sessions").where("id", "=", session.id).execute();
-      return false;
-    }
-    return true;
+    return (await lookupSession(token, false)) !== null;
   } catch {
     return false;
   }
 }
 
-export async function getSession(): Promise<boolean> {
+export async function getSession(): Promise<SessionInfo | null> {
   try {
     const cookieStore = await cookies();
     const token = cookieStore.get(SESSION_COOKIE)?.value;
-    if (!token) return false;
-
-    // Looked up by hash, so the comparison happens inside an indexed equality
-    // check rather than against a secret held in application memory.
-    const db = await getDb();
-    const session = await db
-      .selectFrom("sessions")
-      .select(["id", "expires_at", "last_seen_at"])
-      .where("token_hash", "=", hashToken(token))
-      .executeTakeFirst();
-
-    if (!session) return false;
-
-    if (new Date(session.expires_at) < new Date()) {
-      await db.deleteFrom("sessions").where("id", "=", session.id).execute();
-      return false;
-    }
-
-    // Throttled: without this every request would write a row.
-    if (Date.now() - new Date(session.last_seen_at).getTime() > 60_000) {
-      await db
-        .updateTable("sessions")
-        .set({ last_seen_at: new Date().toISOString() })
-        .where("id", "=", session.id)
-        .execute();
-    }
-
-    return true;
+    if (!token) return null;
+    return await lookupSession(token, true);
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -143,53 +175,69 @@ export async function destroySession(): Promise<void> {
 
   if (token) {
     const db = await getDb();
-    await db.deleteFrom("sessions").where("token_hash", "=", hashToken(token)).execute();
+    const row = await db
+      .deleteFrom("sessions")
+      .where("token_hash", "=", hashToken(token))
+      .returning(["id", "user_id"])
+      .executeTakeFirst();
+    if (row?.user_id) authzEvents.emit(row.user_id, { type: "session-revoked", sessionId: row.id });
   }
 
   cookieStore.delete(SESSION_COOKIE);
 }
 
-/** Sign out every device. Used after a password change. */
-export async function destroyAllSessions(): Promise<number> {
+/** Revoke one session by id. Returns whose it was, or null if there was none. */
+export async function revokeSession(sessionId: string): Promise<string | null> {
   const db = await getDb();
-  const result = await db.deleteFrom("sessions").executeTakeFirst();
-  return rowCount(result);
-}
-
-export async function listSessions() {
-  const db = await getDb();
-  return db
-    .selectFrom("sessions")
-    .select(["id", "user_agent", "ip", "created_at", "last_seen_at", "expires_at"])
-    .orderBy("last_seen_at", "desc")
-    .execute();
-}
-
-// --- Admin password ---
-
-export async function getAdminPasswordHash(): Promise<string | null> {
-  return getSetting("admin_password_hash");
-}
-
-export async function setAdminPassword(password: string): Promise<void> {
-  const hash = await hashPassword(password);
-  await setSetting("admin_password_hash", hash);
+  const row = await db
+    .deleteFrom("sessions")
+    .where("id", "=", sessionId)
+    .returning(["id", "user_id"])
+    .executeTakeFirst();
+  if (!row) return null;
+  if (row.user_id) authzEvents.emit(row.user_id, { type: "session-revoked", sessionId: row.id });
+  return row.user_id ?? null;
 }
 
 /**
- * Set the admin password only if there is not one already.
- *
- * First-run setup used to read `isFirstRun()` and then write, which two
- * concurrent requests could both pass. Returns false when someone else got
- * there first, so the caller can refuse instead of silently overwriting the
- * password the real operator just chose.
+ * Sign a user out everywhere, except optionally the session doing it. Used
+ * after a password change, a reset, or when an account is disabled.
  */
-export async function claimAdminPassword(password: string): Promise<boolean> {
-  const hash = await hashPassword(password);
-  return setSettingIfAbsent("admin_password_hash", hash);
+export async function destroyUserSessions(userId: string, exceptSessionId?: string): Promise<number> {
+  const db = await getDb();
+  let query = db.deleteFrom("sessions").where("user_id", "=", userId);
+  if (exceptSessionId) query = query.where("id", "!=", exceptSessionId);
+  const result = await query.executeTakeFirst();
+  authzEvents.emit(userId, { type: "user-changed" });
+  return rowCount(result);
 }
 
+/** Sessions of one user, or of everyone when `userId` is omitted. */
+export async function listSessions(userId?: string) {
+  const db = await getDb();
+  let query = db
+    .selectFrom("sessions")
+    .leftJoin("users", "users.id", "sessions.user_id")
+    .select([
+      "sessions.id",
+      "sessions.user_id",
+      "users.email",
+      "sessions.user_agent",
+      "sessions.ip",
+      "sessions.created_at",
+      "sessions.last_seen_at",
+      "sessions.expires_at",
+    ])
+    .orderBy("sessions.last_seen_at", "desc");
+  if (userId) query = query.where("sessions.user_id", "=", userId);
+  return query.execute();
+}
+
+// --- First run ---
+
+/** No owner yet: the setup form is what the login page shows. */
 export async function isFirstRun(): Promise<boolean> {
-  return (await getAdminPasswordHash()) === null;
+  const db = await getDb();
+  const owner = await db.selectFrom("users").select("id").where("is_owner", "=", 1).executeTakeFirst();
+  return owner === undefined;
 }
-

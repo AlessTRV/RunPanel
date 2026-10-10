@@ -1,5 +1,8 @@
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth";
+import { GLOBAL_PERMISSIONS, hasPermission } from "@/lib/authz";
+import { loadPrincipal } from "@/lib/principal";
+import { MeProvider } from "@/lib/hooks/useMe";
 import { AppSidebar } from "@/components/AppSidebar";
 import { MobileNav } from "@/components/MobileNav";
 import { CommandPalette } from "@/components/CommandPalette";
@@ -18,8 +21,21 @@ export default async function PanelLayout({
   if (!session) {
     redirect("/login");
   }
+  // The owner migrated from the single password signs in without an email and
+  // sets one before anything else.
+  if (!session.user.email) {
+    redirect("/setup-email");
+  }
+  const principal = await loadPrincipal(session.user);
+  const me = {
+    id: session.user.id,
+    email: session.user.email,
+    isOwner: session.user.isOwner,
+    permissions: GLOBAL_PERMISSIONS.filter((p) => hasPermission(principal, p)),
+  };
 
   return (
+    <MeProvider me={me}>
     <PollingProvider>
     <PanelUpdateProvider>
     <div className="min-h-dvh">
@@ -47,5 +63,6 @@ export default async function PanelLayout({
     </div>
     </PanelUpdateProvider>
     </PollingProvider>
+    </MeProvider>
   );
 }

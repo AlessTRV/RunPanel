@@ -25,8 +25,8 @@ export type ProjectEvent =
    */
   | { type: "process:reset" }
   | { type: "process:status"; status: string; running: boolean; pid?: number; uptime?: number }
-  | { type: "terminal:output"; text: string }
-  | { type: "terminal:closed"; code: number | null }
+  | { type: "terminal:output"; userId: string; text: string }
+  | { type: "terminal:closed"; userId: string; code: number | null }
   /** Applying the bind list — see `services/project-mounts.ts`. */
   | { type: "mount:log"; line: string }
   | { type: "mount:phase"; phase: MountPhase; error?: string }
@@ -92,8 +92,8 @@ export type MountPhase =
   | "failed";
 
 export type ServiceEvent =
-  | { type: "console:output"; mode: ConsoleMode; text: string }
-  | { type: "console:closed"; mode: ConsoleMode; code: number | null }
+  | { type: "console:output"; userId: string; mode: ConsoleMode; text: string }
+  | { type: "console:closed"; userId: string; mode: ConsoleMode; code: number | null }
   /** Applying the bind list — see `services/service-mounts.ts`. */
   | { type: "mount:log"; line: string }
   | { type: "mount:phase"; phase: MountPhase; error?: string }
@@ -146,3 +146,15 @@ export const opsEvents = (globalRef.__runpanelOpsEvents ??= new ChannelBus<OpsEv
 export const serviceEvents = (globalRef.__runpanelServiceEvents ??= new ChannelBus<ServiceEvent>());
 
 export const HOST_CHANNEL = "host";
+
+/**
+ * Access changed for a user — keyed by user id.
+ *
+ * Streams and shells check access when they open; this is how they learn that
+ * it was taken away while they were open. `user-changed` covers permissions,
+ * grants, disabling and deletion; `session-revoked` names one session.
+ */
+export type AuthzEvent = { type: "user-changed" } | { type: "session-revoked"; sessionId: string };
+
+const authzRef = globalThis as typeof globalThis & { __runpanelAuthzEvents?: ChannelBus<AuthzEvent> };
+export const authzEvents = (authzRef.__runpanelAuthzEvents ??= new ChannelBus<AuthzEvent>());

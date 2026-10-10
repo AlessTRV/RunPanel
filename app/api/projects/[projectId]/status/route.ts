@@ -1,15 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAuth } from "@/lib/auth-guard";
+import { isDenied, requireProject } from "@/lib/auth-guard";
 import { getDb } from "@/lib/db";
 import { processManager } from "@/services/process-manager";
 
 type Params = { params: Promise<{ projectId: string }> };
 
 export async function GET(_request: NextRequest, { params }: Params) {
-  const denied = await requireAuth();
-  if (denied) return denied;
-
   const { projectId } = await params;
+  const denied = await requireProject(projectId, "view");
+  if (isDenied(denied)) return denied;
   const db = await getDb();
   const project = await db
     .selectFrom("projects")

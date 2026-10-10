@@ -52,6 +52,7 @@ export async function run({ base }) {
     method: "POST",
     body: JSON.stringify({
       setup: true,
+      email: "owner@runpanel.test",
       setupToken: SETUP_TOKEN,
       password: "redis-restore-suite-pw",
     }),
@@ -72,7 +73,7 @@ export async function run({ base }) {
       version: "7",
       port: PORT,
       projectId,
-      credentials: { password: PASSWORD },
+      credentials: { email: "owner@runpanel.test", password: PASSWORD },
     }),
   });
   r.check("redis provisioned inside the project", service.status === 201, JSON.stringify(service.body));

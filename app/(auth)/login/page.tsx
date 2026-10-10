@@ -3,8 +3,8 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { TextField, Label, Input, Button, Spinner } from "@heroui/react";
-import { Icon } from "@iconify/react";
-import { toast } from "sonner";
+import Image from "next/image";
+import logo from "@/components/logo.png";
 import { Panel } from "@/components/ui/Panel";
 import { Code, FieldHint } from "@/components/ui/Hint";
 
@@ -21,17 +21,21 @@ import { Code, FieldHint } from "@/components/ui/Hint";
 export default function LoginPage() {
   const router = useRouter();
   const [isFirstRun, setIsFirstRun] = useState<boolean | null>(null);
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [setupToken, setSetupToken] = useState("");
   const [loading, setLoading] = useState(false);
+  // Shown under the fields rather than only as a toast: a toast is gone before
+  // you have looked back at what you typed.
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     fetch("/api/auth/check")
       .then((r) => r.json())
       .then((data) => {
         if (data.authenticated) {
-          router.push("/home");
+          router.push(data.emailRequired ? "/setup-email" : "/home");
         }
         setIsFirstRun(data.firstRun);
       })
@@ -39,22 +43,26 @@ export default function LoginPage() {
   }, [router]);
 
   async function handleLogin() {
-    if (!password) return;
+    if (!password) {
+      setError("Inserisci la password");
+      return;
+    }
+    setError(null);
     setLoading(true);
     try {
       const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ password }),
+        body: JSON.stringify({ email: email.trim(), password }),
       });
+      const data = await res.json().catch(() => ({}));
       if (res.ok) {
-        router.push("/home");
+        router.push(data.emailRequired ? "/setup-email" : "/home");
       } else {
-        const data = await res.json();
-        toast.error(data.error || "Password errata");
+        setError(data.error || "Credenziali non valide");
       }
     } catch {
-      toast.error("Impossibile raggiungere il pannello");
+      setError("Impossibile raggiungere il pannello");
     } finally {
       setLoading(false);
     }
@@ -62,32 +70,37 @@ export default function LoginPage() {
 
   async function handleSetup() {
     if (!setupToken.trim()) {
-      toast.error("Serve il token che il pannello ha stampato nel suo log di avvio");
+      setError("Serve il token che il pannello ha stampato nel suo log di avvio");
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      setError("Serve un'email valida: sarà il tuo nome di accesso");
       return;
     }
     if (password.length < 8) {
-      toast.error("La password deve avere almeno 8 caratteri");
+      setError("La password deve avere almeno 8 caratteri");
       return;
     }
     if (password !== confirmPassword) {
-      toast.error("Le due password non coincidono");
+      setError("Le due password non coincidono");
       return;
     }
+    setError(null);
     setLoading(true);
     try {
       const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ password, setup: true, setupToken: setupToken.trim() }),
+        body: JSON.stringify({ email: email.trim(), password, setup: true, setupToken: setupToken.trim() }),
       });
       if (res.ok) {
         router.push("/home");
       } else {
-        const data = await res.json();
-        toast.error(data.error || "Configurazione non riuscita");
+        const data = await res.json().catch(() => ({}));
+        setError(data.error || "Configurazione non riuscita");
       }
     } catch {
-      toast.error("Impossibile raggiungere il pannello");
+      setError("Impossibile raggiungere il pannello");
     } finally {
       setLoading(false);
     }
@@ -95,20 +108,30 @@ export default function LoginPage() {
 
   if (isFirstRun === null) {
     return (
-      <div className="flex min-h-screen items-center justify-center">
+      <div className="flex min-h-dvh items-center justify-center">
         <Spinner />
       </div>
     );
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center p-4">
-      <Panel className="w-full max-w-md space-y-5 p-6 sm:p-8">
+    <div className="flex min-h-dvh items-center justify-center p-4">
+      <Panel className="w-full max-w-md p-6 sm:p-8">
+        {/* A real form: Enter submits from any field, and password managers
+            recognise it as a sign-in. */}
+        <form
+          className="space-y-5"
+          noValidate
+          onSubmit={(e) => {
+            e.preventDefault();
+            void (isFirstRun ? handleSetup() : handleLogin());
+          }}
+        >
         <div className="flex flex-col items-center gap-2 text-center">
-          <Icon icon="solar:server-bold-duotone" className="text-accent" width={44} aria-hidden />
+          <Image src={logo} alt="" aria-hidden width={44} height={44} className="size-11" priority />
           <h1 className="text-foreground text-xl font-semibold tracking-tight">RunPanel</h1>
           <p className="text-muted text-sm">
-            {isFirstRun ? "Scegli la password di amministratore" : "Accedi per continuare"}
+            {isFirstRun ? "Crea l'account proprietario del pannello" : "Accedi per continuare"}
           </p>
         </div>
 
@@ -130,35 +153,39 @@ export default function LoginPage() {
             </div>
           )}
 
-          <TextField type="password" value={password} onChange={setPassword} autoFocus={!isFirstRun}>
+          <TextField type="email" value={email} onChange={setEmail} autoFocus={!isFirstRun}>
+            <Label>Email</Label>
+            <Input placeholder="nome@esempio.it" autoComplete="username" />
+          </TextField>
+          {!isFirstRun && (
+            // One line rather than a paragraph: it concerns an upgrade that
+            // happens once, and was the longest text on the screen every day.
+            <FieldHint>Account senza email, da una versione vecchia? Lascia vuoto.</FieldHint>
+          )}
+
+          <TextField type="password" value={password} onChange={setPassword}>
             <Label>Password</Label>
-            <Input
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !isFirstRun) handleLogin();
-              }}
-            />
+            <Input autoComplete={isFirstRun ? "new-password" : "current-password"} />
           </TextField>
 
           {isFirstRun && (
             <TextField type="password" value={confirmPassword} onChange={setConfirmPassword}>
               <Label>Conferma password</Label>
-              <Input
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") handleSetup();
-                }}
-              />
+              <Input autoComplete="new-password" />
             </TextField>
           )}
         </div>
 
-        <Button
-          variant="primary"
-          className="w-full"
-          isPending={loading}
-          onPress={isFirstRun ? handleSetup : handleLogin}
-        >
+        {error && (
+          <p role="alert" className="text-danger text-sm">
+            {error}
+          </p>
+        )}
+
+        <Button type="submit" variant="primary" className="w-full" isPending={loading}>
           {isFirstRun ? "Configura il pannello" : "Accedi"}
         </Button>
+        </form>
       </Panel>
     </div>
   );

@@ -7,6 +7,7 @@ import { Button, Input, Label, TextField } from "@heroui/react";
 import { Icon } from "@iconify/react";
 import { toast } from "sonner";
 import { useResource } from "@/lib/hooks/useResource";
+import { useCrumbLabel } from "@/lib/hooks/useCrumbLabel";
 import { usePollInterval } from "@/lib/hooks/usePollingInterval";
 import { useLineBuffer } from "@/lib/hooks/useLineBuffer";
 import { useServiceStream, type ConsoleMode, type MountApply } from "@/lib/hooks/useServiceStream";
@@ -27,6 +28,7 @@ import { cn } from "@/lib/utils";
 import { ConnectionPanel } from "./_components/ConnectionPanel";
 import { ConsolePanel } from "./_components/ConsolePanel";
 import { DataSection } from "./_components/DataSection";
+import { AccessPanel } from "@/components/users/AccessPanel";
 import type { Credentials, From, Service, ServiceTabId } from "./_components/types";
 
 /**
@@ -67,6 +69,7 @@ export default function ServiceDetailPage() {
     `/api/services/${serviceId}`,
     { intervalMs: poll5000 }
   );
+  useCrumbLabel(serviceId, service?.display_name || service?.name);
 
   const [creds, setCreds] = useState<Credentials | null>(null);
   // Null until chosen, so the sensible default can depend on data that has not
@@ -219,7 +222,7 @@ export default function ServiceDetailPage() {
   if (!service && loadError && !loadError.includes("404")) {
     return (
       <>
-        <PageHeader title="Servizio" />
+        <PageHeader title="Servizio" back={{ href: "/services", label: "Torna ai servizi" }} />
         <LoadError what="il servizio" error={loadError} onRetry={() => void refresh()} />
       </>
     );
@@ -228,7 +231,7 @@ export default function ServiceDetailPage() {
   if (!service) {
     return (
       <>
-        <PageHeader title="Servizio" />
+        <PageHeader title="Servizio" back={{ href: "/services", label: "Torna ai servizi" }} />
         <Panel>
           <EmptyState
             icon="solar:danger-triangle-linear"
@@ -262,26 +265,33 @@ export default function ServiceDetailPage() {
    */
   const section = (id: ServiceTabId) => cn("lg:block", activeTab === id ? "block" : "hidden");
 
+  // Controls follow the account's level; the server enforces it regardless.
+  const canManage = (service.permission?.level ?? "manage") === "manage";
+  const canOperate = service.permission?.level !== "read";
+
   return (
     <>
       <PageHeader
+        back={{ href: "/services", label: "Torna ai servizi" }}
         title={service.displayName}
         description={`${label} ${service.version} · porta ${service.port} sull'host`}
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <StatusBadge status={service.status} />
-            <Button
-              variant="outline"
-              size="sm"
-              onPress={() => {
-                setRenameValue(service.displayName);
-                setRenameOpen(true);
-              }}
-            >
-              <Icon icon="solar:pen-linear" width={16} aria-hidden />
-              Rinomina
-            </Button>
-            {running ? (
+            {canManage && (
+              <Button
+                variant="outline"
+                size="sm"
+                onPress={() => {
+                  setRenameValue(service.displayName);
+                  setRenameOpen(true);
+                }}
+              >
+                <Icon icon="solar:pen-linear" width={16} aria-hidden />
+                Rinomina
+              </Button>
+            )}
+            {!canOperate ? null : running ? (
               <>
                 <Button variant="outline" size="sm" onPress={() => handleControl("restart")}>
                   <Icon icon="solar:refresh-linear" width={16} aria-hidden />
@@ -375,6 +385,9 @@ export default function ServiceDetailPage() {
               onDeleted={() => router.push("/services")}
               onChanged={refresh}
             />
+            <div className="mt-4">
+              <AccessPanel kind="service" id={service.id} />
+            </div>
           </div>
         </div>
 

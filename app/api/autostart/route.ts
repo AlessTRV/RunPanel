@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { autostartColumns, resolveAutostart } from "@/lib/autostart";
-import { requireAuth } from "@/lib/auth-guard";
+import { isDenied, requirePermission } from "@/lib/auth-guard";
+import { withAudit } from "@/lib/audit";
 import { getDb, nowIso } from "@/lib/db";
 import { autostartUpdateSchema } from "@/lib/validation";
 import { autostartProbeCache, containerPolicies } from "@/services/autostart/probe";
@@ -14,8 +15,8 @@ import { serviceDisplayName } from "@/lib/service-name";
  * actually agree with that.
  */
 export async function GET() {
-  const denied = await requireAuth();
-  if (denied) return denied;
+  const denied = await requirePermission("autostart");
+  if (isDenied(denied)) return denied;
 
   const db = await getDb();
   const [probe, policies, report, stored, services, projects] = await Promise.all([
@@ -82,55 +83,57 @@ function matches(autostart: boolean, actual: string): boolean {
 }
 
 export async function PUT(request: NextRequest) {
-  const denied = await requireAuth();
-  if (denied) return denied;
+  return withAudit(request, { category: "system", action: "autostart.update", scope: "permission", scopeId: "autostart" }, async () => {
+    const denied = await requirePermission("autostart");
+    if (isDenied(denied)) return denied;
 
-  // A malformed body is a bad request, not a 500 with a stack trace.
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: "Richiesta non valida" }, { status: 400 });
-  }
-
-  const parsed = autostartUpdateSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: "Dati non validi", details: parsed.error.issues },
-      { status: 400 }
-    );
-  }
-
-  const db = await getDb();
-
-  // In a transaction because boot order is a RELATION between rows, not a set
-  // of independent values. Saving five entries and failing on the sixth used to
-  // leave a configuration nobody chose — half the new order, half the old — and
-  // the page would then show it as if it were what had been asked for.
-  await db.transaction().execute(async (trx) => {
-    for (const entry of parsed.data.entries) {
-      const columns = autostartColumns({
-        autostart: entry.autostart,
-        order: entry.order,
-        delaySeconds: entry.delaySeconds,
-        waitHealthy: entry.waitHealthy,
-      });
-
-      if (entry.kind === "service") {
-        await trx
-          .updateTable("services")
-          .set({ ...columns, updated_at: nowIso() })
-          .where("id", "=", entry.id)
-          .execute();
-      } else {
-        await trx
-          .updateTable("projects")
-          .set({ ...columns, updated_at: nowIso() })
-          .where("id", "=", entry.id)
-          .execute();
-      }
+    // A malformed body is a bad request, not a 500 with a stack trace.
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json({ error: "Richiesta non valida" }, { status: 400 });
     }
-  });
 
-  return NextResponse.json({ ok: true, updated: parsed.data.entries.length });
+    const parsed = autostartUpdateSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: "Dati non validi", details: parsed.error.issues },
+        { status: 400 }
+      );
+    }
+
+    const db = await getDb();
+
+    // In a transaction because boot order is a RELATION between rows, not a set
+    // of independent values. Saving five entries and failing on the sixth used to
+    // leave a configuration nobody chose — half the new order, half the old — and
+    // the page would then show it as if it were what had been asked for.
+    await db.transaction().execute(async (trx) => {
+      for (const entry of parsed.data.entries) {
+        const columns = autostartColumns({
+          autostart: entry.autostart,
+          order: entry.order,
+          delaySeconds: entry.delaySeconds,
+          waitHealthy: entry.waitHealthy,
+        });
+
+        if (entry.kind === "service") {
+          await trx
+            .updateTable("services")
+            .set({ ...columns, updated_at: nowIso() })
+            .where("id", "=", entry.id)
+            .execute();
+        } else {
+          await trx
+            .updateTable("projects")
+            .set({ ...columns, updated_at: nowIso() })
+            .where("id", "=", entry.id)
+            .execute();
+        }
+      }
+    });
+
+    return NextResponse.json({ ok: true, updated: parsed.data.entries.length });
+  });
 }

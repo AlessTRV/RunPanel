@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAuth } from "@/lib/auth-guard";
+import { isDenied, requireProject } from "@/lib/auth-guard";
+import { audit } from "@/lib/audit";
+import { projectAllows, watchAccess } from "@/lib/stream-guard";
 import { terminalActionSchema } from "@/lib/validation";
 import { getDb } from "@/lib/db";
 import { spawn, type ChildProcess } from "child_process";
@@ -50,10 +52,11 @@ type Params = { params: Promise<{ projectId: string }> };
 
 // POST: Send input to docker exec shell or start a new session
 export async function POST(request: NextRequest, { params }: Params) {
-  const denied = await requireAuth();
-  if (denied) return denied;
-
   const { projectId } = await params;
+  const denied = await requireProject(projectId, "terminal");
+  if (isDenied(denied)) return denied;
+  // One shell per person: output goes to whoever typed, not to every viewer.
+  const userId = denied.session.user.id;
   // A malformed body is a bad request, not a 500.
   let body: unknown;
   try {
@@ -87,7 +90,7 @@ export async function POST(request: NextRequest, { params }: Params) {
   }
 
   const containerName = `runpanel-${project.slug}`;
-  const sessionKey = `term-${projectId}`;
+  const sessionKey = `term-${projectId}-${userId}`;
 
   /*
     A `stop` is never a reason to start one.
@@ -122,6 +125,13 @@ export async function POST(request: NextRequest, { params }: Params) {
     const session = { proc, buffer: [] as string[], lastActivity: Date.now() };
     sessions.set(sessionKey, session);
 
+    // Killed as soon as this person loses the terminal on this project, rather
+    // than living on until the idle reaper finds it.
+    const stopWatching = watchAccess({ userId }, projectAllows(projectId, "terminal"), () => {
+      try { proc.kill(); } catch { /* already gone */ }
+      if (sessions.get(sessionKey) === session) sessions.delete(sessionKey);
+    });
+
     // Output is published on the project's event stream as it arrives. The
     // buffer is kept only so a client that connects slightly late still sees
     // what it missed — it is no longer polled once per second.
@@ -132,7 +142,7 @@ export async function POST(request: NextRequest, { params }: Params) {
       if (session.buffer.length > 500) {
         session.buffer = session.buffer.slice(-250);
       }
-      projectEvents.emit(projectId, { type: "terminal:output", text });
+      projectEvents.emit(projectId, { type: "terminal:output", userId, text });
     };
 
     proc.stdout?.on("data", pushLine);
@@ -140,8 +150,9 @@ export async function POST(request: NextRequest, { params }: Params) {
     proc.on("close", (code) => {
       const notice = `\r\n[Container shell exited with code ${code}]\r\n`;
       session.buffer.push(notice);
-      projectEvents.emit(projectId, { type: "terminal:output", text: notice });
-      projectEvents.emit(projectId, { type: "terminal:closed", code });
+      projectEvents.emit(projectId, { type: "terminal:output", userId, text: notice });
+      projectEvents.emit(projectId, { type: "terminal:closed", userId, code });
+      stopWatching();
 
       // Out of the map as soon as it is gone. Left in, a dead session kept the
       // reaper from collecting it for as long as anything polled the route, and
@@ -151,6 +162,7 @@ export async function POST(request: NextRequest, { params }: Params) {
       if (sessions.get(sessionKey) === session) sessions.delete(sessionKey);
     });
 
+    await audit({ userId, category: "terminal", action: "project.terminal", scope: "project", scopeId: projectId, request });
     return NextResponse.json({ status: "started", container: containerName });
   }
 
@@ -173,11 +185,12 @@ export async function POST(request: NextRequest, { params }: Params) {
 
 // GET: Poll for output
 export async function GET(request: NextRequest, { params }: Params) {
-  const denied = await requireAuth();
-  if (denied) return denied;
-
   const { projectId } = await params;
-  const sessionKey = `term-${projectId}`;
+  const denied = await requireProject(projectId, "terminal");
+  if (isDenied(denied)) return denied;
+  // One shell per person: output goes to whoever typed, not to every viewer.
+  const userId = denied.session.user.id;
+  const sessionKey = `term-${projectId}-${userId}`;
 
   const session = sessions.get(sessionKey);
   if (!session) {

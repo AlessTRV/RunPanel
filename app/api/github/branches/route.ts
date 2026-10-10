@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAuth } from "@/lib/auth-guard";
+import { isDenied, requirePermission } from "@/lib/auth-guard";
 import { githubToken, githubFetch } from "@/lib/github";
 
 const PER_PAGE = 100;
@@ -9,8 +9,8 @@ const MAX_PAGES = 3;
 const REPO_PATTERN = /^[\w.-]+\/[\w.-]+$/;
 
 export async function GET(request: NextRequest) {
-  const denied = await requireAuth();
-  if (denied) return denied;
+  const denied = await requirePermission("github");
+  if (isDenied(denied)) return denied;
 
   const repo = request.nextUrl.searchParams.get("repo") ?? "";
 

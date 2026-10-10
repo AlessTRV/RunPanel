@@ -1,5 +1,6 @@
 import { getDb, rowCount } from "@/lib/db";
 import { pruneRateLimits } from "@/lib/rate-limit";
+import { pruneAudit } from "@/lib/audit";
 import { dockerTry, isDockerAvailable, lines } from "./cli";
 import { LABEL_KIND, LABEL_PROJECT, ownedFilters, parseLabels } from "./labels";
 import { serviceVolumeNames } from "../service-provisioner";
@@ -308,7 +309,7 @@ const ONE_TIME_RETENTION_DAYS = 90;
 /**
  * The rows nothing else collects.
  *
- * Three tables here only ever grew. `deployments` gains a row per push and is
+ * These tables only ever grew. `deployments` gains a row per push and is
  * read with a `GROUP BY` over the whole table on an endpoint polled every 5
  * seconds; `webhook_deliveries` gains one per delivery and is read back only as
  * the last handful on a project's settings tab; `rate_limits` keys on a client
@@ -365,10 +366,13 @@ async function pruneStore(): Promise<void> {
       .executeTakeFirst()
   );
 
-  if (rateLimits + deployed + webhooks + oneTime > 0) {
+  // The activity log keeps what the owner chose in the settings, 90 days by default.
+  const audited = await pruneAudit();
+
+  if (rateLimits + deployed + webhooks + oneTime + audited > 0) {
     console.log(
       `[gc] Store: ${deployed} deployment(s), ${webhooks} webhook delivery(ies), ` +
-        `${oneTime} spent one-time command(s), ${rateLimits} rate-limit window(s)`
+        `${oneTime} spent one-time command(s), ${rateLimits} rate-limit window(s), ${audited} audit entry(ies)`
     );
   }
 }

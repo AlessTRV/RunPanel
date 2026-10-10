@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { encrypt } from "@/lib/crypto";
-import { requireAuth } from "@/lib/auth-guard";
+import { isDenied, requirePermission } from "@/lib/auth-guard";
+import { withAudit } from "@/lib/audit";
 import { getDb, nowIso } from "@/lib/db";
 import { generateId } from "@/lib/utils";
 import { destinationSchema } from "@/lib/validation";
 
 export async function GET() {
-  const denied = await requireAuth();
-  if (denied) return denied;
+  const denied = await requirePermission("backup");
+  if (isDenied(denied)) return denied;
 
   const db = await getDb();
   const rows = await db
@@ -30,60 +31,62 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
-  const denied = await requireAuth();
-  if (denied) return denied;
+  return withAudit(request, { category: "backup", action: "backup.destination.create", scope: "permission", scopeId: "backup" }, async () => {
+    const denied = await requirePermission("backup");
+    if (isDenied(denied)) return denied;
 
-  // A malformed body is a bad request, not a 500.
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: "Richiesta non valida" }, { status: 400 });
-  }
+    // A malformed body is a bad request, not a 500.
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json({ error: "Richiesta non valida" }, { status: 400 });
+    }
 
-  const parsed = destinationSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: "Dati non validi", details: parsed.error.issues },
-      { status: 400 }
-    );
-  }
+    const parsed = destinationSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: "Dati non validi", details: parsed.error.issues },
+        { status: 400 }
+      );
+    }
 
-  const { name, type, config, isDefault } = parsed.data;
-  const db = await getDb();
+    const { name, type, config, isDefault } = parsed.data;
+    const db = await getDb();
 
-  const clash = await db
-    .selectFrom("backup_destinations")
-    .select("id")
-    .where("name", "=", name)
-    .executeTakeFirst();
+    const clash = await db
+      .selectFrom("backup_destinations")
+      .select("id")
+      .where("name", "=", name)
+      .executeTakeFirst();
 
-  if (clash) {
-    return NextResponse.json(
-      { error: `Esiste già una destinazione chiamata "${name}"` },
-      { status: 409 }
-    );
-  }
+    if (clash) {
+      return NextResponse.json(
+        { error: `Esiste già una destinazione chiamata "${name}"` },
+        { status: 409 }
+      );
+    }
 
-  const id = generateId();
-  const now = nowIso();
+    const id = generateId();
+    const now = nowIso();
 
-  if (isDefault) {
-    await db.updateTable("backup_destinations").set({ is_default: 0 }).execute();
-  }
+    if (isDefault) {
+      await db.updateTable("backup_destinations").set({ is_default: 0 }).execute();
+    }
 
-  await db
-    .insertInto("backup_destinations")
-    .values({
-      id,
-      name,
-      type,
-      config: encrypt(JSON.stringify(config ?? {})),
-      is_default: isDefault ? 1 : 0,
-      created_at: now,
-      updated_at: now,
-    })
-    .execute();
+    await db
+      .insertInto("backup_destinations")
+      .values({
+        id,
+        name,
+        type,
+        config: encrypt(JSON.stringify(config ?? {})),
+        is_default: isDefault ? 1 : 0,
+        created_at: now,
+        updated_at: now,
+      })
+      .execute();
 
-  return NextResponse.json({ id, name, type, isDefault: Boolean(isDefault) }, { status: 201 });
+    return NextResponse.json({ id, name, type, isDefault: Boolean(isDefault) }, { status: 201 });
+  });
 }

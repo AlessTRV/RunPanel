@@ -7,6 +7,7 @@ import { Icon } from "@iconify/react";
 import logo from "./logo.png";
 import { cn } from "@/lib/utils";
 import { NAV_GROUPS, isActiveNav, navItemsIn, type NavItem } from "@/lib/nav";
+import { useAllowedNav } from "@/lib/hooks/useMe";
 import { usePanelUpdate } from "@/lib/hooks/usePanelUpdate";
 import { hasUpdate } from "@/lib/panel-update";
 
@@ -76,7 +77,8 @@ function NavLink({ item, active }: { item: NavItem; active: boolean }) {
 
 export function AppSidebar({ version }: { version: string }) {
   const pathname = usePathname();
-  const footer = navItemsIn("footer");
+  const allowed = useAllowedNav();
+  const footer = navItemsIn("footer", allowed);
   // Shared with the banner rather than fetched again — see `usePanelUpdate`.
   const { status } = usePanelUpdate();
   const updateReady = hasUpdate(status);
@@ -107,7 +109,7 @@ export function AppSidebar({ version }: { version: string }) {
                 {group.label}
               </p>
             )}
-            {navItemsIn(group.id).map((item) => (
+            {navItemsIn(group.id, allowed).map((item) => (
               <NavLink key={item.href} item={item} active={isActiveNav(pathname, item)} />
             ))}
           </div>

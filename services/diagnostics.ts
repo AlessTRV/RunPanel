@@ -253,7 +253,8 @@ export async function runDiagnostics(): Promise<Check[]> {
     detail: isValidTimeZone(timezone)
       ? `${timezone} — è il fuso con cui vengono interpretate le pianificazioni`
       : `"${timezone}" non è un fuso valido: le pianificazioni useranno UTC`,
-    href: "/account",
+    // The timezone moved to the Pannello tab with the other panel-wide preferences.
+    href: "/settings",
   });
 
   // --- Pending restore -------------------------------------------------------

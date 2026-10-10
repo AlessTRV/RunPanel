@@ -5,6 +5,8 @@ import { Button, Input, TextField } from "@heroui/react";
 import { Icon } from "@iconify/react";
 import { Code, FieldHint, Hint } from "@/components/ui/Hint";
 import { DeleteButton } from "@/components/ui/DangerAction";
+import { CheckboxField } from "@/components/ui/CheckboxField";
+import { FormError } from "@/components/ui/FormError";
 import {
   CONTAINER_PATH_RULE,
   HOST_PATH_RULE,
@@ -144,24 +146,16 @@ export function MountsSection({
               </div>
 
               <div className="flex flex-wrap items-center gap-4">
-                <label className="flex cursor-pointer items-center gap-2 text-xs">
-                  <input
-                    type="checkbox"
-                    checked={row.enabled}
-                    onChange={(e) => patch(index, { enabled: e.target.checked })}
-                    className="accent-accent size-4"
-                  />
-                  Attivo
-                </label>
-                <label className="flex cursor-pointer items-center gap-2 text-xs">
-                  <input
-                    type="checkbox"
-                    checked={row.readOnly}
-                    onChange={(e) => patch(index, { readOnly: e.target.checked })}
-                    className="accent-accent size-4"
-                  />
-                  Sola lettura
-                </label>
+                <CheckboxField
+                  label="Attivo"
+                  isSelected={row.enabled}
+                  onChange={(enabled) => patch(index, { enabled })}
+                />
+                <CheckboxField
+                  label="Sola lettura"
+                  isSelected={row.readOnly}
+                  onChange={(readOnly) => patch(index, { readOnly })}
+                />
                 <div className="ml-auto">
                   <DeleteButton
                     label="Rimuovi questa cartella"
@@ -180,21 +174,16 @@ export function MountsSection({
                   Contiene {notEmpty.entries.slice(0, 5).join(", ")}
                   {notEmpty.entries.length > 5 ? "…" : ""}. Se è già il contenuto giusto, spunta la
                   casella: il pannello la monta com&apos;è, senza copiarci sopra niente.
-                  <label className="mt-2 flex cursor-pointer items-start gap-2.5">
-                    <input
-                      type="checkbox"
-                      checked={adopt.includes(row.target)}
-                      onChange={(e) =>
-                        setAdopt((prev) =>
-                          e.target.checked
-                            ? [...prev, row.target]
-                            : prev.filter((t) => t !== row.target)
-                        )
-                      }
-                      className="accent-warning mt-0.5 size-4"
-                    />
-                    <span className="text-xs leading-relaxed">Usa i dati che ci sono già</span>
-                  </label>
+                  <CheckboxField
+                    className="mt-2"
+                    label={<span className="text-xs leading-relaxed">Usa i dati che ci sono già</span>}
+                    isSelected={adopt.includes(row.target)}
+                    onChange={(checked) =>
+                      setAdopt((prev) =>
+                        checked ? [...prev, row.target] : prev.filter((t) => t !== row.target)
+                      )
+                    }
+                  />
                 </Hint>
               )}
             </div>
@@ -202,11 +191,7 @@ export function MountsSection({
         </div>
       )}
 
-      {error && !notEmpty && (
-        <p className="text-danger text-xs" role="alert">
-          {error}
-        </p>
-      )}
+      {!notEmpty && <FormError>{error}</FormError>}
 
       <div className="flex flex-wrap gap-2">
         <Button variant="secondary" size="sm" onPress={() => setRows((prev) => [...prev, BLANK()])}>

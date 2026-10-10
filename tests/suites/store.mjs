@@ -23,7 +23,7 @@ export async function run({ base }) {
 
   res = await api.call("/api/auth/login", {
     method: "POST",
-    body: JSON.stringify({ setup: true, setupToken: SETUP_TOKEN, password: "store-suite-pw" }),
+    body: JSON.stringify({ setup: true, email: "owner@runpanel.test", setupToken: SETUP_TOKEN, password: "store-suite-pw" }),
   });
   r.check("first-run setup succeeds", res.body.success === true, JSON.stringify(res.body));
 

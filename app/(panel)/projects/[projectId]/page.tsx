@@ -2,11 +2,12 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { Input, Label, TextField } from "@heroui/react";
+import { Button, Input, Label, TextField } from "@heroui/react";
 import { toast } from "sonner";
 import { MSG } from "@/lib/copy";
 import { useProjectStream } from "@/lib/hooks/useProjectStream";
 import { useResource } from "@/lib/hooks/useResource";
+import { useCrumbLabel } from "@/lib/hooks/useCrumbLabel";
 import { usePollInterval } from "@/lib/hooks/usePollingInterval";
 import { useLineBuffer } from "@/lib/hooks/useLineBuffer";
 import { FormDialog } from "@/components/ui/FormDialog";
@@ -21,6 +22,7 @@ import { LogsTab } from "./_components/LogsTab";
 import { DeploymentsTab } from "./_components/DeploymentsTab";
 import { EnvTab } from "./_components/EnvTab";
 import { LoadError } from "@/components/ui/LoadError";
+import { EmptyState } from "@/components/ui/EmptyState";
 import { TerminalTab } from "./_components/TerminalTab";
 import { SettingsTab } from "./_components/SettingsTab";
 import { VersionDialog } from "./_components/VersionDialog";
@@ -58,6 +60,7 @@ export default function ProjectDetailPage() {
   );
 
   const [project, setProject] = useState<Project | null>(null);
+  useCrumbLabel(projectId, project?.name);
   const [loading, setLoading] = useState(true);
   const [deploying, setDeploying] = useState(false);
 
@@ -178,7 +181,12 @@ export default function ProjectDetailPage() {
   // Tab data is fetched by the shared hook, which owns its own loading flag —
   // so there is no effect here setting one synchronously. Passing `null` as the
   // url is how a tab that is not open stays idle.
-  const { data: deploymentsData, loading: deploymentsLoading } = useResource<Deployment[]>(
+  const {
+    data: deploymentsData,
+    loading: deploymentsLoading,
+    error: deploymentsError,
+    refresh: refreshDeployments,
+  } = useResource<Deployment[]>(
     activeTab === "deployments" ? `/api/projects/${projectId}/logs` : null
   );
   const deployments = useMemo(
@@ -329,10 +337,14 @@ export default function ProjectDetailPage() {
       { id: "logs" as TabId, label: "Log", icon: "solar:document-text-linear" },
       { id: "deployments" as TabId, label: "Deploy", icon: "solar:history-linear" },
       { id: "env" as TabId, label: "Variabili", icon: "solar:key-linear" },
-      ...(project.runtime_type === "docker"
+      // Only the tabs this account can use: the terminal needs the flag, the
+      // settings need `manage`. Missing `permission` means the owner's view.
+      ...(project.runtime_type === "docker" && (project.permission?.terminal ?? true)
         ? [{ id: "terminal" as TabId, label: "Terminale", icon: "solar:monitor-linear" }]
         : []),
-      { id: "settings" as TabId, label: "Impostazioni", icon: "solar:settings-linear" },
+      ...((project.permission?.level ?? "manage") === "manage"
+        ? [{ id: "settings" as TabId, label: "Impostazioni", icon: "solar:settings-linear" }]
+        : []),
     ];
   }, [project]);
 
@@ -343,6 +355,16 @@ export default function ProjectDetailPage() {
     );
   }
   if (loading || !project) return <PageSkeleton />;
+
+  // A remembered tab this account does not have shows the logs instead.
+  const shownTab = tabs.some((tab) => tab.id === activeTab) ? activeTab : "logs";
+
+  // A project that has never been deployed has no process and no files: the
+  // log tab showed an empty console and, below it, the file manager's raw
+  // "no source yet" error. It says what to do next instead.
+  const neverDeployed =
+    !project.last_deploy_at && project.status !== "deploying" && deployLog.lines.length === 0;
+  const canManage = (project.permission?.level ?? "manage") === "manage";
 
   return (
     <div>
@@ -358,18 +380,45 @@ export default function ProjectDetailPage() {
 
       <ProjectStats info={processInfo} />
 
-      <Tabs tabs={tabs} value={activeTab} onChange={setActiveTab} label="Sezioni del progetto" />
+      <Tabs tabs={tabs} value={shownTab} onChange={setActiveTab} label="Sezioni del progetto" />
 
       {/* Each tab is mounted only while selected. The file manager in
           particular used to render on every page load regardless. */}
-      {activeTab === "logs" && (
+      {shownTab === "logs" && neverDeployed && (
+        <EmptyState
+          icon="solar:rocket-2-linear"
+          title="Ancora nessun deploy"
+          description={
+            canManage
+              ? "Scegli la sorgente (repository GitHub o archivio ZIP) nelle impostazioni, poi premi Deploy: qui compariranno build e output del processo."
+              : "Quando qualcuno lo distribuirà, qui compariranno build e output del processo."
+          }
+          action={
+            canManage ? (
+              <Button size="sm" variant="secondary" onPress={() => setActiveTab("settings")}>
+                Apri le impostazioni
+              </Button>
+            ) : undefined
+          }
+          className="border-border rounded-[var(--radius)] border border-dashed"
+        />
+      )}
+
+      {shownTab === "logs" && !neverDeployed && (
         <div className="space-y-6">
           <LogsTab deployLog={deployLog.lines} processLog={processLog.lines} connected={connected} />
-          <FileManager projectId={projectId} runtimeType={project.runtime_type} />
+          {/* Files are part of managing the project; below that the API refuses them. */}
+          {(project.permission?.level ?? "manage") === "manage" && (
+            <FileManager projectId={projectId} runtimeType={project.runtime_type} />
+          )}
         </div>
       )}
 
-      {activeTab === "deployments" && (
+      {activeTab === "deployments" && deploymentsError && !deploymentsData && (
+        <LoadError what="i deploy" error={deploymentsError} onRetry={() => void refreshDeployments()} />
+      )}
+
+      {activeTab === "deployments" && !(deploymentsError && !deploymentsData) && (
         <DeploymentsTab
           project={project}
           deployments={deployments}
@@ -396,10 +445,11 @@ export default function ProjectDetailPage() {
           buildEnvPrefixes={buildEnvPrefixes}
           initialVars={envData ?? []}
           loading={envLoading}
+          readOnly={(project.permission?.level ?? "manage") !== "manage"}
         />
       )}
 
-      {activeTab === "terminal" && (
+      {shownTab === "terminal" && (
         <TerminalTab
           projectId={projectId}
           lines={termLines.lines}
@@ -409,8 +459,14 @@ export default function ProjectDetailPage() {
         />
       )}
 
-      {activeTab === "settings" && (
-        <SettingsTab project={project} onProjectChange={setProject} onRefresh={() => void refreshProject()} />
+      {shownTab === "settings" && (
+        <SettingsTab
+          project={project}
+          onProjectChange={(update) =>
+            setProject((prev) => (typeof update === "function" ? (prev ? update(prev) : prev) : update))
+          }
+          onRefresh={() => void refreshProject()}
+        />
       )}
 
       {/*

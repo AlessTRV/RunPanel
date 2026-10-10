@@ -1,5 +1,7 @@
 import { NextRequest } from "next/server";
-import { requireAuth } from "@/lib/auth-guard";
+import { isDenied, requirePermission } from "@/lib/auth-guard";
+import { runVisible } from "@/lib/backup-access";
+import { permissionAllows, watchAccess } from "@/lib/stream-guard";
 import { getDb } from "@/lib/db";
 import { opsEvents, type OpsEvent } from "@/services/events";
 import { readLogFile } from "@/services/log-file";
@@ -15,10 +17,12 @@ type Params = { params: Promise<{ runId: string }> };
  * that showed nothing until the next line would look broken.
  */
 export async function GET(request: NextRequest, { params }: Params) {
-  const denied = await requireAuth();
-  if (denied) return denied;
+  const denied = await requirePermission("backup");
+  if (isDenied(denied)) return denied;
 
   const { runId } = await params;
+
+  if (!(await runVisible(denied.principal, runId))) return new Response("Backup non trovato", { status: 404 });
   try {
     assertBackupId(runId);
   } catch {
@@ -36,6 +40,7 @@ export async function GET(request: NextRequest, { params }: Params) {
 
   const encoder = new TextEncoder();
   let unsubscribe: (() => void) | null = null;
+  let stopWatching: (() => void) | null = null;
   let heartbeat: NodeJS.Timeout | null = null;
 
   const stream = new ReadableStream<Uint8Array>({
@@ -55,6 +60,7 @@ export async function GET(request: NextRequest, { params }: Params) {
         if (closed) return;
         closed = true;
         unsubscribe?.();
+        stopWatching?.();
         if (heartbeat) clearInterval(heartbeat);
         try {
           controller.close();
@@ -88,11 +94,24 @@ export async function GET(request: NextRequest, { params }: Params) {
         }
       }, 25_000);
 
+      // Ends the stream once this session or its access to what it shows is gone.
+
+      stopWatching = watchAccess(
+
+        { userId: denied.session.user.id, sessionId: denied.session.sessionId },
+
+        permissionAllows("backup"),
+
+        cleanup
+
+      );
+
       request.signal.addEventListener("abort", cleanup);
     },
 
     cancel() {
       unsubscribe?.();
+      stopWatching?.();
       if (heartbeat) clearInterval(heartbeat);
     },
   });

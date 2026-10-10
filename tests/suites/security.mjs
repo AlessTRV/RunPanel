@@ -38,13 +38,13 @@ export async function run({ base }) {
 
   let res = await stranger.call("/api/auth/login", {
     method: "POST",
-    body: JSON.stringify({ setup: true, password: "whoever-gets-here-first" }),
+    body: JSON.stringify({ setup: true, email: "owner@runpanel.test", password: "whoever-gets-here-first" }),
   });
   r.check("setup without a token is refused", res.status === 403, `status ${res.status}`);
 
   res = await stranger.call("/api/auth/login", {
     method: "POST",
-    body: JSON.stringify({ setup: true, password: "whoever-gets-here-first", setupToken: "guess" }),
+    body: JSON.stringify({ setup: true, email: "owner@runpanel.test", password: "whoever-gets-here-first", setupToken: "guess" }),
   });
   r.check("setup with the wrong token is refused", res.status === 403, `status ${res.status}`);
 
@@ -56,13 +56,13 @@ export async function run({ base }) {
   const owner = client(base);
   res = await owner.call("/api/auth/login", {
     method: "POST",
-    body: JSON.stringify({ setup: true, password: PASSWORD, setupToken: SETUP_TOKEN }),
+    body: JSON.stringify({ setup: true, email: "owner@runpanel.test", password: PASSWORD, setupToken: SETUP_TOKEN }),
   });
   r.check("setup with the right token succeeds", res.body.success === true, JSON.stringify(res.body));
 
   res = await stranger.call("/api/auth/login", {
     method: "POST",
-    body: JSON.stringify({ setup: true, password: "too-late", setupToken: SETUP_TOKEN }),
+    body: JSON.stringify({ setup: true, email: "owner@runpanel.test", password: "too-late", setupToken: SETUP_TOKEN }),
   });
   r.check("the panel cannot be claimed twice", res.status !== 200, `status ${res.status}`);
 
@@ -118,7 +118,7 @@ export async function run({ base }) {
   const bystander = await viaProxy(
     client(base),
     "/api/auth/login",
-    { password: PASSWORD },
+    { email: "owner@runpanel.test", password: PASSWORD },
     { real: "203.0.113.200" }
   );
   r.check(

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession, getAdminPasswordHash, verifyPassword, setAdminPassword, createSession, destroyAllSessions } from "@/lib/auth";
+import { isDenied, requireOwner, requirePermission, requireUser } from "@/lib/auth-guard";
+import { withAudit } from "@/lib/audit";
 import { encrypt } from "@/lib/crypto";
 import { z } from "zod";
 import { getAllSettings, getSetting, setSetting } from "@/lib/settings";
@@ -86,8 +87,8 @@ const READABLE_SETTINGS: readonly string[] = [
 
 // GET: Read settings
 export async function GET() {
-  const session = await getSession();
-  if (!session) return NextResponse.json({ error: "Non autorizzato" }, { status: 401 });
+  const denied = await requireUser();
+  if (isDenied(denied)) return denied;
 
   const all = await getAllSettings();
   const settings: Record<string, string> = {};
@@ -115,101 +116,84 @@ export async function GET() {
   return NextResponse.json(settings, { headers: { "Cache-Control": "no-store" } });
 }
 
-// PUT: Update settings (password, preferences, or GitHub token)
+// PUT: Update settings (preferences, signers, or GitHub token). The password
+// is per account now and lives in `/api/account`.
+//
+// Who may write depends on the branch, so the guard runs once the body says
+// which one it is: preferences and signers belong to the owner, the GitHub
+// token to whoever holds the `github` permission.
 export async function PUT(request: NextRequest) {
-  const session = await getSession();
-  if (!session) return NextResponse.json({ error: "Non autorizzato" }, { status: 401 });
+  return withAudit(request, { category: "system", action: "settings.update", scope: null, scopeId: null }, async () => {
+    const signedIn = await requireUser();
+    if (isDenied(signedIn)) return signedIn;
 
-  // A malformed body is a bad request, not a 500.
-  // This handler reads a handful of optional fields by hand rather than through
-  // one schema, because it serves three unrelated operations on one endpoint.
-  // Each field is checked below; what matters here is that a body which is not
-  // JSON at all becomes a 400 rather than an unhandled rejection.
-  let raw: unknown;
-  try {
-    raw = await request.json();
-  } catch {
+    // A malformed body is a bad request, not a 500.
+    // This handler reads a handful of optional fields by hand rather than through
+    // one schema, because it serves three unrelated operations on one endpoint.
+    // Each field is checked below; what matters here is that a body which is not
+    // JSON at all becomes a 400 rather than an unhandled rejection.
+    let raw: unknown;
+    try {
+      raw = await request.json();
+    } catch {
+      return NextResponse.json({ error: "Richiesta non valida" }, { status: 400 });
+    }
+    const body = (raw ?? {}) as {
+      preferences?: unknown;
+      github_token?: unknown;
+      [PANEL_UPDATE_ALLOWED_SIGNERS_SETTING]?: unknown;
+    };
+
+    // Preferences
+    if (body.preferences) {
+      const denied = await requireOwner();
+      if (isDenied(denied)) return denied;
+      const parsed = preferencesSchema.safeParse(body.preferences);
+      if (!parsed.success) {
+        return NextResponse.json(
+          { error: "Preferenze non valide", details: parsed.error.issues },
+          { status: 400 }
+        );
+      }
+
+      // An allowlist rather than "any string that is not a secret": otherwise a
+      // preferences payload can write arbitrary keys into the settings table.
+      const previousZone = parsed.data.timezone !== undefined ? await getSetting("timezone") : null;
+      for (const [key, value] of Object.entries(parsed.data)) {
+        if (value !== undefined) await setSetting(key, value);
+      }
+
+      // A pending restart was computed in the old zone. Left alone it would fire
+      // at the old wall-clock time once more before the new zone took effect.
+      if (parsed.data.timezone !== undefined && parsed.data.timezone !== previousZone) {
+        await rescheduleRestarts();
+      }
+      return NextResponse.json({ success: true });
+    }
+
+    // Allowed signers for update verification. Public keys, so unlike the token
+    // below this is stored and read back as-is — the operator has to be able to
+    // see what they pasted.
+    if (body[PANEL_UPDATE_ALLOWED_SIGNERS_SETTING] !== undefined) {
+      const denied = await requireOwner();
+      if (isDenied(denied)) return denied;
+      const parsed = allowedSignersSchema.safeParse(body[PANEL_UPDATE_ALLOWED_SIGNERS_SETTING]);
+      if (!parsed.success) {
+        return NextResponse.json({ error: "Elenco dei firmatari non valido" }, { status: 400 });
+      }
+      await setSetting(PANEL_UPDATE_ALLOWED_SIGNERS_SETTING, parsed.data.trim());
+      return NextResponse.json({ success: true });
+    }
+
+    // GitHub token
+    if (body.github_token !== undefined) {
+      const denied = await requirePermission("github");
+      if (isDenied(denied)) return denied;
+      const token = typeof body.github_token === "string" ? body.github_token.trim() : "";
+      await setSetting("github_token", token ? encrypt(token) : "");
+      return NextResponse.json({ success: true });
+    }
+
     return NextResponse.json({ error: "Richiesta non valida" }, { status: 400 });
-  }
-  const body = (raw ?? {}) as {
-    currentPassword?: unknown;
-    newPassword?: unknown;
-    preferences?: unknown;
-    github_token?: unknown;
-    [PANEL_UPDATE_ALLOWED_SIGNERS_SETTING]?: unknown;
-  };
-
-  // Password change
-  if (typeof body.currentPassword === "string" && body.newPassword !== undefined) {
-    if (typeof body.newPassword !== "string" || body.newPassword.length < 8) {
-      return NextResponse.json(
-        { error: "New password must be at least 8 characters" },
-        { status: 400 }
-      );
-    }
-    const hash = await getAdminPasswordHash();
-    if (!hash) return NextResponse.json({ error: "No password set" }, { status: 400 });
-    const valid = await verifyPassword(body.currentPassword, hash);
-    if (!valid) {
-      return NextResponse.json({ error: "Current password is incorrect" }, { status: 401 });
-    }
-    await setAdminPassword(body.newPassword);
-
-    // Changing the password ends every other device's session — that is the
-    // usual reason for changing it. The current one is then re-issued so the
-    // person doing it is not thrown out of the page they are on.
-    await destroyAllSessions();
-    await createSession({
-      userAgent: request.headers.get("user-agent") ?? undefined,
-      ip: request.headers.get("x-forwarded-for")?.split(",")[0].trim(),
-    });
-
-    return NextResponse.json({ success: true, signedOutOtherDevices: true });
-  }
-
-  // Preferences
-  if (body.preferences) {
-    const parsed = preferencesSchema.safeParse(body.preferences);
-    if (!parsed.success) {
-      return NextResponse.json(
-        { error: "Preferenze non valide", details: parsed.error.issues },
-        { status: 400 }
-      );
-    }
-
-    // An allowlist rather than "any string that is not a secret": otherwise a
-    // preferences payload can write arbitrary keys into the settings table.
-    const previousZone = parsed.data.timezone !== undefined ? await getSetting("timezone") : null;
-    for (const [key, value] of Object.entries(parsed.data)) {
-      if (value !== undefined) await setSetting(key, value);
-    }
-
-    // A pending restart was computed in the old zone. Left alone it would fire
-    // at the old wall-clock time once more before the new zone took effect.
-    if (parsed.data.timezone !== undefined && parsed.data.timezone !== previousZone) {
-      await rescheduleRestarts();
-    }
-    return NextResponse.json({ success: true });
-  }
-
-  // Allowed signers for update verification. Public keys, so unlike the token
-  // below this is stored and read back as-is — the operator has to be able to
-  // see what they pasted.
-  if (body[PANEL_UPDATE_ALLOWED_SIGNERS_SETTING] !== undefined) {
-    const parsed = allowedSignersSchema.safeParse(body[PANEL_UPDATE_ALLOWED_SIGNERS_SETTING]);
-    if (!parsed.success) {
-      return NextResponse.json({ error: "Elenco dei firmatari non valido" }, { status: 400 });
-    }
-    await setSetting(PANEL_UPDATE_ALLOWED_SIGNERS_SETTING, parsed.data.trim());
-    return NextResponse.json({ success: true });
-  }
-
-  // GitHub token
-  if (body.github_token !== undefined) {
-    const token = typeof body.github_token === "string" ? body.github_token.trim() : "";
-    await setSetting("github_token", token ? encrypt(token) : "");
-    return NextResponse.json({ success: true });
-  }
-
-  return NextResponse.json({ error: "Richiesta non valida" }, { status: 400 });
+  });
 }

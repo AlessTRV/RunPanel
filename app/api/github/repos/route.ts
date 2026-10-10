@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireAuth } from "@/lib/auth-guard";
+import { isDenied, requirePermission } from "@/lib/auth-guard";
 import { githubToken, githubFetch } from "@/lib/github";
 
 export interface GhRepoSummary {
@@ -20,8 +20,8 @@ const PER_PAGE = 100;
 const MAX_PAGES = 5;
 
 export async function GET() {
-  const denied = await requireAuth();
-  if (denied) return denied;
+  const denied = await requirePermission("github");
+  if (isDenied(denied)) return denied;
 
   const token = await githubToken();
 

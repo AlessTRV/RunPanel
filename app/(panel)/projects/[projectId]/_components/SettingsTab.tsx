@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button, Input, Label, TextField } from "@heroui/react";
 import { toast } from "sonner";
@@ -12,9 +12,12 @@ import { Segmented } from "@/components/ui/Segmented";
 import { SettingToggle } from "@/components/ui/SettingToggle";
 import { StickySaveBar } from "@/components/ui/StickySaveBar";
 import { DangerZone } from "@/components/ui/DangerAction";
+import { AccessPanel } from "@/components/users/AccessPanel";
 import { InfoTip } from "@/components/ui/Tooltip";
 import { Code, FieldHint } from "@/components/ui/Hint";
 import { CommandField } from "@/components/ui/CommandField";
+import { CheckboxField } from "@/components/ui/CheckboxField";
+import { Field } from "@/components/ui/Field";
 import { EnvFilePathHint, HealthcheckHint, PortHint } from "@/components/DeployHints";
 import { AccessSection } from "@/components/AccessSection";
 import { ScheduledRestart } from "@/components/ScheduledRestart";
@@ -22,6 +25,7 @@ import { BackupSection } from "./BackupSection";
 import { LinkedServiceDelete, type LinkedServiceRow } from "./LinkedServiceDelete";
 import { MountsSection } from "./MountsSection";
 import { OneTimeCommandsSection } from "./OneTimeCommandsSection";
+import type { PendingSave, RegisterPendingSave } from "./pending-saves";
 import { RepoPathSection } from "./RepoPathSection";
 import { WebhookSection } from "./WebhookSection";
 import { parseContractJson, type DeployContract } from "@/lib/deploy-contract";
@@ -106,7 +110,12 @@ export function SettingsTab({
   onRefresh,
 }: {
   project: Project;
-  onProjectChange: (project: Project) => void;
+  /**
+   * Takes an updater too: the sections save one after another from the same
+   * press, and each spreading the `project` it was rendered with would put
+   * back the fields the one before had just saved.
+   */
+  onProjectChange: (update: Project | ((prev: Project) => Project)) => void;
   /** Re-read the project from the server, after an action that changed it there. */
   onRefresh: () => void;
 }) {
@@ -272,8 +281,54 @@ export function SettingsTab({
     return `rete ${contract.docker.network} · riavvio ${contract.runtime.restartPolicy}${limits ? ` · ${limits}` : ""}`;
   }, [contract.docker.network, contract.runtime.restartPolicy, contract.runtime.memory, contract.runtime.cpus]);
 
-  async function save() {
+  /** Sections with unsaved edits, by id — see `pending-saves.ts`. */
+  const [pending, setPending] = useState<Record<string, PendingSave>>({});
+  const registerPending = useCallback<RegisterPendingSave>((id, entry) => {
+    setPending((prev) => {
+      if (!entry) {
+        if (!(id in prev)) return prev;
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      }
+      return { ...prev, [id]: entry };
+    });
+  }, []);
+  const pendingList = Object.values(pending);
+  const unsavedParts = [...(dirty ? ["Applicazione"] : []), ...pendingList.map((entry) => entry.label)];
+
+  /*
+    One press, every part with edits. The sections go first, each to its own
+    endpoint, and the deploy fields last: the PATCH answers with the whole row,
+    so the page ends on a copy that already includes what the sections wrote.
+    A part that fails does not stop the others — they are independent settings
+    — and the toast names it; its own error stays next to its fields.
+  */
+  async function saveAll() {
     setSaving(true);
+    const failed: string[] = [];
+    try {
+      for (const entry of pendingList) {
+        if (!(await entry.save())) failed.push(entry.label);
+      }
+      if (dirty && !(await save())) failed.push("Applicazione");
+    } finally {
+      setSaving(false);
+    }
+    if (failed.length === 0) toast.success("Impostazioni salvate");
+    // The deploy fields already said why, in their own toast.
+    else if (!(failed.length === 1 && failed[0] === "Applicazione")) {
+      toast.error(`Non salvato: ${failed.join(", ")}. Il motivo è accanto ai campi.`);
+    }
+  }
+
+  function resetAll() {
+    reset();
+    for (const entry of pendingList) entry.reset();
+  }
+
+  /** The deploy fields. Resolves false when they were not saved. */
+  async function save(): Promise<boolean> {
     try {
       const res = await fetch(`/api/projects/${project.id}`, {
         method: "PATCH",
@@ -290,19 +345,18 @@ export function SettingsTab({
       });
       const data = await res.json();
       if (res.ok) {
-        toast.success("Impostazioni salvate");
         setSaved(current);
         onProjectChange(data);
-      } else {
-        // Details first: "Dati non validi" does not say which field, and the
-        // branch name is now validated — an empty one has to come back as
-        // "Nome del branch non valido" rather than as a shrug.
-        toast.error(data.details?.[0]?.message ?? data.error ?? MSG.saveFailed);
+        return true;
       }
+      // Details first: "Dati non validi" does not say which field, and the
+      // branch name is now validated — an empty one has to come back as
+      // "Nome del branch non valido" rather than as a shrug.
+      toast.error(data.details?.[0]?.message ?? data.error ?? MSG.saveFailed);
+      return false;
     } catch {
       toast.error(MSG.saveFailed);
-    } finally {
-      setSaving(false);
+      return false;
     }
   }
 
@@ -391,8 +445,7 @@ export function SettingsTab({
         )}
 
         {runtimeType === "node" && (
-          <div>
-            <span className="text-muted mb-2 block text-sm font-medium">Package manager</span>
+          <Field label="Package manager">
             <Segmented
               label="Package manager"
               value={contract.packageManager}
@@ -405,7 +458,7 @@ export function SettingsTab({
                 { value: "yarn", label: "yarn" },
               ]}
             />
-          </div>
+          </Field>
         )}
 
         {!isDocker && (
@@ -496,7 +549,8 @@ export function SettingsTab({
         runtimeType={runtimeType}
         queued={project.oneTimeCommands ?? []}
         isDeploying={project.status === "deploying"}
-        onChanged={(queued) => (queued ? onProjectChange({ ...project, oneTimeCommands: queued }) : onRefresh())}
+        registerPending={registerPending}
+        onChanged={(queued) => (queued ? onProjectChange((prev) => ({ ...prev, oneTimeCommands: queued })) : onRefresh())}
       />
 
       {/*
@@ -582,7 +636,7 @@ export function SettingsTab({
         access={project.access}
         gate={project.gate}
         unavailable={accessUnavailable}
-        onSaved={(updated) => onProjectChange({ ...project, ...(updated as Partial<Project>) })}
+        onSaved={(updated) => onProjectChange((prev) => ({ ...prev, ...(updated as Partial<Project>) }))}
       />
 
       {/*
@@ -597,12 +651,13 @@ export function SettingsTab({
         nextAt={project.restart_next_at}
         lastAt={project.restart_last_at}
         lastResult={project.restart_last_result}
-        onSaved={(updated) => onProjectChange({ ...project, ...(updated as Partial<Project>) })}
+        onSaved={(updated) => onProjectChange((prev) => ({ ...prev, ...(updated as Partial<Project>) }))}
       />
 
       <BackupSection
         project={project}
-        onSaved={(backupSettings) => onProjectChange({ ...project, backup_settings: backupSettings })}
+        onSaved={(backupSettings) => onProjectChange((prev) => ({ ...prev, backup_settings: backupSettings }))}
+        registerPending={registerPending}
       />
 
       <Section
@@ -763,7 +818,15 @@ export function SettingsTab({
 
       <WebhookSection project={project} onProjectChange={onProjectChange} />
 
-      <StickySaveBar isDirty={dirty} isPending={saving} onSave={save} onReset={reset} />
+      <AccessPanel kind="project" id={project.id} />
+
+      <StickySaveBar
+        isDirty={unsavedParts.length > 0}
+        isPending={saving}
+        onSave={() => void saveAll()}
+        onReset={resetAll}
+        message={`Modifiche non salvate: ${unsavedParts.join(", ")}`}
+      />
 
       {/*
         The two irreversible actions, together and last.
@@ -839,23 +902,21 @@ export function SettingsTab({
                 <LinkedServiceDelete key={service.id} service={service} onDeleted={refreshServices} />
               ))}
             </ul>
-            <label className="flex cursor-pointer items-start gap-2.5">
-              <input
-                type="checkbox"
-                checked={deleteServices}
-                onChange={(e) => setDeleteServices(e.target.checked)}
-                className="accent-danger mt-0.5 size-4"
-              />
-              <span className="text-muted text-xs leading-relaxed">
-                Elimina anche{" "}
-                {linkedServices.length === 1
-                  ? "il servizio collegato"
-                  : `i ${linkedServices.length} servizi collegati`}{" "}
-                e i loro dati. <strong className="text-foreground">Non è recuperabile.</strong>{" "}
-                Senza la spunta restano come servizi autonomi, container e volumi compresi, nella
-                cartella del progetto.
-              </span>
-            </label>
+            <CheckboxField
+              isSelected={deleteServices}
+              onChange={setDeleteServices}
+              label={
+                <span className="text-muted text-xs leading-relaxed">
+                  Elimina anche{" "}
+                  {linkedServices.length === 1
+                    ? "il servizio collegato"
+                    : `i ${linkedServices.length} servizi collegati`}{" "}
+                  e i loro dati. <strong className="text-foreground">Non è recuperabile.</strong>{" "}
+                  Senza la spunta restano come servizi autonomi, container e volumi compresi, nella
+                  cartella del progetto.
+                </span>
+              }
+            />
           </div>
         )}
       </DangerZone>

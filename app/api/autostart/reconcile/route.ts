@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAuth } from "@/lib/auth-guard";
+import { isDenied, requirePermission } from "@/lib/auth-guard";
+import { withAudit } from "@/lib/audit";
 import { reconcileAutostart } from "@/services/autostart/reconcile";
 
 /**
@@ -9,16 +10,18 @@ import { reconcileAutostart } from "@/services/autostart/reconcile";
  * construction: it inspects before it acts and starts only what is down.
  */
 export async function POST(request: NextRequest) {
-  const denied = await requireAuth();
-  if (denied) return denied;
+  return withAudit(request, { category: "system", action: "autostart.reconcile", scope: "permission", scopeId: "autostart" }, async () => {
+    const denied = await requirePermission("autostart");
+    if (isDenied(denied)) return denied;
 
-  const body = await request.json().catch(() => ({}));
-  const dryRun = body?.dryRun === true;
+    const body = await request.json().catch(() => ({}));
+    const dryRun = body?.dryRun === true;
 
-  try {
-    return NextResponse.json(await reconcileAutostart({ dryRun }));
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Riconciliazione fallita";
-    return NextResponse.json({ error: message }, { status: 500 });
-  }
+    try {
+      return NextResponse.json(await reconcileAutostart({ dryRun }));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Riconciliazione fallita";
+      return NextResponse.json({ error: message }, { status: 500 });
+    }
+  });
 }

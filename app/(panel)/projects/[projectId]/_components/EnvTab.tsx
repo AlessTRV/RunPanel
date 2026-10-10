@@ -10,6 +10,7 @@ import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { SkeletonBlock } from "@/components/ui/Skeletons";
 import { Code, Hint } from "@/components/ui/Hint";
+import { Section } from "@/components/ui/Section";
 import { BuildEnvHint, ManagedEnvHint, ServiceLinkHint } from "@/components/DeployHints";
 import { InfoTip } from "@/components/ui/Tooltip";
 import { ServiceLink } from "@/components/ServiceLink";
@@ -58,12 +59,15 @@ export function EnvTab({
   buildEnvPrefixes,
   initialVars,
   loading,
+  readOnly = false,
 }: {
   projectId: string;
   runtimeType: string;
   buildEnvPrefixes: string[];
   initialVars: EnvVar[];
   loading: boolean;
+  /** Below `manage`: the names are shown, the values arrive masked, nothing is editable. */
+  readOnly?: boolean;
 }) {
   const [vars, onChange] = useState<EnvVar[]>(() =>
     initialVars.map((v) => ({ key: v.key, value: v.value }))
@@ -202,11 +206,11 @@ export function EnvTab({
             e.target.value = "";
           }}
         />
-        <Button variant="outline" size="sm" onPress={() => fileInputRef.current?.click()}>
+        <Button variant="outline" size="sm" isDisabled={readOnly} onPress={() => fileInputRef.current?.click()}>
           <Icon icon="solar:import-linear" width={16} aria-hidden />
           Importa .env
         </Button>
-        <Button variant="outline" size="sm" onPress={() => onChange([...vars, { key: "", value: "" }])}>
+        <Button variant="outline" size="sm" isDisabled={readOnly} onPress={() => onChange([...vars, { key: "", value: "" }])}>
           <Icon icon="solar:add-circle-linear" width={16} aria-hidden />
           Aggiungi
         </Button>
@@ -232,6 +236,7 @@ export function EnvTab({
             <div key={i} className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-end">
               <div className="w-full sm:flex-1">
                 <TextField
+                  isReadOnly={readOnly}
                   value={v.key}
                   onChange={(val) => onChange(vars.map((x, j) => (j === i ? { ...x, key: val } : x)))}
                 >
@@ -241,6 +246,7 @@ export function EnvTab({
               </div>
               <div className="w-full sm:flex-[2]">
                 <TextField
+                  isReadOnly={readOnly}
                   value={v.value}
                   onChange={(val) => onChange(vars.map((x, j) => (j === i ? { ...x, value: val } : x)))}
                 >
@@ -253,6 +259,7 @@ export function EnvTab({
                 size="sm"
                 isIconOnly
                 className="self-end"
+                isDisabled={readOnly}
                 aria-label={`Rimuovi ${v.key || "variabile"}`}
                 onPress={() => onChange(vars.filter((_, j) => j !== i))}
               >
@@ -274,7 +281,7 @@ export function EnvTab({
           twenty variables the button used to be a scroll away from whichever
           row you were editing, and the hints below pushed it further still. */}
       <StickySaveBar
-        isDirty={dirty}
+        isDirty={dirty && !readOnly}
         isPending={saving}
         onSave={save}
         onReset={reset}
@@ -292,9 +299,17 @@ export function EnvTab({
         onConfirm={() => send([])}
       />
 
-      {/* Reference rather than instructions: kept under the editor so the thing
-          you came here to do is the first thing on screen. */}
-      <div className="border-border space-y-3 border-t pt-4">
+      {/* Reference rather than instructions: under the editor and closed, so the
+          thing you came here to do is the first thing on screen and three
+          paragraphs of notes are not read again on every visit. */}
+      <Section
+        title="Come vengono usate"
+        summary={
+          runtimeType === "docker"
+            ? "Variabili al build, quelle gestite da RunPanel, host.docker.internal"
+            : "Variabili al build e quelle gestite da RunPanel"
+        }
+      >
         <BuildEnvHint prefixes={buildEnvPrefixes} />
         <ManagedEnvHint runtimeType={runtimeType} />
         {runtimeType === "docker" && (
@@ -305,7 +320,7 @@ export function EnvTab({
             container è il container stesso.
           </Hint>
         )}
-      </div>
+      </Section>
     </div>
   );
 }

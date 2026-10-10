@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAuth } from "@/lib/auth-guard";
+import { isDenied, requireProject } from "@/lib/auth-guard";
 import { getDb } from "@/lib/db";
 import { githubFetch, githubToken, parseRepoSlug } from "@/lib/github";
 import { commitsQuerySchema } from "@/lib/validation";
@@ -38,10 +38,9 @@ interface GhCommit {
  * the caller asked wrongly, or the panel is broken.
  */
 export async function GET(request: NextRequest, { params }: Params) {
-  const denied = await requireAuth();
-  if (denied) return denied;
-
   const { projectId } = await params;
+  const denied = await requireProject(projectId, "view");
+  if (isDenied(denied)) return denied;
 
   const query = commitsQuerySchema.safeParse({
     branch: request.nextUrl.searchParams.get("branch") ?? undefined,

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAuth } from "@/lib/auth-guard";
+import { isDenied, requirePermission } from "@/lib/auth-guard";
+import { restoreVisible } from "@/lib/backup-access";
 import { getDb } from "@/lib/db";
 import { assertBackupId, restoreLogPath } from "@/services/backup/paths";
 import { readLogFile } from "@/services/log-file";
@@ -7,10 +8,12 @@ import { readLogFile } from "@/services/log-file";
 type Params = { params: Promise<{ restoreId: string }> };
 
 export async function GET(_request: NextRequest, { params }: Params) {
-  const denied = await requireAuth();
-  if (denied) return denied;
+  const denied = await requirePermission("restore");
+  if (isDenied(denied)) return denied;
 
   const { restoreId } = await params;
+
+  if (!(await restoreVisible(denied.principal, restoreId))) return NextResponse.json({ error: "Ripristino non trovato" }, { status: 404 });
   try {
     assertBackupId(restoreId);
   } catch {

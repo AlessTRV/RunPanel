@@ -49,7 +49,7 @@ export async function run({ base, dataDir }) {
 
   await api.call("/api/auth/login", {
     method: "POST",
-    body: JSON.stringify({ setup: true, setupToken: SETUP_TOKEN, password: PASSWORD, confirmPassword: PASSWORD }),
+    body: JSON.stringify({ setup: true, email: "owner@runpanel.test", setupToken: SETUP_TOKEN, password: PASSWORD, confirmPassword: PASSWORD }),
   });
 
   // --- the local destination exists on its own -----------------------------

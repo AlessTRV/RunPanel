@@ -1,7 +1,8 @@
 import path from "path";
 import { Readable } from "stream";
 import { NextRequest, NextResponse } from "next/server";
-import { requireAuth } from "@/lib/auth-guard";
+import { isDenied, requirePermission } from "@/lib/auth-guard";
+import { runVisible } from "@/lib/backup-access";
 import { getDb } from "@/lib/db";
 import { buildDestination } from "@/services/backup/destinations";
 import { assertBackupId } from "@/services/backup/paths";
@@ -18,10 +19,12 @@ type Params = { params: Promise<{ runId: string }> };
  * name a path here even if it wants to.
  */
 export async function GET(_request: NextRequest, { params }: Params) {
-  const denied = await requireAuth();
-  if (denied) return denied;
+  const denied = await requirePermission("backup");
+  if (isDenied(denied)) return denied;
 
   const { runId } = await params;
+
+  if (!(await runVisible(denied.principal, runId))) return NextResponse.json({ error: "Backup non trovato" }, { status: 404 });
   try {
     assertBackupId(runId);
   } catch {

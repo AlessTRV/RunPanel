@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAuth } from "@/lib/auth-guard";
+import { isDenied, requireService } from "@/lib/auth-guard";
+import { withAudit } from "@/lib/audit";
 import { getDb, nowIso } from "@/lib/db";
 import { generateId } from "@/lib/utils";
 import { createDatabaseSchema } from "@/lib/validation";
@@ -18,10 +19,9 @@ interface ServiceDatabase {
 }
 
 export async function GET(_request: NextRequest, { params }: Params) {
-  const denied = await requireAuth();
-  if (denied) return denied;
-
   const { serviceId } = await params;
+  const denied = await requireService(serviceId, "view");
+  if (isDenied(denied)) return denied;
   const db = await getDb();
 
   const service = await db
@@ -80,83 +80,84 @@ export async function GET(_request: NextRequest, { params }: Params) {
 }
 
 export async function POST(request: NextRequest, { params }: Params) {
-  const denied = await requireAuth();
-  if (denied) return denied;
+  return withAudit(request, { category: "config", action: "service.database.create", scope: "service", scopeId: async () => (await params).serviceId }, async () => {
+    const { serviceId } = await params;
+    const denied = await requireService(serviceId, "databases");
+    if (isDenied(denied)) return denied;
+    // A malformed body is a bad request, not a 500.
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json({ error: "Richiesta non valida" }, { status: 400 });
+    }
+    const parsed = createDatabaseSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: parsed.error.issues[0]?.message ?? "Nome non valido" },
+        { status: 400 }
+      );
+    }
 
-  const { serviceId } = await params;
-  // A malformed body is a bad request, not a 500.
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: "Richiesta non valida" }, { status: 400 });
-  }
-  const parsed = createDatabaseSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: parsed.error.issues[0]?.message ?? "Nome non valido" },
-      { status: 400 }
-    );
-  }
+    const { name } = parsed.data;
+    const db = await getDb();
 
-  const { name } = parsed.data;
-  const db = await getDb();
+    const service = await db
+      .selectFrom("services")
+      .selectAll()
+      .where("id", "=", serviceId)
+      .executeTakeFirst();
 
-  const service = await db
-    .selectFrom("services")
-    .selectAll()
-    .where("id", "=", serviceId)
-    .executeTakeFirst();
+    if (!service) {
+      return NextResponse.json({ error: "Servizio non trovato" }, { status: 404 });
+    }
 
-  if (!service) {
-    return NextResponse.json({ error: "Servizio non trovato" }, { status: 404 });
-  }
+    const admin = databaseAdmin(service.type);
+    if (!admin.supported) {
+      return NextResponse.json(
+        { error: "Questo tipo di servizio non ha database con un nome." },
+        { status: 400 }
+      );
+    }
 
-  const admin = databaseAdmin(service.type);
-  if (!admin.supported) {
-    return NextResponse.json(
-      { error: "Questo tipo di servizio non ha database con un nome." },
-      { status: 400 }
-    );
-  }
+    if (service.status !== "running") {
+      return NextResponse.json(
+        { error: "Il servizio è fermo: avvialo per creare un database." },
+        { status: 409 }
+      );
+    }
 
-  if (service.status !== "running") {
-    return NextResponse.json(
-      { error: "Il servizio è fermo: avvialo per creare un database." },
-      { status: 409 }
-    );
-  }
+    const target = serviceTarget(service);
 
-  const target = serviceTarget(service);
+    if (name === target.credentials.database || admin.system.includes(name)) {
+      return NextResponse.json({ error: `"${name}" esiste già.` }, { status: 409 });
+    }
 
-  if (name === target.credentials.database || admin.system.includes(name)) {
-    return NextResponse.json({ error: `"${name}" esiste già.` }, { status: 409 });
-  }
+    const existing = await db
+      .selectFrom("service_databases")
+      .select("id")
+      .where("service_id", "=", serviceId)
+      .where("name", "=", name)
+      .executeTakeFirst();
 
-  const existing = await db
-    .selectFrom("service_databases")
-    .select("id")
-    .where("service_id", "=", serviceId)
-    .where("name", "=", name)
-    .executeTakeFirst();
+    if (existing) {
+      return NextResponse.json({ error: `"${name}" esiste già.` }, { status: 409 });
+    }
 
-  if (existing) {
-    return NextResponse.json({ error: `"${name}" esiste già.` }, { status: 409 });
-  }
+    try {
+      // The engine first: a row for a database that was never created is the
+      // failure mode this ordering exists to avoid.
+      await admin.create(target, name);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Creazione non riuscita";
+      return NextResponse.json({ error: message }, { status: 500 });
+    }
 
-  try {
-    // The engine first: a row for a database that was never created is the
-    // failure mode this ordering exists to avoid.
-    await admin.create(target, name);
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : "Creazione non riuscita";
-    return NextResponse.json({ error: message }, { status: 500 });
-  }
+    await db
+      .insertInto("service_databases")
+      .values({ id: generateId(), service_id: serviceId, name, created_at: nowIso() })
+      .execute();
 
-  await db
-    .insertInto("service_databases")
-    .values({ id: generateId(), service_id: serviceId, name, created_at: nowIso() })
-    .execute();
-
-  return NextResponse.json({ name }, { status: 201 });
+    return NextResponse.json({ name }, { status: 201 });
+  });
 }

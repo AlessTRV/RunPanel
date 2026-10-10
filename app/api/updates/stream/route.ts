@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
-import { requireAuth } from "@/lib/auth-guard";
+import { isDenied, requirePermission } from "@/lib/auth-guard";
+import { permissionAllows, watchAccess } from "@/lib/stream-guard";
 import { HOST_CHANNEL, opsEvents, type OpsEvent } from "@/services/events";
 import { logPathFor, readLogFile } from "@/services/log-file";
 import { currentRun, updateLogDir } from "@/services/panel-update/run";
@@ -17,12 +18,13 @@ import { isTerminal } from "@/services/panel-update/state";
  * flight, and the page has to be able to attach before it knows the id.
  */
 export async function GET(request: NextRequest) {
-  const denied = await requireAuth();
-  if (denied) return denied;
+  const denied = await requirePermission("updates");
+  if (isDenied(denied)) return denied;
 
   const run = currentRun();
   const encoder = new TextEncoder();
   let unsubscribe: (() => void) | null = null;
+  let stopWatching: (() => void) | null = null;
   let heartbeat: NodeJS.Timeout | null = null;
 
   const stream = new ReadableStream<Uint8Array>({
@@ -42,6 +44,7 @@ export async function GET(request: NextRequest) {
         if (closed) return;
         closed = true;
         unsubscribe?.();
+        stopWatching?.();
         if (heartbeat) clearInterval(heartbeat);
         try {
           controller.close();
@@ -88,11 +91,24 @@ export async function GET(request: NextRequest) {
         }
       }, 25_000);
 
+      // Ends the stream once this session or its access to what it shows is gone.
+
+      stopWatching = watchAccess(
+
+        { userId: denied.session.user.id, sessionId: denied.session.sessionId },
+
+        permissionAllows("updates"),
+
+        cleanup
+
+      );
+
       request.signal.addEventListener("abort", cleanup);
     },
 
     cancel() {
       unsubscribe?.();
+      stopWatching?.();
       if (heartbeat) clearInterval(heartbeat);
     },
   });

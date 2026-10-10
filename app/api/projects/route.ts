@@ -1,22 +1,32 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAuth } from "@/lib/auth-guard";
+import { isDenied, requirePermission, requireUser } from "@/lib/auth-guard";
+import { withAudit } from "@/lib/audit";
 import { getDb, nowIso } from "@/lib/db";
+import { isVisible, projectRefs, visibleServiceIds } from "@/lib/principal";
+import { projectAccess } from "@/lib/authz";
+import { redactProject } from "@/lib/project-redact";
+import { grantCreator } from "@/lib/users";
 import { generateId, slugify } from "@/lib/utils";
 import { createProjectSchema } from "@/lib/validation";
 import crypto from "crypto";
 
 export async function GET() {
-  const denied = await requireAuth();
-  if (denied) return denied;
+  const denied = await requireUser();
+  if (isDenied(denied)) return denied;
 
   try {
     const db = await getDb();
 
-    const projects = await db
-      .selectFrom("projects")
-      .selectAll()
-      .orderBy("created_at", "desc")
-      .execute();
+    // Only what this account can at least read; the services nested under a
+    // project are filtered too, since a service grant can be narrower.
+    const [refs, canSeeService] = await Promise.all([projectRefs(), visibleServiceIds(denied.principal)]);
+    const levelOf = (id: string) => {
+      const ref = refs.get(id);
+      return ref ? projectAccess(denied.principal, ref).level : null;
+    };
+    const projects = (await db.selectFrom("projects").selectAll().orderBy("created_at", "desc").execute())
+      .filter((p) => levelOf(p.id) !== null)
+      .map((p) => redactProject(p, levelOf(p.id) === "manage"));
 
     // Deployment stats in one grouped pass rather than two correlated
     // subqueries per project. `count` comes back as a string on Postgres and a
@@ -48,7 +58,7 @@ export async function GET() {
     const servicesByProject = new Map<string, typeof allServices>();
     for (const svc of allServices) {
       const pid = svc.project_id;
-      if (!pid) continue;
+      if (!pid || !isVisible(canSeeService, svc.id)) continue;
       const list = servicesByProject.get(pid);
       if (list) list.push(svc);
       else servicesByProject.set(pid, [svc]);
@@ -69,73 +79,78 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
-  const denied = await requireAuth();
-  if (denied) return denied;
+  return withAudit(request, { category: "config", action: "project.create", scope: "permission", scopeId: "projects.create" }, async () => {
+    const denied = await requirePermission("projects.create");
+    if (isDenied(denied)) return denied;
 
-  // A malformed body is a bad request, not a 500.
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: "Richiesta non valida" }, { status: 400 });
-  }
-  const parsed = createProjectSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: "Dati non validi", details: parsed.error.issues },
-      { status: 400 }
-    );
-  }
+    // A malformed body is a bad request, not a 500.
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json({ error: "Richiesta non valida" }, { status: 400 });
+    }
+    const parsed = createProjectSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: "Dati non validi", details: parsed.error.issues },
+        { status: 400 }
+      );
+    }
 
-  const { name } = parsed.data;
-  const id = generateId();
-  const slug = slugify(name);
+    const { name } = parsed.data;
+    const id = generateId();
+    const slug = slugify(name);
 
-  const db = await getDb();
+    const db = await getDb();
 
-  const existing = await db
-    .selectFrom("projects")
-    .select("id")
-    .where("slug", "=", slug)
-    .executeTakeFirst();
+    const existing = await db
+      .selectFrom("projects")
+      .select("id")
+      .where("slug", "=", slug)
+      .executeTakeFirst();
 
-  if (existing) {
-    return NextResponse.json(
-      { error: `A project with slug "${slug}" already exists` },
-      { status: 409 }
-    );
-  }
+    if (existing) {
+      return NextResponse.json(
+        { error: `A project with slug "${slug}" already exists` },
+        { status: 409 }
+      );
+    }
 
-  const now = nowIso();
+    const now = nowIso();
 
-  // A project starts as an empty container — the app and its services are
-  // added afterwards.
-  await db
-    .insertInto("projects")
-    .values({
-      id,
-      name,
-      slug,
-      app_name: null,
-      source_type: "upload",
-      source_url: null,
-      source_branch: "main",
-      runtime_type: "node",
-      builder_config: "{}",
-      port: null,
-      status: "stopped",
-      auto_deploy: 0,
-      webhook_secret: crypto.randomBytes(20).toString("hex"),
-      created_at: now,
-      updated_at: now,
-    })
-    .execute();
+    // A project starts as an empty container — the app and its services are
+    // added afterwards.
+    await db
+      .insertInto("projects")
+      .values({
+        id,
+        name,
+        slug,
+        app_name: null,
+        source_type: "upload",
+        source_url: null,
+        source_branch: "main",
+        runtime_type: "node",
+        builder_config: "{}",
+        port: null,
+        status: "stopped",
+        auto_deploy: 0,
+        webhook_secret: crypto.randomBytes(20).toString("hex"),
+        created_at: now,
+        updated_at: now,
+      })
+      .execute();
 
-  const project = await db
-    .selectFrom("projects")
-    .selectAll()
-    .where("id", "=", id)
-    .executeTakeFirst();
+    const project = await db
+      .selectFrom("projects")
+      .selectAll()
+      .where("id", "=", id)
+      .executeTakeFirst();
 
-  return NextResponse.json(project, { status: 201 });
+    // Allowed to create, so allowed to open what was created.
+    await grantCreator(denied.session.user.id, "project", id);
+
+    return NextResponse.json(project, { status: 201 });
+  });
 }

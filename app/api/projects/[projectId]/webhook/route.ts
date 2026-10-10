@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAuth } from "@/lib/auth-guard";
+import { isDenied, requireProject } from "@/lib/auth-guard";
+import { hasPermission } from "@/lib/authz";
+import { withAudit } from "@/lib/audit";
 import { getDb } from "@/lib/db";
 import { webhookActionSchema } from "@/lib/validation";
 import { webhookStatus } from "@/services/webhook-status";
@@ -23,10 +25,9 @@ async function loadProject(projectId: string) {
 }
 
 export async function GET(request: NextRequest, { params }: Params) {
-  const denied = await requireAuth();
-  if (denied) return denied;
-
   const { projectId } = await params;
+  const denied = await requireProject(projectId, "webhook");
+  if (isDenied(denied)) return denied;
   const project = await loadProject(projectId);
   if (!project) {
     return NextResponse.json({ error: "Progetto non trovato" }, { status: 404 });
@@ -37,48 +38,53 @@ export async function GET(request: NextRequest, { params }: Params) {
 }
 
 export async function POST(request: NextRequest, { params }: Params) {
-  const denied = await requireAuth();
-  if (denied) return denied;
+  return withAudit(request, { category: "config", action: "project.webhook", scope: "project", scopeId: async () => (await params).projectId }, async () => {
+    const { projectId } = await params;
+    const denied = await requireProject(projectId, "webhook");
+    if (isDenied(denied)) return denied;
+    // Creating or changing a GitHub webhook acts with the panel's token.
+    if (!hasPermission(denied.principal, "github")) {
+      return NextResponse.json({ error: "Serve il permesso GitHub" }, { status: 403 });
+    }
 
-  const { projectId } = await params;
+    // A malformed body is a bad request, not a 500.
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json({ error: "Richiesta non valida" }, { status: 400 });
+    }
 
-  // A malformed body is a bad request, not a 500.
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: "Richiesta non valida" }, { status: 400 });
-  }
+    const parsed = webhookActionSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: "Azione non valida", details: parsed.error.issues },
+        { status: 400 }
+      );
+    }
 
-  const parsed = webhookActionSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: "Azione non valida", details: parsed.error.issues },
-      { status: 400 }
-    );
-  }
+    const project = await loadProject(projectId);
+    if (!project) {
+      return NextResponse.json({ error: "Progetto non trovato" }, { status: 404 });
+    }
 
-  const project = await loadProject(projectId);
-  if (!project) {
-    return NextResponse.json({ error: "Progetto non trovato" }, { status: 404 });
-  }
+    const { action } = parsed.data;
 
-  const { action } = parsed.data;
+    const result =
+      action === "connect"
+        ? await connectWebhook(project, request)
+        : action === "ping"
+          ? await pingWebhook(project)
+          : await disconnectWebhook(project);
 
-  const result =
-    action === "connect"
-      ? await connectWebhook(project, request)
-      : action === "ping"
-        ? await pingWebhook(project)
-        : await disconnectWebhook(project);
+    // The status is recomputed either way, so the caller re-renders from one
+    // answer rather than firing a follow-up GET that races the write it just did.
+    const status = await webhookStatus(await loadProject(projectId) ?? project, request);
 
-  // The status is recomputed either way, so the caller re-renders from one
-  // answer rather than firing a follow-up GET that races the write it just did.
-  const status = await webhookStatus(await loadProject(projectId) ?? project, request);
+    if (!result.ok) {
+      return NextResponse.json({ error: result.message, status }, { status: 400 });
+    }
 
-  if (!result.ok) {
-    return NextResponse.json({ error: result.message, status }, { status: 400 });
-  }
-
-  return NextResponse.json({ ok: true, message: result.message, status });
+    return NextResponse.json({ ok: true, message: result.message, status });
+  });
 }

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireAuth } from "@/lib/auth-guard";
+import { isDenied, requirePermission } from "@/lib/auth-guard";
 import { panelRelease } from "@/services/panel-update/release";
 import {
   DEFAULT_PANEL_UPDATE_INTERVAL,
@@ -25,8 +25,8 @@ import { autostartProbeCache } from "@/services/autostart/probe";
  * requests to draw one line would be two chances to draw it inconsistently.
  */
 export async function GET() {
-  const denied = await requireAuth();
-  if (denied) return denied;
+  const denied = await requirePermission("updates");
+  if (isDenied(denied)) return denied;
 
   const [checkout, check, probe, interval, release] = await Promise.all([
     readCheckout(),

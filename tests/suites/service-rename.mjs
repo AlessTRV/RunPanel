@@ -34,7 +34,7 @@ export async function run({ base, dataDir }) {
 
   await api.call("/api/auth/login", {
     method: "POST",
-    body: JSON.stringify({ setup: true, setupToken: SETUP_TOKEN, password: "service-rename-suite-pw" }),
+    body: JSON.stringify({ setup: true, email: "owner@runpanel.test", setupToken: SETUP_TOKEN, password: "service-rename-suite-pw" }),
   });
 
   const project = await api.call("/api/projects", { method: "POST", body: JSON.stringify({ name: "Rename Suite" }) });
@@ -61,7 +61,7 @@ export async function run({ base, dataDir }) {
 
   const created = await api.call("/api/services", {
     method: "POST",
-    body: JSON.stringify({ name: "cache", type: "redis", version: "7", port: PORT, projectId, credentials: { password: PASSWORD } }),
+    body: JSON.stringify({ name: "cache", type: "redis", version: "7", port: PORT, projectId, credentials: { email: "owner@runpanel.test", password: PASSWORD } }),
   });
   r.check("a redis is created inside the project", created.status === 201, JSON.stringify(created.body).slice(0, 160));
   if (created.status !== 201) return r.result();
@@ -143,7 +143,7 @@ export async function run({ base, dataDir }) {
     // --- a name another container already has is refused -------------------------------
     const other = await api.call("/api/services", {
       method: "POST",
-      body: JSON.stringify({ name: "other", type: "redis", version: "7", port: PORT + 1, projectId, credentials: { password: PASSWORD } }),
+      body: JSON.stringify({ name: "other", type: "redis", version: "7", port: PORT + 1, projectId, credentials: { email: "owner@runpanel.test", password: PASSWORD } }),
     });
     otherId = other.body?.id ?? null;
     await api.call(`/api/services/${serviceId}`, { method: "PATCH", body: JSON.stringify({ displayName: "Other" }) });

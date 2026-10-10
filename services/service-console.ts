@@ -2,6 +2,7 @@ import { spawn, type ChildProcess } from "child_process";
 import type { ServicesTable } from "@/lib/db/schema";
 import { dockerStream, dockerTry } from "./docker/cli";
 import { serviceEvents, type ConsoleMode } from "./events";
+import { serviceAllows, watchAccess } from "@/lib/stream-guard";
 import { execArgs, serviceTarget, type ServiceTarget } from "./service-databases";
 
 /**
@@ -33,6 +34,15 @@ interface ConsoleSession {
   /** Replayed to a stream that connects after output has already gone past. */
   buffer: string[];
   lastActivity: number;
+  /** Whose session it is: output goes to them only. */
+  userId: string;
+  /** Stops watching the owner's access; see lib/stream-guard.ts. */
+  unwatch: (() => void) | null;
+}
+
+/** One session per service per person. */
+function sessionKey(serviceId: string, userId: string): string {
+  return `${serviceId}:${userId}`;
 }
 
 const SESSION_TIMEOUT_MS = 10 * 60 * 1000;
@@ -64,14 +74,15 @@ if (!globalRef.__runpanelServiceConsoleReaper) {
   globalRef.__runpanelServiceConsoleReaper.unref?.();
 }
 
-function kill(serviceId: string, session: ConsoleSession): void {
+function kill(key: string, session: ConsoleSession): void {
+  session.unwatch?.();
   try {
     session.stop?.();
     session.proc?.kill();
   } catch {
     /* a process that is already gone is the outcome we wanted */
   }
-  sessions.delete(serviceId);
+  if (sessions.get(key) === session) sessions.delete(key);
 }
 
 /**
@@ -195,30 +206,43 @@ function push(serviceId: string, session: ConsoleSession, text: string): void {
   if (session.buffer.length > BUFFER_MAX) {
     session.buffer = session.buffer.slice(-BUFFER_KEEP);
   }
-  serviceEvents.emit(serviceId, { type: "console:output", mode: session.mode, text });
+  serviceEvents.emit(serviceId, { type: "console:output", userId: session.userId, mode: session.mode, text });
 }
 
 /**
  * Open a session, replacing whatever was open before.
  *
- * One at a time per service, like the project terminal: a second shell on the
- * same container is a thing an operator can want and a thing this panel has no
- * way to show two of.
+ * One at a time per service and person, like the project terminal: a second
+ * shell on the same container is a thing an operator can want and a thing
+ * this panel has no way to show two of.
  */
 export async function openConsole(
   service: ServicesTable,
-  mode: ConsoleMode
+  mode: ConsoleMode,
+  userId: string
 ): Promise<{ mode: ConsoleMode }> {
-  closeConsole(service.id);
+  closeConsole(service.id, userId);
 
+  const key = sessionKey(service.id, userId);
   const session: ConsoleSession = {
     mode,
     proc: null,
     stop: null,
     buffer: [],
     lastActivity: Date.now(),
+    userId,
+    unwatch: null,
   };
-  sessions.set(service.id, session);
+  sessions.set(key, session);
+  // Closed as soon as its owner loses what it needs: the logs need read access,
+  // a shell or a database client needs the console.
+  session.unwatch = watchAccess({ userId }, serviceAllows(service.id, mode === "logs" ? "view" : "console"), () =>
+    kill(key, session)
+  );
+  const ended = () => {
+    session.unwatch?.();
+    if (sessions.get(key) === session) sessions.delete(key);
+  };
 
   if (mode === "logs") {
     // Nothing to write to and nothing to authenticate: `docker logs -f` is a
@@ -227,8 +251,8 @@ export async function openConsole(
       ["logs", "-f", "--tail", "200", service.container_name],
       (line) => push(service.id, session, `${line}\n`),
       (code) => {
-        serviceEvents.emit(service.id, { type: "console:closed", mode, code });
-        sessions.delete(service.id);
+        serviceEvents.emit(service.id, { type: "console:closed", userId, mode, code });
+        ended();
       }
     );
     return { mode };
@@ -257,22 +281,22 @@ export async function openConsole(
 
   proc.on("close", (code) => {
     push(service.id, session, `\n[sessione chiusa, codice ${code ?? 0}]\n`);
-    serviceEvents.emit(service.id, { type: "console:closed", mode, code });
-    sessions.delete(service.id);
+    serviceEvents.emit(service.id, { type: "console:closed", userId, mode, code });
+    ended();
   });
 
   proc.on("error", (err) => {
     push(service.id, session, `\n[impossibile aprire la sessione: ${err.message}]\n`);
-    serviceEvents.emit(service.id, { type: "console:closed", mode, code: null });
-    sessions.delete(service.id);
+    serviceEvents.emit(service.id, { type: "console:closed", userId, mode, code: null });
+    ended();
   });
 
   return { mode };
 }
 
 /** False when there is no session, or when the mode has no stdin to write to. */
-export function writeConsole(serviceId: string, input: string): boolean {
-  const session = sessions.get(serviceId);
+export function writeConsole(serviceId: string, userId: string, input: string): boolean {
+  const session = sessions.get(sessionKey(serviceId, userId));
   if (!session?.proc?.stdin?.writable) return false;
 
   session.proc.stdin.write(input);
@@ -280,13 +304,14 @@ export function writeConsole(serviceId: string, input: string): boolean {
   return true;
 }
 
-export function closeConsole(serviceId: string): void {
-  const session = sessions.get(serviceId);
-  if (session) kill(serviceId, session);
+export function closeConsole(serviceId: string, userId: string): void {
+  const key = sessionKey(serviceId, userId);
+  const session = sessions.get(key);
+  if (session) kill(key, session);
 }
 
-export function consoleState(serviceId: string): { active: boolean; mode: ConsoleMode } | null {
-  const session = sessions.get(serviceId);
+export function consoleState(serviceId: string, userId: string): { active: boolean; mode: ConsoleMode } | null {
+  const session = sessions.get(sessionKey(serviceId, userId));
   return session ? { active: true, mode: session.mode } : null;
 }
 
@@ -299,12 +324,12 @@ export function consoleState(serviceId: string): { active: boolean; mode: Consol
  * deliberately does not count as activity; for the other two it is harmless
  * belt and braces on a session whose typing already counts.
  */
-export function touchConsole(serviceId: string): void {
-  const session = sessions.get(serviceId);
+export function touchConsole(serviceId: string, userId: string): void {
+  const session = sessions.get(sessionKey(serviceId, userId));
   if (session) session.lastActivity = Date.now();
 }
 
 /** What has already gone past, for a stream that connects mid-session. */
-export function consoleBacklog(serviceId: string): string[] {
-  return sessions.get(serviceId)?.buffer ?? [];
+export function consoleBacklog(serviceId: string, userId: string): string[] {
+  return sessions.get(sessionKey(serviceId, userId))?.buffer ?? [];
 }

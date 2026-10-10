@@ -25,7 +25,7 @@ export async function run({ base }) {
   const api = client(base);
   await api.call("/api/auth/login", {
     method: "POST",
-    body: JSON.stringify({ setup: true, setupToken: SETUP_TOKEN, password: "diagnostics-pw-1" }),
+    body: JSON.stringify({ setup: true, email: "owner@runpanel.test", setupToken: SETUP_TOKEN, password: "diagnostics-pw-1" }),
   });
 
   // A parameter that spawns a dozen child processes is not one to leave open.

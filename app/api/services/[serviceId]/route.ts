@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { serviceDisplayName, technicalServiceName } from "@/lib/service-name";
-import { requireAuth } from "@/lib/auth-guard";
+import { isDenied, requireProject, requireService } from "@/lib/auth-guard";
+import { withAudit } from "@/lib/audit";
+import { accessChangedForEveryone, deleteGrantsFor } from "@/lib/users";
+import { SERVICE_ACTIONS, satisfies } from "@/lib/authz";
+import { isVisible, visibleFolderIds } from "@/lib/principal";
 import { getDb, nowIso } from "@/lib/db";
 import { decrypt } from "@/lib/crypto";
 import { updateServiceSchema } from "@/lib/validation";
@@ -38,11 +42,11 @@ function pendingContainerName(
 }
 
 export async function GET(request: NextRequest, { params }: Params) {
-  const denied = await requireAuth();
-  if (denied) return denied;
-
   const { serviceId } = await params;
-  const reveal = request.nextUrl.searchParams.get("reveal") === "true";
+  const denied = await requireService(serviceId, "view");
+  if (isDenied(denied)) return denied;
+  const reveal =
+    request.nextUrl.searchParams.get("reveal") === "true" && satisfies(denied.access, SERVICE_ACTIONS.credentials);
 
   const db = await getDb();
   const service = await db
@@ -88,6 +92,8 @@ export async function GET(request: NextRequest, { params }: Params) {
   // browser has no business restating.
   return NextResponse.json({
     ...service,
+    // What the signed-in account may do with this service.
+    permission: denied.access,
     containerName: service.container_name,
     displayName: serviceDisplayName(service),
     // The container name the next deploy of its project will give it, when it
@@ -138,91 +144,255 @@ export async function GET(request: NextRequest, { params }: Params) {
  * dialog about destroying data.
  */
 export async function PATCH(request: NextRequest, { params }: Params) {
-  const denied = await requireAuth();
-  if (denied) return denied;
+  return withAudit(request, { category: "config", action: "service.update", scope: "service", scopeId: async () => (await params).serviceId }, async () => {
+    const { serviceId } = await params;
+    const denied = await requireService(serviceId, "settings");
+    if (isDenied(denied)) return denied;
 
-  const { serviceId } = await params;
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json({ error: "Richiesta non valida" }, { status: 400 });
+    }
 
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: "Richiesta non valida" }, { status: 400 });
-  }
-
-  const parsed = updateServiceSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: "Dati non validi", details: parsed.error.issues },
-      { status: 400 }
-    );
-  }
-
-  const db = await getDb();
-  const service = await db
-    .selectFrom("services")
-    .selectAll()
-    .where("id", "=", serviceId)
-    .executeTakeFirst();
-
-  if (!service) {
-    return NextResponse.json({ error: "Servizio non trovato" }, { status: 404 });
-  }
-
-  const { projectId, injectEnv, envKey, access, folderId, restartCron, displayName } = parsed.data;
-  const detaching = projectId === null && service.project_id !== null;
-  const attaching = typeof projectId === "string" && projectId !== service.project_id;
-
-  const nextProjectId = projectId === undefined ? service.project_id : projectId;
-
-  // A folder is where a service sits on the Overview while it has no project;
-  // once linked it shows under the project, so the folder goes with the link.
-  // Checked before anything is written or any container is touched.
-  if (folderId !== undefined && !(await folderExists(db, folderId))) {
-    return NextResponse.json({ error: "Cartella non trovata" }, { status: 404 });
-  }
-  const nextFolderId = nextProjectId ? null : folderId === undefined ? service.folder_id : folderId;
-  const nextInject = detaching
-    ? 0
-    : injectEnv === undefined
-      ? (attaching ? 1 : (service.inject_env ?? 0))
-      : injectEnv
-        ? 1
-        : 0;
-  const nextEnvKey = envKey === undefined ? service.env_key : envKey;
-  // The next occurrence is computed on save, so the page can show it at once.
-  const restartColumns = restartCron === undefined ? {} : await restartScheduleColumns(restartCron);
-
-  // Two links in one project cannot answer to the same variable. Checked before
-  // anything is written, so a rejected request changes nothing.
-  if (nextProjectId && nextInject === 1) {
-    const resolved = serviceEnvKey({ type: service.type, env_key: nextEnvKey });
-    const siblings = await db
-      .selectFrom("services")
-      .select(["id", "name", "type", "env_key", "inject_env"])
-      .where("project_id", "=", nextProjectId)
-      .where("id", "!=", serviceId)
-      .execute();
-
-    const clash = siblings.find(
-      (row) => row.inject_env === 1 && serviceEnvKey(row) === resolved
-    );
-    if (clash) {
+    const parsed = updateServiceSchema.safeParse(body);
+    if (!parsed.success) {
       return NextResponse.json(
-        {
-          error: `${resolved} è già fornita da "${clash.name}". Dai a questo collegamento un'altra variabile.`,
-          suggestedEnvKey: suggestEnvKey(service.name, service.type),
-        },
-        { status: 409 }
+        { error: "Dati non validi", details: parsed.error.issues },
+        { status: 400 }
       );
     }
-  }
 
-  // Moving between projects is a network change, not just a column. The
-  // container keeps its name — `container_name` exists precisely so the name is
-  // never re-derived — so only its network membership moves.
-  if (detaching || attaching) {
-    const previous = service.project_id
+    const db = await getDb();
+    const service = await db
+      .selectFrom("services")
+      .selectAll()
+      .where("id", "=", serviceId)
+      .executeTakeFirst();
+
+    if (!service) {
+      return NextResponse.json({ error: "Servizio non trovato" }, { status: 404 });
+    }
+
+    const { projectId, injectEnv, envKey, access, folderId, restartCron, displayName } = parsed.data;
+    const detaching = projectId === null && service.project_id !== null;
+    const attaching = typeof projectId === "string" && projectId !== service.project_id;
+
+    const nextProjectId = projectId === undefined ? service.project_id : projectId;
+
+    // A folder is where a service sits on the Overview while it has no project;
+    // once linked it shows under the project, so the folder goes with the link.
+    // Checked before anything is written or any container is touched.
+    if (
+      folderId !== undefined &&
+      (!(await folderExists(db, folderId)) || (folderId !== null && !isVisible(await visibleFolderIds(denied.principal), folderId)))
+    ) {
+      return NextResponse.json({ error: "Cartella non trovata" }, { status: 404 });
+    }
+    // Linking or unlinking changes what a project's deploys receive, so it needs
+    // the settings level on each project involved, not only on the service.
+    for (const touched of [attaching ? projectId : null, (attaching || detaching) ? service.project_id : null]) {
+      if (!touched) continue;
+      const allowed = await requireProject(touched, "settings");
+      if (isDenied(allowed)) return allowed;
+    }
+    const nextFolderId = nextProjectId ? null : folderId === undefined ? service.folder_id : folderId;
+    const nextInject = detaching
+      ? 0
+      : injectEnv === undefined
+        ? (attaching ? 1 : (service.inject_env ?? 0))
+        : injectEnv
+          ? 1
+          : 0;
+    const nextEnvKey = envKey === undefined ? service.env_key : envKey;
+    // The next occurrence is computed on save, so the page can show it at once.
+    const restartColumns = restartCron === undefined ? {} : await restartScheduleColumns(restartCron);
+
+    // Two links in one project cannot answer to the same variable. Checked before
+    // anything is written, so a rejected request changes nothing.
+    if (nextProjectId && nextInject === 1) {
+      const resolved = serviceEnvKey({ type: service.type, env_key: nextEnvKey });
+      const siblings = await db
+        .selectFrom("services")
+        .select(["id", "name", "type", "env_key", "inject_env"])
+        .where("project_id", "=", nextProjectId)
+        .where("id", "!=", serviceId)
+        .execute();
+
+      const clash = siblings.find(
+        (row) => row.inject_env === 1 && serviceEnvKey(row) === resolved
+      );
+      if (clash) {
+        return NextResponse.json(
+          {
+            error: `${resolved} è già fornita da "${clash.name}". Dai a questo collegamento un'altra variabile.`,
+            suggestedEnvKey: suggestEnvKey(service.name, service.type),
+          },
+          { status: 409 }
+        );
+      }
+    }
+
+    // Moving between projects is a network change, not just a column. The
+    // container keeps its name — `container_name` exists precisely so the name is
+    // never re-derived — so only its network membership moves.
+    if (detaching || attaching) {
+      const previous = service.project_id
+        ? await db
+            .selectFrom("projects")
+            .select("slug")
+            .where("id", "=", service.project_id)
+            .executeTakeFirst()
+        : undefined;
+
+      if (previous) {
+        await disconnectFromNetwork(service.container_name, previous.slug);
+      }
+
+      if (attaching) {
+        const target = await db
+          .selectFrom("projects")
+          .select("slug")
+          .where("id", "=", projectId as string)
+          .executeTakeFirst();
+
+        if (!target) {
+          return NextResponse.json({ error: "Progetto non trovato" }, { status: 404 });
+        }
+
+        await ensureProjectNetwork(target.slug);
+        await connectToNetwork(service.container_name, target.slug);
+      }
+    }
+
+    // --- who may reach the port ------------------------------------------------
+    const current = readAccess(service);
+    const nextAccess: AccessRow = access
+      ? {
+          access_mode: access.mode,
+          access_allow: JSON.stringify(access.allow),
+          // Allocated the first time a target is restricted and kept for as long
+          // as it stays that way, so the container's publish spec is stable
+          // across edits to the list.
+          access_port:
+            access.mode === "restricted" ? (service.access_port ?? (await allocateLoopbackPort())) : null,
+        }
+      : { access_mode: service.access_mode, access_allow: service.access_allow, access_port: service.access_port };
+
+    const next = readAccess(nextAccess);
+    const bindChanged = next.mode !== current.mode || next.port !== current.port;
+
+    let recreated: { containerId: string; status: ServicesTable["status"] } | null = null;
+
+    if (bindChanged) {
+      // Strict order, and both halves matter. Going restricted: the container
+      // still holds the public port, so it has to be recreated onto loopback
+      // before the gate can bind. Going open: the gate holds the public port, so
+      // it has to let go before the container can take it back.
+      await closeGate("service", serviceId);
+
+      const slug = nextProjectId
+        ? (
+            await db
+              .selectFrom("projects")
+              .select("slug")
+              .where("id", "=", nextProjectId)
+              .executeTakeFirst()
+          )?.slug
+        : undefined;
+
+      try {
+        recreated = await recreateService(service, slug, nextAccess);
+      } catch (err) {
+        // Nothing is written: the row keeps describing the container that is
+        // actually there. Reopening the previous gate is best-effort — if it
+        // fails too, the port stays shut, which is the safe direction.
+        await syncGate("service", serviceId, service, {
+          publicPort: service.port,
+          label: service.name,
+        }).catch(() => {});
+
+        return NextResponse.json(
+          { error: err instanceof Error ? err.message : "Impossibile applicare la restrizione" },
+          { status: 500 }
+        );
+      }
+    }
+
+    await db
+      .updateTable("services")
+      .set({
+        project_id: nextProjectId,
+        inject_env: nextInject,
+        env_key: nextEnvKey,
+        ...restartColumns,
+        access_mode: nextAccess.access_mode,
+        access_allow: nextAccess.access_allow,
+        access_port: nextAccess.access_port,
+        folder_id: nextFolderId,
+        // Only the label. The container takes the new name at the next deploy of
+        // its project — see `services/service-rename.ts` — and its volume never does.
+        ...(displayName !== undefined ? { display_name: displayName || null } : {}),
+        ...(recreated ? { status: recreated.status } : {}),
+        updated_at: nowIso(),
+      })
+      .where("id", "=", serviceId)
+      .execute();
+    // Linking, unlinking or refiling changes who reaches the service by inheritance.
+    if (attaching || detaching || folderId !== undefined) await accessChangedForEveryone();
+
+    // After the container, never before: a gate that binds while the old
+    // container still publishes the port is an EADDRINUSE, not a gate.
+    try {
+      await syncGate("service", serviceId, nextAccess, {
+        publicPort: service.port,
+        label: service.name,
+      });
+    } catch (err) {
+      // The columns are already written and the container is already on loopback,
+      // so the port is simply closed. Reported rather than swallowed, because
+      // "restricted" and "unreachable" look identical from the outside.
+      return NextResponse.json(
+        { error: err instanceof Error ? err.message : "Restrizione salvata, ma la porta non è stata aperta" },
+        { status: 500 }
+      );
+    }
+
+    const updated = await db
+      .selectFrom("services")
+      .selectAll()
+      .where("id", "=", serviceId)
+      .executeTakeFirst();
+
+    return NextResponse.json({
+      ...updated,
+      envKey: serviceEnvKey({ type: service.type, env_key: nextEnvKey }),
+      access: readAccess(nextAccess),
+      gate: reportGate("service", serviceId),
+    });
+  });
+}
+
+export async function DELETE(request: NextRequest, { params }: Params) {
+  return withAudit(request, { category: "delete", action: "service.delete", scope: "service", scopeId: async () => (await params).serviceId }, async () => {
+    const { serviceId } = await params;
+    const denied = await requireService(serviceId, "delete");
+    if (isDenied(denied)) return denied;
+    const db = await getDb();
+    const service = await db
+      .selectFrom("services")
+      .selectAll()
+      .where("id", "=", serviceId)
+      .executeTakeFirst();
+
+    if (!service) {
+      return NextResponse.json({ error: "Servizio non trovato" }, { status: 404 });
+    }
+
+    // The project slug is part of a service's volume names, so it has to be
+    // resolved before they can be named — not to scope a search.
+    const project = service.project_id
       ? await db
           .selectFrom("projects")
           .select("slug")
@@ -230,177 +400,28 @@ export async function PATCH(request: NextRequest, { params }: Params) {
           .executeTakeFirst()
       : undefined;
 
-    if (previous) {
-      await disconnectFromNetwork(service.container_name, previous.slug);
-    }
+    // Deleting a service deletes its data. This is the point of no return, so the
+    // client has to ask for it explicitly with ?deleteData=true; the UI confirms
+    // first. Previously the volume was simply left behind forever, and a service
+    // recreated with the same name silently inherited the old database.
+    const deleteData = request.nextUrl.searchParams.get("deleteData") === "true";
 
-    if (attaching) {
-      const target = await db
-        .selectFrom("projects")
-        .select("slug")
-        .where("id", "=", projectId as string)
-        .executeTakeFirst();
-
-      if (!target) {
-        return NextResponse.json({ error: "Progetto non trovato" }, { status: 404 });
-      }
-
-      await ensureProjectNetwork(target.slug);
-      await connectToNetwork(service.container_name, target.slug);
-    }
-  }
-
-  // --- who may reach the port ------------------------------------------------
-  const current = readAccess(service);
-  const nextAccess: AccessRow = access
-    ? {
-        access_mode: access.mode,
-        access_allow: JSON.stringify(access.allow),
-        // Allocated the first time a target is restricted and kept for as long
-        // as it stays that way, so the container's publish spec is stable
-        // across edits to the list.
-        access_port:
-          access.mode === "restricted" ? (service.access_port ?? (await allocateLoopbackPort())) : null,
-      }
-    : { access_mode: service.access_mode, access_allow: service.access_allow, access_port: service.access_port };
-
-  const next = readAccess(nextAccess);
-  const bindChanged = next.mode !== current.mode || next.port !== current.port;
-
-  let recreated: { containerId: string; status: ServicesTable["status"] } | null = null;
-
-  if (bindChanged) {
-    // Strict order, and both halves matter. Going restricted: the container
-    // still holds the public port, so it has to be recreated onto loopback
-    // before the gate can bind. Going open: the gate holds the public port, so
-    // it has to let go before the container can take it back.
+    // Before the container goes: a gate left open would keep holding the public
+    // port for a service that no longer exists, and the next one to claim that
+    // port would fail to bind for no visible reason.
     await closeGate("service", serviceId);
 
-    const slug = nextProjectId
-      ? (
-          await db
-            .selectFrom("projects")
-            .select("slug")
-            .where("id", "=", nextProjectId)
-            .executeTakeFirst()
-        )?.slug
-      : undefined;
-
+    let volumesRemoved: string[] = [];
     try {
-      recreated = await recreateService(service, slug, nextAccess);
-    } catch (err) {
-      // Nothing is written: the row keeps describing the container that is
-      // actually there. Reopening the previous gate is best-effort — if it
-      // fails too, the port stays shut, which is the safe direction.
-      await syncGate("service", serviceId, service, {
-        publicPort: service.port,
-        label: service.name,
-      }).catch(() => {});
+      const result = await removeService(service.container_name, {
+        removeData: deleteData,
+        service: { type: service.type, name: service.name, projectSlug: project?.slug },
+      });
+      volumesRemoved = result.volumesRemoved;
+    } catch { /* ignore */ }
 
-      return NextResponse.json(
-        { error: err instanceof Error ? err.message : "Impossibile applicare la restrizione" },
-        { status: 500 }
-      );
-    }
-  }
-
-  await db
-    .updateTable("services")
-    .set({
-      project_id: nextProjectId,
-      inject_env: nextInject,
-      env_key: nextEnvKey,
-      ...restartColumns,
-      access_mode: nextAccess.access_mode,
-      access_allow: nextAccess.access_allow,
-      access_port: nextAccess.access_port,
-      folder_id: nextFolderId,
-      // Only the label. The container takes the new name at the next deploy of
-      // its project — see `services/service-rename.ts` — and its volume never does.
-      ...(displayName !== undefined ? { display_name: displayName || null } : {}),
-      ...(recreated ? { status: recreated.status } : {}),
-      updated_at: nowIso(),
-    })
-    .where("id", "=", serviceId)
-    .execute();
-
-  // After the container, never before: a gate that binds while the old
-  // container still publishes the port is an EADDRINUSE, not a gate.
-  try {
-    await syncGate("service", serviceId, nextAccess, {
-      publicPort: service.port,
-      label: service.name,
-    });
-  } catch (err) {
-    // The columns are already written and the container is already on loopback,
-    // so the port is simply closed. Reported rather than swallowed, because
-    // "restricted" and "unreachable" look identical from the outside.
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Restrizione salvata, ma la porta non è stata aperta" },
-      { status: 500 }
-    );
-  }
-
-  const updated = await db
-    .selectFrom("services")
-    .selectAll()
-    .where("id", "=", serviceId)
-    .executeTakeFirst();
-
-  return NextResponse.json({
-    ...updated,
-    envKey: serviceEnvKey({ type: service.type, env_key: nextEnvKey }),
-    access: readAccess(nextAccess),
-    gate: reportGate("service", serviceId),
+    await db.deleteFrom("services").where("id", "=", serviceId).execute();
+    await deleteGrantsFor("service", serviceId);
+    return NextResponse.json({ success: true, volumesRemoved });
   });
-}
-
-export async function DELETE(request: NextRequest, { params }: Params) {
-  const denied = await requireAuth();
-  if (denied) return denied;
-
-  const { serviceId } = await params;
-  const db = await getDb();
-  const service = await db
-    .selectFrom("services")
-    .selectAll()
-    .where("id", "=", serviceId)
-    .executeTakeFirst();
-
-  if (!service) {
-    return NextResponse.json({ error: "Servizio non trovato" }, { status: 404 });
-  }
-
-  // The project slug is part of a service's volume names, so it has to be
-  // resolved before they can be named — not to scope a search.
-  const project = service.project_id
-    ? await db
-        .selectFrom("projects")
-        .select("slug")
-        .where("id", "=", service.project_id)
-        .executeTakeFirst()
-    : undefined;
-
-  // Deleting a service deletes its data. This is the point of no return, so the
-  // client has to ask for it explicitly with ?deleteData=true; the UI confirms
-  // first. Previously the volume was simply left behind forever, and a service
-  // recreated with the same name silently inherited the old database.
-  const deleteData = request.nextUrl.searchParams.get("deleteData") === "true";
-
-  // Before the container goes: a gate left open would keep holding the public
-  // port for a service that no longer exists, and the next one to claim that
-  // port would fail to bind for no visible reason.
-  await closeGate("service", serviceId);
-
-  let volumesRemoved: string[] = [];
-  try {
-    const result = await removeService(service.container_name, {
-      removeData: deleteData,
-      service: { type: service.type, name: service.name, projectSlug: project?.slug },
-    });
-    volumesRemoved = result.volumesRemoved;
-  } catch { /* ignore */ }
-
-  await db.deleteFrom("services").where("id", "=", serviceId).execute();
-  return NextResponse.json({ success: true, volumesRemoved });
 }

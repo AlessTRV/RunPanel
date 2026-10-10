@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { requireAuth } from "@/lib/auth-guard";
+import { isDenied, requirePermission } from "@/lib/auth-guard";
+import { withAudit } from "@/lib/audit";
 import { isDockerAvailable } from "@/services/docker/cli";
 import { diskUsage, findOrphans, sweep, DEFAULT_RETENTION } from "@/services/docker/gc";
 import { listOwnedImages } from "@/services/docker/images";
@@ -25,8 +26,8 @@ function invalidateStorageSnapshot() {
 
 /** What Docker is holding on RunPanel's behalf, and what can be reclaimed. */
 export async function GET() {
-  const denied = await requireAuth();
-  if (denied) return denied;
+  const denied = await requirePermission("storage");
+  if (isDenied(denied)) return denied;
 
   if (snapshot && Date.now() - snapshot.at < SNAPSHOT_TTL_MS) {
     return NextResponse.json(snapshot.payload, {
@@ -82,32 +83,34 @@ const sweepSchema = z.object({
 });
 
 export async function POST(request: NextRequest) {
-  const denied = await requireAuth();
-  if (denied) return denied;
+  return withAudit(request, { category: "system", action: "storage.clean", scope: "permission", scopeId: "storage" }, async () => {
+    const denied = await requirePermission("storage");
+    if (isDenied(denied)) return denied;
 
-  let body: unknown = {};
-  try {
-    body = await request.json();
-  } catch {
-    /* an empty body means "defaults" */
-  }
+    let body: unknown = {};
+    try {
+      body = await request.json();
+    } catch {
+      /* an empty body means "defaults" */
+    }
 
-  const parsed = sweepSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: "Richiesta non valida", details: parsed.error.issues },
-      { status: 400 }
-    );
-  }
+    const parsed = sweepSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: "Richiesta non valida", details: parsed.error.issues },
+        { status: 400 }
+      );
+    }
 
-  invalidateStorageSnapshot();
+    invalidateStorageSnapshot();
 
-  const result = await sweep({
-    removeOrphans: parsed.data.removeOrphans ?? false,
-    deep: parsed.data.deep ?? false,
-    unusedImages: parsed.data.unusedImages ?? false,
-    retention: parsed.data.retention ?? DEFAULT_RETENTION,
+    const result = await sweep({
+      removeOrphans: parsed.data.removeOrphans ?? false,
+      deep: parsed.data.deep ?? false,
+      unusedImages: parsed.data.unusedImages ?? false,
+      retention: parsed.data.retention ?? DEFAULT_RETENTION,
+    });
+
+    return NextResponse.json(result);
   });
-
-  return NextResponse.json(result);
 }

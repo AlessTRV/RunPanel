@@ -26,6 +26,11 @@ export interface OneTimeCommand {
 
 export interface Project {
   id: string;
+  /**
+   * What the signed-in account may do here (lib/authz.ts levels). Optional
+   * because a few places build a `Project` from the list endpoint.
+   */
+  permission?: { level: "read" | "operate" | "manage" | null; terminal: boolean };
   name: string;
   slug: string;
   app_name: string | null;

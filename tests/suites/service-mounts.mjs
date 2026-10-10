@@ -51,7 +51,7 @@ export async function run({ base }) {
 
   await api.call("/api/auth/login", {
     method: "POST",
-    body: JSON.stringify({ setup: true, setupToken: SETUP_TOKEN, password: "mount-suite-password" }),
+    body: JSON.stringify({ setup: true, email: "owner@runpanel.test", setupToken: SETUP_TOKEN, password: "mount-suite-password" }),
   });
 
   scrub();
@@ -63,7 +63,7 @@ export async function run({ base }) {
       type: "redis",
       version: "7",
       port: PORT,
-      credentials: { password: PASSWORD },
+      credentials: { email: "owner@runpanel.test", password: PASSWORD },
     }),
   });
   r.check("redis provisioned", created.status === 201, JSON.stringify(created.body));

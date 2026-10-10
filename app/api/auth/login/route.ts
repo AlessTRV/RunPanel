@@ -1,11 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import {
-  isFirstRun,
-  claimAdminPassword,
-  getAdminPasswordHash,
-  verifyPassword,
-  createSession,
-} from "@/lib/auth";
+import { createHash } from "crypto";
+import { audit } from "@/lib/audit";
+import { isFirstRun, verifyPasswordOrDummy, createSession } from "@/lib/auth";
+import { claimOwner, findLoginUser, normalizeEmail, recordLogin } from "@/lib/users";
 import { trustedClientIp } from "@/lib/client-ip";
 import { isValidSetupToken } from "@/lib/setup-token";
 import { clearRateLimit, consumeRateLimit } from "@/lib/rate-limit";
@@ -15,9 +12,9 @@ const MAX_ATTEMPTS_PER_IP = 5;
 /**
  * Across everyone, always.
  *
- * There is exactly one account here, so what is worth protecting is the account
- * rather than any particular source — and with no proxy configured there is no
- * trustworthy source anyway, which makes this the only limit that applies.
+ * The accounts are what is worth protecting, rather than any particular source —
+ * and with no proxy configured there is no trustworthy source anyway, so this
+ * and the per-account bucket below are the only limits that apply.
  *
  * Without a client identity the choice is unavoidable: a low ceiling resists
  * guessing but lets anyone lock the operator out for the window, a high one
@@ -29,7 +26,7 @@ const MAX_ATTEMPTS_PER_IP = 5;
 const MAX_ATTEMPTS_GLOBAL = 20;
 
 /**
- * A login body is `{password, setup, setupToken}` and nothing else.
+ * A login body is `{email, password, setup, setupToken}` and nothing else.
  *
  * This route is one of the few `proxy.ts` lets through without a session, and
  * `request.json()` buffers whatever arrives before anything can look at it. The
@@ -40,6 +37,8 @@ const MAX_ATTEMPTS_GLOBAL = 20;
  */
 const MAX_BODY_BYTES = 8 * 1024;
 const GLOBAL_KEY = "login:global";
+/** Per account named in the form, so one account cannot be guessed at full speed. */
+const MAX_ATTEMPTS_PER_EMAIL = 10;
 const WINDOW_MS = 15 * 60 * 1000;
 
 export async function POST(request: NextRequest) {
@@ -80,14 +79,21 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Richiesta non valida" }, { status: 400 });
   }
 
-  const { password, setup, setupToken } = (body ?? {}) as {
+  const { email: rawEmail, password, setup, setupToken } = (body ?? {}) as {
+    email?: unknown;
     password?: unknown;
     setup?: unknown;
     setupToken?: unknown;
   };
 
   if (!password || typeof password !== "string" || password.length > 128) {
-    return NextResponse.json({ error: "Password errata" }, { status: 400 });
+    return NextResponse.json({ error: "Credenziali non valide" }, { status: 400 });
+  }
+
+  const email = normalizeEmail(rawEmail);
+  const emailGiven = typeof rawEmail === "string" && rawEmail.trim().length > 0;
+  if (emailGiven && !email) {
+    return NextResponse.json({ error: "Email non valida" }, { status: 400 });
   }
 
   const sessionMeta = {
@@ -95,15 +101,32 @@ export async function POST(request: NextRequest) {
     ip: ip ?? undefined,
   };
 
+  // Counted per account too. Hashed so the bucket key does not store addresses.
+  if (email) {
+    const key = `login:email:${createHash("sha256").update(email).digest("hex").slice(0, 32)}`;
+    const limit = await consumeRateLimit(key, MAX_ATTEMPTS_PER_EMAIL, WINDOW_MS);
+    if (!limit.allowed) {
+      return NextResponse.json(
+        { error: `Troppi tentativi. Riprova tra ${Math.ceil(limit.retryAfter / 60)} minuti.` },
+        { status: 429, headers: { "Retry-After": String(limit.retryAfter) } }
+      );
+    }
+    buckets.push({ key, limit: MAX_ATTEMPTS_PER_EMAIL });
+  }
+
   const clearBuckets = () => Promise.all(buckets.map((bucket) => clearRateLimit(bucket.key)));
 
-  // First-run setup
+  // First-run setup: the owner account, with an email from the start.
   if (setup && (await isFirstRun())) {
     if (!isValidSetupToken(setupToken)) {
       return NextResponse.json(
         { error: "Token di setup mancante o errato. Lo trovi nel log di avvio del pannello." },
         { status: 403 }
       );
+    }
+
+    if (!email) {
+      return NextResponse.json({ error: "Serve un'email valida" }, { status: 400 });
     }
 
     if (password.length < 8) {
@@ -114,34 +137,51 @@ export async function POST(request: NextRequest) {
     }
 
     // Claimed rather than written: `isFirstRun()` above is a read, and two
-    // requests can pass it together.
-    if (!(await claimAdminPassword(password))) {
+    // requests can pass it together. The unique index on the owner decides.
+    const ownerId = await claimOwner(email, password);
+    if (!ownerId) {
       return NextResponse.json(
         { error: "Il pannello è già stato configurato. Ricarica la pagina." },
         { status: 409 }
       );
     }
 
-    await createSession(sessionMeta);
+    await createSession(ownerId, sessionMeta);
+    await recordLogin(ownerId);
+    await audit({ userId: ownerId, category: "security", action: "auth.setup", scope: "user", scopeId: ownerId, request });
     await clearBuckets();
     return NextResponse.json({ success: true });
   }
 
-  // Normal login
-  const hash = await getAdminPasswordHash();
-  if (!hash) {
+  if (await isFirstRun()) {
     return NextResponse.json(
       { error: "Il pannello non è ancora configurato. Ricarica la pagina." },
       { status: 400 }
     );
   }
 
-  const valid = await verifyPassword(password, hash);
-  if (!valid) {
-    return NextResponse.json({ error: "Password errata" }, { status: 401 });
+  // Normal login. An empty email only finds the owner migrated from the single
+  // password, while they have no email yet. Every failure reads the same and
+  // costs the same bcrypt round, so the form does not reveal which accounts exist.
+  const user = await findLoginUser(email);
+  const valid = await verifyPasswordOrDummy(password, user?.password_hash ?? null);
+  if (!user || !valid || user.disabled === 1) {
+    // The address typed is kept only when it names a real account: a log of
+    // every string anyone typed would be a list of guesses, not of events.
+    await audit({
+      userId: user?.id ?? null,
+      category: "security",
+      action: "auth.login.failed",
+      scope: user ? "user" : null,
+      scopeId: user?.id ?? null,
+      request,
+    });
+    return NextResponse.json({ error: "Credenziali non valide" }, { status: 401 });
   }
 
   await clearBuckets();
-  await createSession(sessionMeta);
-  return NextResponse.json({ success: true });
+  await createSession(user.id, sessionMeta);
+  await recordLogin(user.id);
+  await audit({ userId: user.id, category: "security", action: "auth.login", scope: "user", scopeId: user.id, request });
+  return NextResponse.json({ success: true, emailRequired: user.email === null });
 }

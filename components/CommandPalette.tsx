@@ -5,7 +5,8 @@ import { useRouter } from "next/navigation";
 import { Icon } from "@iconify/react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { NAV_ITEMS } from "@/lib/nav";
+import { NAV_PAGES } from "@/lib/nav";
+import { useAllowedNav } from "@/lib/hooks/useMe";
 import { serviceDisplayName } from "@/lib/service-name";
 
 /**
@@ -27,8 +28,6 @@ interface Command {
   run: () => void | Promise<void>;
 }
 
-/** The same destinations the sidebar shows, from the same list. */
-const PAGES = NAV_ITEMS;
 
 interface Indexed {
   projects: { id: string; name: string; slug: string }[];
@@ -37,6 +36,9 @@ interface Indexed {
 
 export function CommandPalette() {
   const router = useRouter();
+  // The same destinations the sidebar shows, from the same list and filter.
+  const allowed = useAllowedNav();
+  const PAGES = useMemo(() => NAV_PAGES.filter(allowed), [allowed]);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
@@ -109,7 +111,7 @@ export function CommandPalette() {
 
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, router, load]);
+  }, [open, router, load, PAGES]);
 
   useEffect(() => {
     // Focus only: the input exists only once open is true, so this cannot be
@@ -171,17 +173,25 @@ export function CommandPalette() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ dryRun: true }),
         });
-        const body = await res.json();
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          toast.error(body.error || "Simulazione non riuscita");
+          return;
+        }
         toast.success(
-          res.ok
-            ? `${(body.entries ?? []).filter((entry: { action: string }) => entry.action === "would-start").length} elementi verrebbero avviati`
-            : "Simulazione non riuscita"
+          `${(body.entries ?? []).filter((entry: { action: string }) => entry.action === "would-start").length} elementi verrebbero avviati`
         );
       },
     });
 
     return list;
-  }, [index, router]);
+  }, [index, router, PAGES]);
+
+  // Keeps the highlighted row in view while the arrows walk past the fold.
+  useEffect(() => {
+    if (!open) return;
+    document.getElementById(`palette-option-${active}`)?.scrollIntoView({ block: "nearest" });
+  }, [active, open]);
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -216,8 +226,17 @@ export function CommandPalette() {
       >
         <div className="border-border flex items-center gap-2 border-b px-3">
           <Icon icon="solar:magnifer-linear" width={16} className="text-muted" aria-hidden />
+          {/* A combobox over a listbox: the focus stays in the field, and
+              aria-activedescendant tells a screen reader which row the arrows
+              are on. The rows used to be plain buttons the reader never heard
+              about while typing. */}
           <input
             ref={inputRef}
+            role="combobox"
+            aria-expanded
+            aria-controls="palette-list"
+            aria-autocomplete="list"
+            aria-activedescendant={filtered[active] ? `palette-option-${active}` : undefined}
             value={query}
             onChange={(event) => {
               setQuery(event.target.value);
@@ -241,23 +260,37 @@ export function CommandPalette() {
             className="text-foreground placeholder:text-muted h-11 flex-1 bg-transparent text-sm outline-none"
             aria-label="Cerca"
           />
-          <kbd className="text-muted border-border rounded border px-1.5 py-0.5 text-meta">
+          {/* A key hint means nothing on a phone, which has no Esc: there the
+              way out is a button. */}
+          <kbd className="text-muted border-border hidden rounded border px-1.5 py-0.5 text-meta sm:inline-block">
             esc
           </kbd>
+          <button
+            type="button"
+            onClick={() => setOpen(false)}
+            className="text-muted hover:text-foreground -mr-1 p-1 sm:hidden"
+            aria-label="Chiudi"
+          >
+            <Icon icon="solar:close-circle-linear" width={18} aria-hidden />
+          </button>
         </div>
 
-        <ul className="max-h-80 overflow-y-auto p-1">
-          {filtered.length === 0 && (
-            <li className="text-muted px-3 py-6 text-center text-sm">Nessun risultato.</li>
-          )}
+        {filtered.length === 0 && (
+          <p className="text-muted px-3 py-6 text-center text-sm">Nessun risultato.</p>
+        )}
+        <ul id="palette-list" role="listbox" aria-label="Risultati" className="max-h-80 overflow-y-auto p-1">
           {filtered.map((command, position) => (
-            <li key={command.id}>
-              <button
-                type="button"
+            <li
+              key={command.id}
+              id={`palette-option-${position}`}
+              role="option"
+              aria-selected={position === active}
+            >
+              <div
                 onClick={() => void choose(command)}
                 onMouseEnter={() => setActive(position)}
                 className={cn(
-                  "flex w-full items-center gap-3 rounded-[var(--radius)] px-3 py-2 text-left text-sm",
+                  "flex w-full cursor-pointer items-center gap-3 rounded-[var(--radius)] px-3 py-2 text-left text-sm",
                   // The palette lists the same destinations as the sidebar, from
                   // the same array, with the same icons — so the highlighted row
                   // should look like the sidebar's, not like a grey rectangle.
@@ -272,7 +305,7 @@ export function CommandPalette() {
                 />
                 <span className="text-foreground flex-1 truncate">{command.label}</span>
                 {command.hint && <span className="text-muted text-xs">{command.hint}</span>}
-              </button>
+              </div>
             </li>
           ))}
         </ul>

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireAuth } from "@/lib/auth-guard";
+import { isDenied, requirePermission } from "@/lib/auth-guard";
 import { getDb } from "@/lib/db";
 import { processManager } from "@/services/process-manager";
 import { containerStats } from "@/services/docker/stats";
@@ -56,8 +56,8 @@ async function containerUptimes(names: string[]): Promise<Map<string, number>> {
 }
 
 export async function GET() {
-  const denied = await requireAuth();
-  if (denied) return denied;
+  const denied = await requirePermission("monitor");
+  if (isDenied(denied)) return denied;
 
   const db = await getDb();
   void containerStats.ensureStarted();

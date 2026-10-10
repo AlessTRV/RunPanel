@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAuth } from "@/lib/auth-guard";
+import { isDenied, requireUser } from "@/lib/auth-guard";
 import { describeCron, isValidTimeZone, nextOccurrences } from "@/lib/cron";
 import { getSetting } from "@/lib/settings";
 import { cronPreviewSchema } from "@/lib/validation";
@@ -12,8 +12,8 @@ import { cronPreviewSchema } from "@/lib/validation";
  * approximation would have.
  */
 export async function POST(request: NextRequest) {
-  const denied = await requireAuth();
-  if (denied) return denied;
+  const denied = await requireUser();
+  if (isDenied(denied)) return denied;
 
   // A malformed body is a bad request, not a 500.
   let body: unknown;

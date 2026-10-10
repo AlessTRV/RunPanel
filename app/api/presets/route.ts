@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireAuth } from "@/lib/auth-guard";
+import { isDenied, requireUser } from "@/lib/auth-guard";
 import { DEPLOY_PRESETS } from "@/services/deploy-presets";
 
 /**
@@ -17,8 +17,8 @@ import { DEPLOY_PRESETS } from "@/services/deploy-presets";
  * from the contracts they name.
  */
 export async function GET() {
-  const denied = await requireAuth();
-  if (denied) return denied;
+  const denied = await requireUser();
+  if (isDenied(denied)) return denied;
 
   return NextResponse.json({
     presets: DEPLOY_PRESETS.map((preset) => ({

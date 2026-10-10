@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAuth } from "@/lib/auth-guard";
+import { isDenied, requireProject } from "@/lib/auth-guard";
+import { requireHostFor } from "@/lib/host-guard";
+import { withAudit } from "@/lib/audit";
 import { getDb } from "@/lib/db";
 import { oneTimeCommandsSchema } from "@/lib/validation";
 import { phaseLabel, phaseUnavailableReason } from "@/lib/deploy-phases";
@@ -28,10 +30,9 @@ type Params = { params: Promise<{ projectId: string }> };
  * Unlike the mount route this starts nothing, so it answers 200 rather than 202.
  */
 export async function GET(request: NextRequest, { params }: Params) {
-  const denied = await requireAuth();
-  if (denied) return denied;
-
   const { projectId } = await params;
+  const denied = await requireProject(projectId, "one-time");
+  if (isDenied(denied)) return denied;
   const db = await getDb();
 
   const project = await db
@@ -60,114 +61,120 @@ export async function GET(request: NextRequest, { params }: Params) {
  * note from the tentativo that failed — see `replaceQueue`.
  */
 export async function PUT(request: NextRequest, { params }: Params) {
-  const denied = await requireAuth();
-  if (denied) return denied;
+  return withAudit(request, { category: "config", action: "project.one-time", scope: "project", scopeId: async () => (await params).projectId }, async () => {
+    const { projectId } = await params;
+    const denied = await requireProject(projectId, "one-time");
+    if (isDenied(denied)) return denied;
+    const noHost = requireHostFor(denied.principal, "eseguire comandi una tantum");
+    if (noHost) return noHost;
 
-  const { projectId } = await params;
-
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: "Richiesta non valida" }, { status: 400 });
-  }
-
-  const parsed = oneTimeCommandsSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: "Dati non validi", details: parsed.error.issues },
-      { status: 400 }
-    );
-  }
-
-  const db = await getDb();
-  const project = await db
-    .selectFrom("projects")
-    .select(["id", "runtime_type"])
-    .where("id", "=", projectId)
-    .executeTakeFirst();
-
-  if (!project) return NextResponse.json({ error: "Progetto non trovato" }, { status: 404 });
-
-  /*
-    Refused while a deploy holds any of these rows.
-
-    Not a nicety: the queue is replaced by id, and a deploy that has already
-    claimed a row would have it deleted from under it — or, worse, see the same
-    command re-inserted as queued and run it a second time on the next deploy.
-    Asked of the rows themselves rather than of `projects.status`, which says
-    "deploying" for a while before and after the claim.
-  */
-  if (await hasClaimed(projectId)) {
-    return NextResponse.json(
-      {
-        error:
-          "Un deploy in corso ha già preso i comandi in coda. Riprova quando è finito.",
-        code: "deploy-in-progress",
-      },
-      { status: 409 }
-    );
-  }
-
-  /*
-    Refused for a row being written here, not for one that is merely still
-    there.
-
-    Checking every row meant that changing a project's runtime made the whole
-    section unsaveable: the editor sends the full queue, so one row stranded on
-    a phase the new runtime does not have rejected every later edit with a 400
-    about a command the operator was not touching. The section flagged the
-    stranded row and said it would stay in the queue — which cannot both be
-    true and be a reason to refuse the save. So an unchanged stored row is
-    allowed through and keeps its warning; a new or edited one is not.
-  */
-  const stored = new Map(
-    (await queuedForProject(projectId, project.runtime_type)).map((row) => [row.id, row])
-  );
-
-  for (const command of parsed.data.commands) {
-    const reason = phaseUnavailableReason(command.phase, project.runtime_type);
-    if (!reason) continue;
-
-    const previous = command.id ? stored.get(command.id) : undefined;
-    const unchanged =
-      previous !== undefined &&
-      previous.phase === command.phase &&
-      previous.command === command.command;
-    if (unchanged) continue;
-
-    return NextResponse.json(
-      { error: `"${phaseLabel(command.phase)}": ${reason}`, code: "phase-unavailable" },
-      { status: 400 }
-    );
-  }
-
-  try {
-    const queued = await replaceQueue(projectId, project.runtime_type, parsed.data.commands);
-    return NextResponse.json({ queued });
-  } catch (err) {
-    if (err instanceof QueueChangedError) {
-      return NextResponse.json({ error: err.message, code: "queue-changed" }, { status: 409 });
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json({ error: "Richiesta non valida" }, { status: 400 });
     }
-    throw err;
-  }
+
+    const parsed = oneTimeCommandsSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: "Dati non validi", details: parsed.error.issues },
+        { status: 400 }
+      );
+    }
+
+    const db = await getDb();
+    const project = await db
+      .selectFrom("projects")
+      .select(["id", "runtime_type"])
+      .where("id", "=", projectId)
+      .executeTakeFirst();
+
+    if (!project) return NextResponse.json({ error: "Progetto non trovato" }, { status: 404 });
+
+    /*
+      Refused while a deploy holds any of these rows.
+
+      Not a nicety: the queue is replaced by id, and a deploy that has already
+      claimed a row would have it deleted from under it — or, worse, see the same
+      command re-inserted as queued and run it a second time on the next deploy.
+      Asked of the rows themselves rather than of `projects.status`, which says
+      "deploying" for a while before and after the claim.
+    */
+    if (await hasClaimed(projectId)) {
+      return NextResponse.json(
+        {
+          error:
+            "Un deploy in corso ha già preso i comandi in coda. Riprova quando è finito.",
+          code: "deploy-in-progress",
+        },
+        { status: 409 }
+      );
+    }
+
+    /*
+      Refused for a row being written here, not for one that is merely still
+      there.
+
+      Checking every row meant that changing a project's runtime made the whole
+      section unsaveable: the editor sends the full queue, so one row stranded on
+      a phase the new runtime does not have rejected every later edit with a 400
+      about a command the operator was not touching. The section flagged the
+      stranded row and said it would stay in the queue — which cannot both be
+      true and be a reason to refuse the save. So an unchanged stored row is
+      allowed through and keeps its warning; a new or edited one is not.
+    */
+    const stored = new Map(
+      (await queuedForProject(projectId, project.runtime_type)).map((row) => [row.id, row])
+    );
+
+    for (const command of parsed.data.commands) {
+      const reason = phaseUnavailableReason(command.phase, project.runtime_type);
+      if (!reason) continue;
+
+      const previous = command.id ? stored.get(command.id) : undefined;
+      const unchanged =
+        previous !== undefined &&
+        previous.phase === command.phase &&
+        previous.command === command.command;
+      if (unchanged) continue;
+
+      return NextResponse.json(
+        { error: `"${phaseLabel(command.phase)}": ${reason}`, code: "phase-unavailable" },
+        { status: 400 }
+      );
+    }
+
+    try {
+      const queued = await replaceQueue(projectId, project.runtime_type, parsed.data.commands);
+      return NextResponse.json({ queued });
+    } catch (err) {
+      if (err instanceof QueueChangedError) {
+        return NextResponse.json({ error: err.message, code: "queue-changed" }, { status: 409 });
+      }
+      throw err;
+    }
+  });
 }
 
 /** Empty the history. The queue and anything in flight are left alone. */
 export async function DELETE(_request: NextRequest, { params }: Params) {
-  const denied = await requireAuth();
-  if (denied) return denied;
+  return withAudit(_request, { category: "config", action: "project.one-time.delete", scope: "project", scopeId: async () => (await params).projectId }, async () => {
+    const { projectId } = await params;
+    const denied = await requireProject(projectId, "one-time");
+    if (isDenied(denied)) return denied;
+    const noHost = requireHostFor(denied.principal, "eseguire comandi una tantum");
+    if (noHost) return noHost;
+    const db = await getDb();
 
-  const { projectId } = await params;
-  const db = await getDb();
+    const project = await db
+      .selectFrom("projects")
+      .select("id")
+      .where("id", "=", projectId)
+      .executeTakeFirst();
 
-  const project = await db
-    .selectFrom("projects")
-    .select("id")
-    .where("id", "=", projectId)
-    .executeTakeFirst();
+    if (!project) return NextResponse.json({ error: "Progetto non trovato" }, { status: 404 });
 
-  if (!project) return NextResponse.json({ error: "Progetto non trovato" }, { status: 404 });
-
-  return NextResponse.json({ removed: await clearHistory(projectId) });
+    return NextResponse.json({ removed: await clearHistory(projectId) });
+  });
 }

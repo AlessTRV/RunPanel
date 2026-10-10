@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireAuth } from "@/lib/auth-guard";
+import { isDenied, requirePermission } from "@/lib/auth-guard";
 import { logPathFor, readLogFile } from "@/services/log-file";
 import { currentRun, updateLogDir } from "@/services/panel-update/run";
 
@@ -16,8 +16,8 @@ const TAIL_LINES = 2000;
  * is a document, and this hands it over once.
  */
 export async function GET() {
-  const denied = await requireAuth();
-  if (denied) return denied;
+  const denied = await requirePermission("updates");
+  if (isDenied(denied)) return denied;
 
   const run = currentRun();
   if (!run) {

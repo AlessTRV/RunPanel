@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireAuth } from "@/lib/auth-guard";
+import { isDenied, requirePermission } from "@/lib/auth-guard";
 import { checkPanelUpdate } from "@/services/panel-update/check";
 
 /**
@@ -11,8 +11,8 @@ import { checkPanelUpdate } from "@/services/panel-update/check";
  * instead of the sentence explaining what is wrong.
  */
 export async function POST() {
-  const denied = await requireAuth();
-  if (denied) return denied;
+  const denied = await requirePermission("updates");
+  if (isDenied(denied)) return denied;
 
   const result = await checkPanelUpdate();
   return NextResponse.json(result, { headers: { "Cache-Control": "no-store" } });

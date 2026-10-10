@@ -4,26 +4,31 @@ import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@heroui/react";
 import { Icon } from "@iconify/react";
-import { SEGMENT_LABELS } from "@/lib/nav";
+import { CRUMBS_WITHOUT_PAGE, SEGMENT_LABELS } from "@/lib/nav";
+import { useCrumbLabels } from "@/lib/hooks/useCrumbLabel";
 
 interface Crumb {
   label: string;
   href: string;
+  /** False for a URL level that has no page of its own. */
+  linked: boolean;
   /** Opaque ids get truncated; real labels never do. */
   truncate: boolean;
 }
 
-function buildCrumbs(pathname: string): Crumb[] {
+function buildCrumbs(pathname: string, named: ReadonlyMap<string, string>): Crumb[] {
   const segments = pathname.split("/").filter(Boolean);
   const crumbs: Crumb[] = [];
   let href = "";
 
   for (const segment of segments) {
     href += `/${segment}`;
-    const known = SEGMENT_LABELS[segment];
+    // A page-provided name (a project's, a service's) wins over the raw id.
+    const known = named.get(segment) ?? SEGMENT_LABELS[segment];
     crumbs.push({
       label: known ?? decodeURIComponent(segment),
       href,
+      linked: !CRUMBS_WITHOUT_PAGE.has(href),
       truncate: !known,
     });
   }
@@ -34,7 +39,7 @@ function buildCrumbs(pathname: string): Crumb[] {
 export function TopBar() {
   const pathname = usePathname();
   const router = useRouter();
-  const crumbs = buildCrumbs(pathname);
+  const crumbs = buildCrumbs(pathname, useCrumbLabels());
 
   async function handleLogout() {
     await fetch("/api/auth/logout", { method: "POST" });
@@ -59,7 +64,9 @@ export function TopBar() {
                     /
                   </span>
                 )}
-                {last ? (
+                {!last && !crumb.linked ? (
+                  <span className="text-muted max-w-[12ch] truncate">{crumb.label}</span>
+                ) : last ? (
                   <span
                     className="text-foreground max-w-[16ch] truncate font-medium sm:max-w-[28ch]"
                     aria-current="page"

@@ -11,6 +11,8 @@ import type { ServiceMount } from "@/lib/mount";
  */
 
 export interface Service {
+  /** What the signed-in account may do with this service (lib/authz.ts levels). */
+  permission?: { level: "read" | "operate" | "manage" | null; terminal: boolean };
   id: string;
   /** The technical name: fixed for life, it is part of the volume names. */
   name: string;

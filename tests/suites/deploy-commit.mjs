@@ -23,7 +23,7 @@ export async function run({ base }) {
 
   await api.call("/api/auth/login", {
     method: "POST",
-    body: JSON.stringify({ setup: true, setupToken: SETUP_TOKEN, password: "commit-suite-pw" }),
+    body: JSON.stringify({ setup: true, email: "owner@runpanel.test", setupToken: SETUP_TOKEN, password: "commit-suite-pw" }),
   });
 
   const created = await api.call("/api/projects", {

@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
-import { requireAuth } from "@/lib/auth-guard";
+import { isDenied, requireProject } from "@/lib/auth-guard";
+import { projectAllows, watchAccess } from "@/lib/stream-guard";
 import { getDb } from "@/lib/db";
 import { projectEvents, type ProjectEvent } from "@/services/events";
 import { processLogHub } from "@/services/process-logs";
@@ -20,10 +21,9 @@ type Params = { params: Promise<{ projectId: string }> };
  * ordinary reverse proxies, and the browser reconnects on its own.
  */
 export async function GET(request: NextRequest, { params }: Params) {
-  const denied = await requireAuth();
-  if (denied) return denied;
-
   const { projectId } = await params;
+  const denied = await requireProject(projectId, "view");
+  if (isDenied(denied)) return denied;
   const db = await getDb();
 
   const project = await db
@@ -49,6 +49,7 @@ export async function GET(request: NextRequest, { params }: Params) {
 
   const encoder = new TextEncoder();
   let unsubscribe: (() => void) | null = null;
+  let stopWatching: (() => void) | null = null;
   let detachLogs: (() => void) | null = null;
   let heartbeat: NodeJS.Timeout | null = null;
 
@@ -69,6 +70,7 @@ export async function GET(request: NextRequest, { params }: Params) {
         if (closed) return;
         closed = true;
         unsubscribe?.();
+        stopWatching?.();
         detachLogs?.();
         if (heartbeat) clearInterval(heartbeat);
         try {
@@ -87,7 +89,12 @@ export async function GET(request: NextRequest, { params }: Params) {
         }
       }
 
-      unsubscribe = projectEvents.subscribe(projectId, send);
+      // A shell's output belongs to the person who opened it.
+      const me = denied.session.user.id;
+      unsubscribe = projectEvents.subscribe(projectId, (event) => {
+        if ((event.type === "terminal:output" || event.type === "terminal:closed") && event.userId !== me) return;
+        send(event);
+      });
       detachLogs = processLogHub.attach(projectId, project.slug, project.runtime_type);
 
       // Proxies and browsers drop a stream that goes quiet. A comment frame is
@@ -101,11 +108,24 @@ export async function GET(request: NextRequest, { params }: Params) {
         }
       }, 25_000);
 
+      // Ends the stream once this session or its access to what it shows is gone.
+
+      stopWatching = watchAccess(
+
+        { userId: denied.session.user.id, sessionId: denied.session.sessionId },
+
+        projectAllows(projectId, "view"),
+
+        cleanup
+
+      );
+
       request.signal.addEventListener("abort", cleanup);
     },
 
     cancel() {
       unsubscribe?.();
+      stopWatching?.();
       detachLogs?.();
       if (heartbeat) clearInterval(heartbeat);
     },

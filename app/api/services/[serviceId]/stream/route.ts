@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
-import { requireAuth } from "@/lib/auth-guard";
+import { isDenied, requireService } from "@/lib/auth-guard";
+import { serviceAllows, watchAccess } from "@/lib/stream-guard";
 import { getDb } from "@/lib/db";
 import { serviceEvents, type ServiceEvent } from "@/services/events";
 import { consoleBacklog, consoleState, touchConsole } from "@/services/service-console";
@@ -17,10 +18,9 @@ type Params = { params: Promise<{ serviceId: string }> };
  * the machine.
  */
 export async function GET(request: NextRequest, { params }: Params) {
-  const denied = await requireAuth();
-  if (denied) return denied;
-
   const { serviceId } = await params;
+  const denied = await requireService(serviceId, "view");
+  if (isDenied(denied)) return denied;
 
   const db = await getDb();
   const service = await db
@@ -33,6 +33,7 @@ export async function GET(request: NextRequest, { params }: Params) {
 
   const encoder = new TextEncoder();
   let unsubscribe: (() => void) | null = null;
+  let stopWatching: (() => void) | null = null;
   let heartbeat: NodeJS.Timeout | null = null;
 
   const stream = new ReadableStream<Uint8Array>({
@@ -52,6 +53,7 @@ export async function GET(request: NextRequest, { params }: Params) {
         if (closed) return;
         closed = true;
         unsubscribe?.();
+        stopWatching?.();
         if (heartbeat) clearInterval(heartbeat);
         try {
           controller.close();
@@ -60,15 +62,16 @@ export async function GET(request: NextRequest, { params }: Params) {
         }
       };
 
-      const open = consoleState(serviceId);
+      const me = denied.session.user.id;
+      const open = consoleState(serviceId, me);
       const apply = parseApplyJournal(service.mount_apply);
       send({ type: "ready", serviceId, status: service.status, console: open, apply });
 
       // Whatever the session has already printed, so a reload or a second tab
       // does not start from a blank pane above a live shell.
       if (open) {
-        for (const text of consoleBacklog(serviceId)) {
-          send({ type: "console:output", mode: open.mode, text });
+        for (const text of consoleBacklog(serviceId, me)) {
+          send({ type: "console:output", userId: me, mode: open.mode, text });
         }
       }
 
@@ -81,14 +84,18 @@ export async function GET(request: NextRequest, { params }: Params) {
         }
       }
 
-      unsubscribe = serviceEvents.subscribe(serviceId, send);
+      // A console session belongs to the person who opened it.
+      unsubscribe = serviceEvents.subscribe(serviceId, (event) => {
+        if ((event.type === "console:output" || event.type === "console:closed") && event.userId !== me) return;
+        send(event);
+      });
 
       heartbeat = setInterval(() => {
         if (closed) return;
         // Doubles as the "somebody is still watching" signal — see
         // `touchConsole`. It is what keeps a log follower alive while a viewer
         // is attached, and what lets it be reaped once none is.
-        touchConsole(serviceId);
+        touchConsole(serviceId, me);
         try {
           controller.enqueue(encoder.encode(": keepalive\n\n"));
         } catch {
@@ -96,11 +103,24 @@ export async function GET(request: NextRequest, { params }: Params) {
         }
       }, 25_000);
 
+      // Ends the stream once this session or its access to what it shows is gone.
+
+      stopWatching = watchAccess(
+
+        { userId: denied.session.user.id, sessionId: denied.session.sessionId },
+
+        serviceAllows(serviceId, "view"),
+
+        cleanup
+
+      );
+
       request.signal.addEventListener("abort", cleanup);
     },
 
     cancel() {
       unsubscribe?.();
+      stopWatching?.();
       if (heartbeat) clearInterval(heartbeat);
     },
   });

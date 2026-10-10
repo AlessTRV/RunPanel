@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAuth } from "@/lib/auth-guard";
+import { isDenied, requireProject } from "@/lib/auth-guard";
 import { getDb } from "@/lib/db";
 import { isPathShapeSafe, resolveInside } from "@/lib/fs-safe";
 import { getRepoPath } from "@/services/git-manager";
@@ -13,10 +13,9 @@ const exec = promisify(execFile);
 type Params = { params: Promise<{ projectId: string }> };
 
 export async function GET(request: NextRequest, { params }: Params) {
-  const denied = await requireAuth();
-  if (denied) return denied;
-
   const { projectId } = await params;
+  const denied = await requireProject(projectId, "files");
+  if (isDenied(denied)) return denied;
   const dirPath = request.nextUrl.searchParams.get("path") || "/";
 
   if (!isPathShapeSafe(dirPath)) {

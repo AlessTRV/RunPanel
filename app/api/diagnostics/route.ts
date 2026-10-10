@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
-import { requireAuth } from "@/lib/auth-guard";
+import { isDenied, requirePermission } from "@/lib/auth-guard";
 import { diagnosticsCache, worstTone } from "@/services/diagnostics";
 
 /**
@@ -17,8 +17,8 @@ import { diagnosticsCache, worstTone } from "@/services/diagnostics";
  * page did not so much as re-render.
  */
 export async function GET(request: NextRequest) {
-  const denied = await requireAuth();
-  if (denied) return denied;
+  const denied = await requirePermission("diagnostics");
+  if (isDenied(denied)) return denied;
 
   const fresh = request.nextUrl.searchParams.get("fresh") === "1";
   const checks = await diagnosticsCache.get({ fresh });

@@ -23,11 +23,11 @@ export async function run({ base }) {
 
   await desktop.call("/api/auth/login", {
     method: "POST",
-    body: JSON.stringify({ setup: true, setupToken: SETUP_TOKEN, password: "sessions-pw-1" }),
+    body: JSON.stringify({ setup: true, email: "owner@runpanel.test", setupToken: SETUP_TOKEN, password: "sessions-pw-1" }),
   });
   await phone.call("/api/auth/login", {
     method: "POST",
-    body: JSON.stringify({ password: "sessions-pw-1" }),
+    body: JSON.stringify({ email: "owner@runpanel.test", password: "sessions-pw-1" }),
   });
 
   let d = await desktop.call("/api/projects");
@@ -43,12 +43,12 @@ export async function run({ base }) {
 
   await tablet.call("/api/auth/login", {
     method: "POST",
-    body: JSON.stringify({ password: "sessions-pw-1" }),
+    body: JSON.stringify({ email: "owner@runpanel.test", password: "sessions-pw-1" }),
   });
   r.check("third device signed in", (await tablet.call("/api/projects")).status === 200);
 
-  const changed = await desktop.call("/api/settings", {
-    method: "PUT",
+  const changed = await desktop.call("/api/account", {
+    method: "PATCH",
     body: JSON.stringify({ currentPassword: "sessions-pw-1", newPassword: "sessions-pw-2" }),
   });
   r.check("password change accepted", changed.status === 200, JSON.stringify(changed.body));
@@ -68,7 +68,7 @@ export async function run({ base }) {
   for (let i = 0; i < 25; i++) {
     const res = await attacker.call("/api/auth/login", {
       method: "POST",
-      body: JSON.stringify({ password: "wrong-guess" }),
+      body: JSON.stringify({ email: "owner@runpanel.test", password: "wrong-guess" }),
     });
     last = res.status;
     if (res.status === 429) { limited = true; break; }

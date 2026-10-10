@@ -482,6 +482,71 @@ export interface SessionsTable {
   created_at: string;
   last_seen_at: string;
   expires_at: string;
+  /** Whose session it is — see migration 023. Null only for a row that predates it. */
+  user_id: string | null;
+}
+
+/** An account — see migration 023 and lib/authz.ts. */
+export interface UsersTable {
+  id: string;
+  /** Lower-cased. Null only for an owner migrated from the single password, until they set one. */
+  email: string | null;
+  /** Null until an invited user picks a password. */
+  password_hash: string | null;
+  /** 0 | 1 — exactly one row has 1, enforced by a partial unique index. */
+  is_owner: number;
+  /** 0 | 1 */
+  disabled: number;
+  created_by: string | null;
+  created_at: string;
+  last_login_at: string | null;
+}
+
+export interface UserPermissionsTable {
+  user_id: string;
+  /** A `GlobalPermission` from lib/authz.ts. */
+  permission: string;
+}
+
+export interface UserGrantsTable {
+  id: string;
+  user_id: string;
+  /** `'all'` | `'folder'` | `'project'` | `'service'` */
+  scope: string;
+  /** '' for `all` — not NULL, so the unique index can see duplicates. */
+  scope_id: string;
+  /** `'read'` | `'operate'` | `'manage'` */
+  level: string;
+  /** 0 | 1 */
+  terminal: number;
+  created_at: string;
+}
+
+export interface UserInvitesTable {
+  id: string;
+  user_id: string;
+  /** SHA-256 of the link token. The token itself is never stored. */
+  token_hash: string;
+  /** `'invite'` | `'reset'` */
+  kind: string;
+  expires_at: string;
+  used_at: string | null;
+  created_by: string | null;
+  created_at: string;
+}
+
+export interface AuditLogTable {
+  id: string;
+  at: string;
+  /** Null when the panel acted by itself (scheduler, webhook, poll). */
+  user_id: string | null;
+  category: string;
+  action: string;
+  scope: string | null;
+  scope_id: string | null;
+  /** Names and keys only, never secret values. */
+  detail: string | null;
+  ip: string | null;
 }
 
 export interface RateLimitsTable {
@@ -493,6 +558,11 @@ export interface RateLimitsTable {
 export interface Database {
   settings: SettingsTable;
   sessions: SessionsTable;
+  users: UsersTable;
+  user_permissions: UserPermissionsTable;
+  user_grants: UserGrantsTable;
+  user_invites: UserInvitesTable;
+  audit_log: AuditLogTable;
   rate_limits: RateLimitsTable;
   projects: ProjectsTable;
   folders: FoldersTable;

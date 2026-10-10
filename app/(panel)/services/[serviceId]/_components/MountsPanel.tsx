@@ -7,6 +7,8 @@ import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { Code, FieldHint, Hint } from "@/components/ui/Hint";
 import { LogViewer, type LogLine } from "@/components/ui/LogViewer";
 import { DeleteButton } from "@/components/ui/DangerAction";
+import { CheckboxField } from "@/components/ui/CheckboxField";
+import { FormError } from "@/components/ui/FormError";
 import {
   CONTAINER_PATH_RULE,
   HOST_PATH_RULE,
@@ -233,24 +235,16 @@ export function MountsPanel({
                   </div>
 
                   <div className="flex flex-wrap items-center gap-4">
-                    <label className="flex cursor-pointer items-center gap-2 text-xs">
-                      <input
-                        type="checkbox"
-                        checked={row.enabled}
-                        onChange={(e) => patch(row.id, { enabled: e.target.checked })}
-                        className="accent-accent size-4"
-                      />
-                      Attivo
-                    </label>
-                    <label className="flex cursor-pointer items-center gap-2 text-xs">
-                      <input
-                        type="checkbox"
-                        checked={row.readOnly}
-                        onChange={(e) => patch(row.id, { readOnly: e.target.checked })}
-                        className="accent-accent size-4"
-                      />
-                      Sola lettura
-                    </label>
+                    <CheckboxField
+                      label="Attivo"
+                      isSelected={row.enabled}
+                      onChange={(checked) => patch(row.id, { enabled: checked })}
+                    />
+                    <CheckboxField
+                      label="Sola lettura"
+                      isSelected={row.readOnly}
+                      onChange={(checked) => patch(row.id, { readOnly: checked })}
+                    />
                     <div className="ml-auto">
                       <DeleteButton
                         label="Rimuovi questa cartella"
@@ -270,21 +264,16 @@ export function MountsPanel({
                       {notEmpty.entries.length > 5 ? "…" : ""}. Se è già il contenuto giusto — una
                       installazione precedente, un disco che stai riadottando — spunta la casella: il
                       pannello la monta com&apos;è, senza copiarci sopra niente.
-                      <label className="mt-2 flex cursor-pointer items-start gap-2.5">
-                        <input
-                          type="checkbox"
-                          checked={adopt.includes(row.id)}
-                          onChange={(e) =>
-                            setAdopt((prev) =>
-                              e.target.checked
-                                ? [...prev, row.id]
-                                : prev.filter((id) => id !== row.id)
-                            )
-                          }
-                          className="accent-warning mt-0.5 size-4"
-                        />
-                        <span className="text-xs leading-relaxed">Usa i dati che ci sono già</span>
-                      </label>
+                      <CheckboxField
+                        className="mt-2"
+                        label="Usa i dati che ci sono già"
+                        isSelected={adopt.includes(row.id)}
+                        onChange={(checked) =>
+                          setAdopt((prev) =>
+                            checked ? [...prev, row.id] : prev.filter((id) => id !== row.id)
+                          )
+                        }
+                      />
                     </Hint>
                   )}
                 </div>
@@ -295,31 +284,20 @@ export function MountsPanel({
           {releasing && (
             <Hint tone="warn" title="Stai togliendo il bind sui dati del servizio">
               {releasing.message}
-              <label className="mt-2 flex cursor-pointer items-start gap-2.5">
-                <input
-                  type="checkbox"
-                  checked={release.includes(releasing.id)}
-                  onChange={(e) =>
-                    setRelease((prev) =>
-                      e.target.checked
-                        ? [...prev, releasing.id]
-                        : prev.filter((id) => id !== releasing.id)
-                    )
-                  }
-                  className="accent-danger mt-0.5 size-4"
-                />
-                <span className="text-xs leading-relaxed">
-                  Ho capito: rimetti il servizio sul volume di prima
-                </span>
-              </label>
+              <CheckboxField
+                className="mt-2"
+                label="Ho capito: rimetti il servizio sul volume di prima"
+                isSelected={release.includes(releasing.id)}
+                onChange={(checked) =>
+                  setRelease((prev) =>
+                    checked ? [...prev, releasing.id] : prev.filter((id) => id !== releasing.id)
+                  )
+                }
+              />
             </Hint>
           )}
 
-          {error && !notEmpty && (
-            <p className="text-danger text-xs" role="alert">
-              {error}
-            </p>
-          )}
+          {!notEmpty && <FormError>{error}</FormError>}
 
           <div className="flex flex-wrap gap-2">
             <Button

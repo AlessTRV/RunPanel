@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { requireAuth } from "@/lib/auth-guard";
+import { isDenied, requirePermission } from "@/lib/auth-guard";
+import { withAudit } from "@/lib/audit";
 import { NOTIFY_EVENTS } from "@/lib/notify-events";
 import { isConfigured, readConfig, sendTest, writeConfig } from "@/services/notify";
 import { discoverChats, getMe } from "@/services/notify/telegram";
@@ -47,8 +48,8 @@ const putSchema = z
 const postSchema = z.object({ action: z.enum(["test", "chats"]) }).strict();
 
 export async function GET() {
-  const denied = await requireAuth();
-  if (denied) return denied;
+  const denied = await requirePermission("notifications");
+  if (isDenied(denied)) return denied;
 
   const config = await readConfig();
 
@@ -64,49 +65,51 @@ export async function GET() {
 }
 
 export async function PUT(request: NextRequest) {
-  const denied = await requireAuth();
-  if (denied) return denied;
+  return withAudit(request, { category: "system", action: "notifications.update", scope: "permission", scopeId: "notifications" }, async () => {
+    const denied = await requirePermission("notifications");
+    if (isDenied(denied)) return denied;
 
-  let raw: unknown;
-  try {
-    raw = await request.json();
-  } catch {
-    return NextResponse.json({ error: "Richiesta non valida" }, { status: 400 });
-  }
-
-  const parsed = putSchema.safeParse(raw);
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: parsed.error.issues[0]?.message ?? "Dati non validi", details: parsed.error.issues },
-      { status: 400 }
-    );
-  }
-
-  const { token, chatId, events } = parsed.data;
-
-  // Checked before it is stored, so a typo is refused while the operator is
-  // still looking at the field rather than discovered by a silent notification
-  // three days later.
-  if (token) {
-    const identity = await getMe(token);
-    if (!identity.ok) {
-      return NextResponse.json({ error: identity.error ?? "Token rifiutato da Telegram" }, { status: 400 });
+    let raw: unknown;
+    try {
+      raw = await request.json();
+    } catch {
+      return NextResponse.json({ error: "Richiesta non valida" }, { status: 400 });
     }
-  }
 
-  await writeConfig({
-    ...(token !== undefined ? { token: token || null } : {}),
-    ...(chatId !== undefined ? { chatId: chatId || null } : {}),
-    ...(events !== undefined ? { events } : {}),
+    const parsed = putSchema.safeParse(raw);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: parsed.error.issues[0]?.message ?? "Dati non validi", details: parsed.error.issues },
+        { status: 400 }
+      );
+    }
+
+    const { token, chatId, events } = parsed.data;
+
+    // Checked before it is stored, so a typo is refused while the operator is
+    // still looking at the field rather than discovered by a silent notification
+    // three days later.
+    if (token) {
+      const identity = await getMe(token);
+      if (!identity.ok) {
+        return NextResponse.json({ error: identity.error ?? "Token rifiutato da Telegram" }, { status: 400 });
+      }
+    }
+
+    await writeConfig({
+      ...(token !== undefined ? { token: token || null } : {}),
+      ...(chatId !== undefined ? { chatId: chatId || null } : {}),
+      ...(events !== undefined ? { events } : {}),
+    });
+
+    const config = await readConfig();
+    return NextResponse.json({ success: true, configured: isConfigured(config) });
   });
-
-  const config = await readConfig();
-  return NextResponse.json({ success: true, configured: isConfigured(config) });
 }
 
 export async function POST(request: NextRequest) {
-  const denied = await requireAuth();
-  if (denied) return denied;
+  const denied = await requirePermission("notifications");
+  if (isDenied(denied)) return denied;
 
   let raw: unknown;
   try {

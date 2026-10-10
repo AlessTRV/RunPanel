@@ -1,6 +1,6 @@
 import os from "os";
 import { NextRequest, NextResponse } from "next/server";
-import { requireAuth } from "@/lib/auth-guard";
+import { isDenied, requireUser } from "@/lib/auth-guard";
 import { networksFrom, normalizeAddress } from "@/lib/ip-access";
 import { trustedClientIp } from "@/lib/client-ip";
 
@@ -18,8 +18,8 @@ import { trustedClientIp } from "@/lib/client-ip";
  * presented as a fact, on the one screen where believing it locks you out.
  */
 export async function GET(request: NextRequest) {
-  const denied = await requireAuth();
-  if (denied) return denied;
+  const denied = await requireUser();
+  if (isDenied(denied)) return denied;
 
   const networks = networksFrom(os.networkInterfaces());
   const client = trustedClientIp(request);

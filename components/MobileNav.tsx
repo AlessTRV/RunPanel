@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { Icon } from "@iconify/react";
 import { cn } from "@/lib/utils";
 import { NAV_ITEMS, isActiveNav } from "@/lib/nav";
+import { useAllowedNav } from "@/lib/hooks/useMe";
 
 /**
  * Navigation for a phone: four destinations under the thumb, the rest behind a
@@ -28,31 +29,63 @@ const PRIMARY = ["/home", "/projects", "/services", "/monitor"];
 export function MobileNav() {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const drawerRef = useRef<HTMLElement>(null);
 
   // Escape closes it, and the page behind must not scroll while it is open.
+  //
+  // Focus moves into the drawer on open, Tab cycles inside it, and on close it
+  // goes back to the button that opened it. Without that a keyboard or a screen
+  // reader stayed on the page underneath — the drawer was open on screen and
+  // unreachable from the keys.
   useEffect(() => {
     if (!open) return;
+    const drawer = drawerRef.current;
+    const focusables = () =>
+      Array.from(drawer?.querySelectorAll<HTMLElement>("a[href], button:not([disabled])") ?? []);
+    focusables()[0]?.focus();
+
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
+      if (e.key === "Escape") {
+        setOpen(false);
+        return;
+      }
+      if (e.key !== "Tab") return;
+      const items = focusables();
+      if (items.length === 0) return;
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
     };
     window.addEventListener("keydown", onKey);
     document.body.style.overflow = "hidden";
+    const trigger = triggerRef.current;
     return () => {
       window.removeEventListener("keydown", onKey);
       document.body.style.overflow = "";
+      trigger?.focus();
     };
   }, [open]);
 
-  const primary = PRIMARY.map((href) => NAV_ITEMS.find((item) => item.href === href)!).filter(
-    Boolean
+  const allowed = useAllowedNav();
+  const items = NAV_ITEMS.filter(allowed);
+  const primary = PRIMARY.map((href) => items.find((item) => item.href === href)).filter(
+    (item): item is (typeof items)[number] => Boolean(item)
   );
-  const rest = NAV_ITEMS.filter((item) => !PRIMARY.includes(item.href));
+  const rest = items.filter((item) => !PRIMARY.includes(item.href));
 
   return (
     <>
       {/* Opens the rest of the navigation, top right — reachable, and out of the
           way of the back gesture on the left edge. */}
       <button
+        ref={triggerRef}
         type="button"
         className="border-border bg-surface text-foreground fixed top-3 right-3 z-50 flex size-9 items-center justify-center rounded-[var(--radius)] border md:hidden"
         onClick={() => setOpen(true)}
@@ -72,7 +105,12 @@ export function MobileNav() {
       )}
 
       <aside
+        ref={drawerRef}
         id="mobile-drawer"
+        role="dialog"
+        aria-modal={open}
+        // Out of the tab order and the accessibility tree while it is off screen.
+        inert={!open}
         aria-label="Tutte le sezioni"
         aria-hidden={!open}
         className={cn(
