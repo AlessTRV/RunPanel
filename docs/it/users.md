@@ -1,6 +1,6 @@
 # Utenti e permessi
 
-[← Torna al README](../../README.md)
+[← Torna al README](../../README.it.md)
 
 Il pannello può avere più account. Il primo è il **proprietario**: lo crea il setup iniziale, ha sempre tutti i permessi e nessuno può limitarlo, disattivarlo o eliminarlo. Ogni altro account nasce senza accessi e riceve solo quello che gli dai.
 

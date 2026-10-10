@@ -1,6 +1,6 @@
 # Users and permissions
 
-[← Back to the README](../../README.en.md)
+[← Back to the README](../../README.md)
 
 The panel can have several accounts. The first one is the **owner**: the initial setup creates it, it always holds every permission, and nobody can restrict, disable or delete it. Every other account starts with no access and gets only what you grant.
 

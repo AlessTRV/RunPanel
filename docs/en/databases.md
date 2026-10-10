@@ -1,4 +1,4 @@
-[← RunPanel](../../README.en.md) · [Italiano](../it/databases.md) · **English**
+[← RunPanel](../../README.md) · [Italiano](../it/databases.md) · **English**
 
 ---
 
