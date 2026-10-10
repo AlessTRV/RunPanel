@@ -3,10 +3,12 @@
 import { useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
+import Image from "next/image";
 import { Icon } from "@iconify/react";
 import { cn } from "@/lib/utils";
 import { NAV_ITEMS, isActiveNav } from "@/lib/nav";
 import { useAllowedNav } from "@/lib/hooks/useMe";
+import logo from "./logo.svg";
 
 /**
  * Navigation for a phone: four destinations under the thumb, the rest behind a
@@ -120,6 +122,7 @@ export function MobileNav() {
         )}
       >
         <div className="border-border flex h-14 items-center gap-2.5 border-b px-4">
+          <Image src={logo} alt="" aria-hidden width={24} height={24} className="size-6" />
           <span className="text-foreground text-sm font-semibold tracking-tight">RunPanel</span>
           <button
             type="button"

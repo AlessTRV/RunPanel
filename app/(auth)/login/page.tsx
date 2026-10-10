@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { TextField, Label, Input, Button, Spinner } from "@heroui/react";
 import Image from "next/image";
-import logo from "@/components/logo.png";
+import logo from "@/components/logo.svg";
 import { Panel } from "@/components/ui/Panel";
 import { Code, FieldHint } from "@/components/ui/Hint";
 
