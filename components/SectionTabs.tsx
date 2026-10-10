@@ -26,7 +26,13 @@ export function SectionTabs({ section }: { section: NavSectionId }) {
   if (visible.length < 2) return null;
 
   return (
-    <nav aria-label={label} className="border-border mb-6 flex gap-1 overflow-x-auto border-b">
+    // The baseline is an inset shadow, not a border: with overflow-x-auto the
+    // strip also scrolls vertically, so a tab pulled 1px over a border with
+    // -mb-px drew a stray vertical scrollbar. The tab's own border covers it.
+    <nav
+      aria-label={label}
+      className="mb-6 flex gap-1 overflow-x-auto overflow-y-hidden shadow-[inset_0_-1px_0_var(--color-border)]"
+    >
       {visible.map((tab) => {
         const active = isActiveNav(pathname, tab);
         return (
@@ -35,7 +41,7 @@ export function SectionTabs({ section }: { section: NavSectionId }) {
             href={tab.href}
             aria-current={active ? "page" : undefined}
             className={cn(
-              "-mb-px flex items-center gap-1.5 border-b-2 px-3 py-2.5 text-sm whitespace-nowrap transition-colors",
+              "flex items-center gap-1.5 border-b-2 px-3 py-2.5 text-sm whitespace-nowrap transition-colors",
               active
                 ? "border-accent text-foreground font-medium"
                 : "text-muted hover:text-foreground border-transparent"
