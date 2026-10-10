@@ -8,11 +8,21 @@
 
 ```
 app/
-  (auth)/login          setup iniziale e accesso
-  (panel)/              panoramica, progetti, servizi, monitor, storage, backup, impostazioni
+  (auth)/login          setup iniziale e accesso; invite/ e setup-email/
+  (panel)/              panoramica, progetti, servizi, backup, monitor
+    (system)/           Sistema a tab: diagnostics, autostart, updates, storage
+    (access)/           Accessi a tab: users, audit
+    (settings)/         Impostazioni a tab: account, settings (Pannello), github
   api/                  handler REST; /projects/:id/stream è il canale SSE
 lib/
   db/                   schema Kysely, migrazioni, entrambi i dialetti
+  authz.ts              chi può fare cosa: livelli, grant, permessi, nessun import
+  auth-guard.ts         require* con cui comincia ogni handler (401, 403, 404)
+  principal.ts          carica account e riferimenti per authz.ts
+  users.ts              account, inviti, grant; emette authzEvents
+  stream-guard.ts       ricontrollo dei permessi per SSE e shell aperte
+  host-guard.ts         cosa richiede il permesso "Accesso all'host"
+  audit.ts              registro attività (regole pure in audit-filter.ts)
   deploy-contract.ts    il contratto, il suo parser e i controlli preliminari
   deploy-phases.ts      gli otto punti a cui si aggancia un comando una tantum
   ip-access.ts          confronto CIDR, e le reti della macchina
@@ -35,7 +45,10 @@ tests/                  suite end-to-end, un server isolato ciascuna
 data/                   stato a runtime (in gitignore)
 ```
 
-Tutte le route `/api` richiedono una sessione, tranne l'accesso e i webhook. Le
+Tutte le route `/api` richiedono una sessione, tranne l'accesso, gli inviti e i
+webhook. Ogni handler comincia con un guard di `lib/auth-guard.ts`, e
+`authz-coverage-unit` fallisce se uno ne è privo: una route deve dire cosa
+protegge. Il modello dei permessi è in [Utenti e permessi](users.md). Le
 uniche superfici pensate per l'esterno sono il webhook GitHub per progetto e i
 canali SSE, che comunque richiedono la sessione.
 

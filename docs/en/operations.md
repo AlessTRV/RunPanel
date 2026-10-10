@@ -44,7 +44,7 @@ page. Pick a ready interval (every night at 04:00, every Sunday, every 6 hours,
 every hour) or write a five-field cron expression, with a preview of the next
 three restarts computed by the same parser that later runs them.
 
-The time is in the **panel's time zone**, set under **Impostazioni** and shared
+The time is in the **panel's time zone**, set under **Settings → Panel** and shared
 with backups. Until you save one the panel uses UTC, and the page says so rather
 than showing the browser's zone as if it were already set. An unknown zone is
 refused on save. Changing it recomputes the pending restarts at once, so a
@@ -71,7 +71,7 @@ for skips.
 
 ## Freeing space
 
-The **Storage** page shows how much Docker holds and what can be reclaimed.
+The **System → Docker cleanup** page shows how much Docker holds and what can be reclaimed.
 **Pulisci ora** removes only things that can be recreated, never volumes or data:
 
 - old versions of the projects' images, beyond the ones you choose to keep for

@@ -45,7 +45,7 @@ l'anteprima dei prossimi tre riavvii calcolata dallo stesso parser che poi li
 esegue.
 
 L'ora è quella del **fuso orario del pannello**, che si imposta in
-**Impostazioni** ed è lo stesso dei backup. Finché non lo salvi il pannello usa
+**Impostazioni → Pannello** ed è lo stesso dei backup. Finché non lo salvi il pannello usa
 UTC, e la pagina lo dice invece di mostrare il fuso del browser come se fosse già
 impostato. Un fuso sconosciuto viene rifiutato al salvataggio. Cambiarlo
 ricalcola subito i riavvii in attesa, così una pianificazione notturna non scatta
@@ -72,7 +72,7 @@ fallito, non per i salti.
 
 ## Liberare spazio
 
-La pagina **Storage** mostra quanto occupa Docker e cosa si può recuperare.
+La pagina **Sistema → Pulizia Docker** mostra quanto occupa Docker e cosa si può recuperare.
 **Pulisci ora** toglie soltanto cose che si possono ricreare, mai volumi o dati:
 
 - le versioni vecchie delle immagini dei progetti, oltre quelle che scegli di

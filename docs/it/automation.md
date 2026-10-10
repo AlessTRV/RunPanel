@@ -22,7 +22,7 @@ ultima consegna rifiutata. Il pulsante **Invia ping** chiede a GitHub una
 consegna vera, che passa da DNS, firewall, TLS e firma.
 
 Perché il pannello sappia quale indirizzo scrivere su GitHub, imposta
-**Indirizzo pubblico** in Account → Preferenze. Lasciato vuoto viene dedotto
+**Indirizzo pubblico** in Impostazioni → Pannello. Lasciato vuoto viene dedotto
 dalla richiesta, il che vale finché apri il pannello dallo stesso indirizzo da
 cui lo raggiunge GitHub.
 
@@ -49,7 +49,7 @@ impostazioni del progetto, *Deploy automatico → Come parte il deploy*:
   quando il commit cambia. Una richiesta in uscita, nessuna in entrata: funziona
   ovunque ci sia una connessione a internet.
 
-L'intervallo è in Account → Preferenze, da 30 secondi a 30 minuti (predefinito 5
+L'intervallo è in Impostazioni → Pannello, da 30 secondi a 30 minuti (predefinito 5
 minuti). Un branch fermo risponde `304 Not Modified` grazie all'ETag, e GitHub
 non conta le 304 nel limite orario di richieste: anche 30 secondi costano
 praticamente nulla. Il ritardo massimo di un deploy è un intervallo.

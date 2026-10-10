@@ -72,9 +72,9 @@ npm run build
 npm start
 ```
 
-Apri `http://localhost:3000`. Alla prima visita ti viene chiesto di impostare una
-password di amministratore, insieme al **token di setup** che il pannello scrive
-nel proprio log all'avvio:
+Apri `http://localhost:3000`. Alla prima visita crei l'account **proprietario**
+con email e password, insieme al **token di setup** che il pannello scrive nel
+proprio log all'avvio:
 
 ```
 [RunPanel] Not set up yet. Enter this token on the setup screen:
@@ -119,24 +119,25 @@ reverse proxy stanno in [Configurazione](docs/it/configuration.md).
 | [Database e servizi](docs/it/databases.md) | Motori gestiti, console, cartelle condivise con l'host, collegamento a un progetto |
 | [Accesso di rete](docs/it/network.md) | Limitare una porta agli indirizzi che indichi |
 | [Backup e ripristino](docs/it/backups.md) | Cosa si salva, come viene preso, dove finisce, come si rimette a posto |
+| [Utenti e permessi](docs/it/users.md) | Account, inviti, livelli su progetti e servizi, permessi del pannello, registro attività |
 | [Operatività](docs/it/operations.md) | Avvio automatico, aggiornamento del pannello, notifiche su Telegram |
 | [Architettura e sviluppo](docs/it/architecture.md) | Mappa del codice, suite di test, come lavorarci |
 
 ## Il pannello, giorno per giorno
 
-| Pagina | A cosa serve |
+Il menu ha sette voci; Sistema, Accessi e Impostazioni raggruppano più pagine
+in schede, ognuna con il suo indirizzo.
+
+| Voce | A cosa serve |
 |---|---|
 | **Panoramica** | stato di tutto, in una schermata: cartelle per raggruppare progetti e servizi, più i servizi senza progetto |
 | **Progetti** | deploy, log in diretta, storico, variabili, file, terminale, impostazioni |
 | **Servizi** | database gestiti, i loro database interni, collegamenti ai progetti |
-| **Monitor** | CPU, memoria, carico, uptime dell'host e dei container |
-| **Storage** | cosa occupa il disco: immagini, volumi, archivi, repository |
-| **Backup** | policy, esecuzioni, archivi, ripristini |
-| **Autostart** | cosa torna su dopo un riavvio |
-| **Aggiornamenti** | la versione del pannello, i commit nuovi, il pulsante che li applica |
-| **Diagnostica** | cosa manca a questa installazione e cosa premere |
-| **GitHub** | token, repository, branch |
-| **Account** | password, sessioni per dispositivo, notifiche Telegram, preferenze |
+| **Backup** | policy, destinazioni, esecuzioni, archivi, ripristini |
+| **Monitor** | processi e container con CPU, memoria e uptime, più il riepilogo dell'host |
+| **Sistema** | *Diagnostica* (cosa manca e cosa premere), *Avvio automatico* (cosa torna su dopo un riavvio), *Aggiornamenti* (versione, commit nuovi, il pulsante che li applica), *Pulizia Docker* (cosa occupa il disco e cosa si recupera) |
+| **Accessi** | *Utenti* (inviti con link a scadenza, permessi per account) e *Registro attività* (chi ha fatto cosa) |
+| **Impostazioni** | *Account* (email, password, sessioni, tema chiaro o scuro), *Pannello* (fuso, indirizzo pubblico, polling, colore d'accento, notifiche Telegram, registry), *GitHub* (token, repository, branch) |
 
 Dettagli che tornano utili:
 
@@ -147,7 +148,8 @@ Dettagli che tornano utili:
 - **Log** — in diretta via SSE mentre il deploy gira, e su file dopo.
 - **Sessioni** — una per dispositivo, revocabili singolarmente dall'account.
 - **Preferenze** — intervallo di aggiornamento (2, 5, 10 secondi), fuso orario,
-  cinque temi di accento.
+  cinque colori d'accento (blu predefinito).
+- **Tema** — chiaro, scuro o quello del sistema, scelto per browser.
 - **Palette comandi** e navigazione da tastiera; su mobile una barra in basso e
   il menu che entra da destra.
 
@@ -159,6 +161,9 @@ Dettagli che tornano utili:
   ancora reclamato non può esserlo da chi arriva per primo
 - Il limite sui tentativi di accesso sopravvive a un riavvio, conta in modo
   atomico, ed è legato a un indirizzo solo dove un proxy configurato lo garantisce
+- Più account con permessi per progetto, servizio, cartella e risorsa, controllati
+  dal server su ogni route e su ogni stream; un test fallisce se una route nuova
+  non dichiara cosa protegge ([Utenti e permessi](docs/it/users.md))
 - Ogni route `/api` viene rifiutata senza sessione da `proxy.ts` prima ancora di
   essere raggiunta, in aggiunta al controllo di ciascun handler
 - Variabili d'ambiente dei progetti, credenziali dei servizi e dei registri
@@ -182,8 +187,6 @@ Per il TLS e i reverse proxy davanti al pannello, vedi
 
 - I comandi una tantum girano **almeno una volta**, non esattamente una volta:
   un riavvio del pannello a metà esecuzione rimette il comando in coda.
-- Il **tema chiaro** non è incluso; il livello dei token è strutturato per
-  accoglierlo.
 - Le restrizioni sulle porte sono applicate dal processo del pannello, quindi non
   sopravvivono al suo arresto — la porta semplicemente si chiude. Un insieme di
   regole che deve valere anche a pannello spento richiede in più un firewall

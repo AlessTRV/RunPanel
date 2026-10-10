@@ -8,11 +8,21 @@
 
 ```
 app/
-  (auth)/login          first-run setup and sign-in
-  (panel)/              overview, projects, services, monitor, storage, backups, settings
+  (auth)/login          first-run setup and sign-in; invite/ and setup-email/
+  (panel)/              overview, projects, services, backups, monitor
+    (system)/           System tabs: diagnostics, autostart, updates, storage
+    (access)/           Access tabs: users, audit
+    (settings)/         Settings tabs: account, settings (panel-wide), github
   api/                  REST handlers; /projects/:id/stream is the SSE channel
 lib/
   db/                   Kysely schema, migrations, both dialects
+  authz.ts              who may do what: levels, grants, permissions, no imports
+  auth-guard.ts         the require* every handler starts with (401, 403, 404)
+  principal.ts          loads accounts and references for authz.ts
+  users.ts              accounts, invitations, grants; emits authzEvents
+  stream-guard.ts       rechecks access for open SSE streams and shells
+  host-guard.ts         what needs the "Host access" permission
+  audit.ts              activity log (pure rules in audit-filter.ts)
   deploy-contract.ts    the contract, its parser and preflight checks
   deploy-phases.ts      the eight points a one-time command can pin to
   ip-access.ts          CIDR matching, and the host's own networks
@@ -35,7 +45,10 @@ tests/                  end-to-end suites, one isolated server each
 data/                   runtime state (gitignored)
 ```
 
-Every `/api` route requires a session, except sign-in and the webhooks. The only
+Every `/api` route requires a session, except sign-in, invitations and the
+webhooks. Each handler starts with a guard from `lib/auth-guard.ts`, and
+`authz-coverage-unit` fails when one has none: a route has to say what it
+protects. The permission model is in [Users and permissions](users.md). The only
 surfaces meant for the outside are the per-project GitHub webhook and the SSE
 channels, which still require the session.
 

@@ -23,7 +23,7 @@ delivery. **Send ping** asks GitHub for a real delivery, across DNS, the
 firewall, TLS and the signature.
 
 So the panel knows which address to write into GitHub, set **Public address**
-under Account → Preferences. Left empty it is derived from the request, which
+under Settings → Panel. Left empty it is derived from the request, which
 holds as long as you open the panel on the same address GitHub reaches it by.
 
 > **Panel only reachable over a VPN or Tailscale?** Then webhooks never arrive:
@@ -48,7 +48,7 @@ So the panel can **ask** instead of being told. In the project's settings, under
   changes. One outbound request, none inbound: it works anywhere with an
   internet connection.
 
-The interval lives under Account → Preferences, from 30 seconds to 30 minutes
+The interval lives under Settings → Panel, from 30 seconds to 30 minutes
 (5 minutes by default). An unchanged branch answers `304 Not Modified` thanks to
 the ETag, and GitHub does not count 304s against the hourly rate limit — even 30
 seconds costs practically nothing. A deploy is delayed by at most one interval.

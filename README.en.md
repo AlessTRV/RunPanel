@@ -72,8 +72,9 @@ npm run build
 npm start
 ```
 
-Open `http://localhost:3000`. The first visit asks you to set an admin password,
-along with the **setup token** the panel prints to its own log at startup:
+Open `http://localhost:3000`. The first visit creates the **owner** account with
+an email and a password, along with the **setup token** the panel prints to its
+own log at startup:
 
 ```
 [RunPanel] Not set up yet. Enter this token on the setup screen:
@@ -118,24 +119,26 @@ reverse proxy needs are in [Configuration](docs/en/configuration.md).
 | [Databases and services](docs/en/databases.md) | Managed engines, console, folders shared with the host, linking one to a project |
 | [Network access](docs/en/network.md) | Restricting a port to the addresses you name |
 | [Backups and restore](docs/en/backups.md) | What is saved, how it is taken, where it goes, how it comes back |
+| [Users and permissions](docs/en/users.md) | Accounts, invitations, levels on projects and services, panel permissions, activity log |
 | [Operations](docs/en/operations.md) | Starting at boot, updating the panel, Telegram notifications |
 | [Architecture and development](docs/en/architecture.md) | Map of the code, the test suite, working on it |
 
 ## The panel, day to day
 
-| Page | What it is for |
+The menu has seven entries; System, Access and Settings group several pages as
+tabs, each with its own address. The interface is in Italian; the names below
+are translated.
+
+| Entry | What it is for |
 |---|---|
 | **Overview** | the state of everything, on one screen: folders to group projects and services, plus the services that belong to no project |
 | **Projects** | deploys, live logs, history, variables, files, terminal, settings |
 | **Services** | managed databases, the databases inside them, project links |
-| **Monitor** | CPU, memory, load, uptime of the host and the containers |
-| **Storage** | what is using the disk: images, volumes, archives, repositories |
-| **Backups** | policies, runs, archives, restores |
-| **Autostart** | what comes back after a reboot |
-| **Updates** | the panel's version, the commits waiting, the button that applies them |
-| **Diagnostics** | what this installation is missing and what to press |
-| **GitHub** | token, repositories, branches |
-| **Account** | password, per-device sessions, Telegram notifications, preferences |
+| **Backups** | policies, destinations, runs, archives, restores |
+| **Monitor** | processes and containers with CPU, memory and uptime, plus a summary of the host |
+| **System** | *Diagnostics* (what is missing and what to press), *Autostart* (what comes back after a reboot), *Updates* (version, waiting commits, the button that applies them), *Docker cleanup* (what is using the disk and what can be reclaimed) |
+| **Access** | *Users* (invitations with expiring links, per-account permissions) and *Activity log* (who did what) |
+| **Settings** | *Account* (email, password, sessions, light or dark theme), *Panel* (timezone, public address, polling, accent colour, Telegram notifications, registries), *GitHub* (token, repositories, branches) |
 
 Details worth knowing:
 
@@ -146,7 +149,8 @@ Details worth knowing:
 - **Logs** — live over SSE while the deploy runs, and on file afterwards.
 - **Sessions** — one per device, revocable individually from the account page.
 - **Preferences** — refresh interval (2, 5, 10 seconds), timezone, five accent
-  themes.
+  colours (blue by default).
+- **Theme** — light, dark or the system's, chosen per browser.
 - **Command palette** and keyboard navigation; on mobile a bottom bar and a
   drawer that comes in from the right.
 
@@ -158,6 +162,9 @@ Details worth knowing:
   cannot be claimed by whoever arrives first
 - Login rate limiting survives a restart, counts atomically, and is keyed on an
   address only where a configured proxy vouches for it
+- Several accounts with permissions per project, service, folder and resource,
+  checked by the server on every route and every stream; a test fails when a new
+  route does not declare what it protects ([Users and permissions](docs/en/users.md))
 - Every `/api` route is refused without a session by `proxy.ts` before it is
   reached, in addition to each handler's own check
 - Project env vars, service credentials and registry credentials encrypted at
@@ -180,7 +187,6 @@ For TLS and reverse proxies in front of the panel, see
 
 - One-time commands run **at least once**, not exactly once: a panel restart
   mid-execution puts the command back in the queue.
-- **Light theme** is not shipped; the token layer is structured for it.
 - Port restrictions are enforced by the panel process, so they do not survive it
   being stopped — the port simply closes. A rule set that has to hold with the
   panel down needs a host firewall as well.
