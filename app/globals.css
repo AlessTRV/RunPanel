@@ -44,35 +44,38 @@
 }
 
 /* ── Base palette ────────────────────────────────────────────────────────────
- * Dark only for now. A light theme is a second block of the same variables on
- * `[data-theme="light"]` and nothing else — which is why no colour below is
- * hardcoded outside this file, and why `color-scheme` is set here rather than
- * on :root globally.
+ * Dark is the default; the light theme is the `[data-theme="light"]` block
+ * further down, the same variables and nothing else. No colour is hardcoded
+ * outside this file, which is what makes that block enough.
+ *
+ * The neutrals lean slightly cool (hue 265) so they sit under the blue accent
+ * instead of beside it, and the page is a step darker than it was so cards
+ * separate from it without needing a shadow.
  */
 :root,
 .dark,
 [data-theme="dark"] {
   color-scheme: dark;
 
-  --background: oklch(14.5% 0.004 286);
-  --foreground: oklch(98.5% 0 0);
+  --background: oklch(13.5% 0.006 265);
+  --foreground: oklch(97.5% 0.003 265);
 
   /* Surfaces climb in three steps; anything flatter reads as muddy at these
      low lightness values, anything steeper starts to look striped. */
-  --surface: oklch(18.5% 0.004 286);
+  --surface: oklch(18% 0.007 265);
   --surface-foreground: var(--foreground);
-  --surface-secondary: oklch(21.5% 0.004 286);
+  --surface-secondary: oklch(21% 0.008 265);
   --surface-secondary-foreground: var(--foreground);
-  --surface-tertiary: oklch(25% 0.004 286);
+  --surface-tertiary: oklch(24.5% 0.009 265);
   --surface-tertiary-foreground: var(--foreground);
 
   /* Overlays sit above surfaces, so they are one step lighter than the page
      but distinct from cards. */
-  --overlay: oklch(20% 0.004 286);
+  --overlay: oklch(19.5% 0.008 265);
   --overlay-foreground: var(--foreground);
 
-  --muted: oklch(70.8% 0.008 286);
-  --default: oklch(24% 0.004 286);
+  --muted: oklch(70.5% 0.014 265);
+  --default: oklch(23.5% 0.008 265);
   --default-foreground: var(--foreground);
 
   /* Translucent so borders read correctly over any surface step. */
@@ -82,7 +85,7 @@
 
   --field-background: oklch(100% 0 0 / 4%);
   --field-foreground: var(--foreground);
-  --field-placeholder: oklch(55% 0.008 286);
+  --field-placeholder: oklch(55% 0.012 265);
   --field-border: var(--border);
   --field-border-width: 1px;
 
@@ -91,9 +94,9 @@
   /* Status colours never change with the accent preset: a theme must not be
      able to make "running" and "deploying" hard to tell apart. */
   --success: oklch(72% 0.17 155);
-  --success-foreground: oklch(14.5% 0.004 286);
+  --success-foreground: oklch(13.5% 0.006 265);
   --warning: oklch(80% 0.15 78);
-  --warning-foreground: oklch(14.5% 0.004 286);
+  --warning-foreground: oklch(13.5% 0.006 265);
   --danger: oklch(63% 0.2 25);
   --danger-foreground: oklch(98.5% 0 0);
 
@@ -149,17 +152,17 @@
  * group changes; structure, surfaces and status colours are identical in all of
  * them, so no preset can break legibility.
  *
- * `mono` is the default: the primary action is near-white on near-black and
- * colour appears only where it carries meaning.
+ * `blue` is the default, taken from the logo. `mono` — near-white primary
+ * actions, colour only where it carries meaning — is still one click away.
  */
 :root,
-[data-accent="mono"] {
-  --accent: oklch(97% 0 0);
-  --accent-foreground: oklch(14.5% 0.004 286);
+[data-accent="blue"] {
+  --accent: oklch(66% 0.15 250);
+  --accent-foreground: oklch(13.5% 0.006 265);
 }
 
-[data-accent="blue"] {
-  --accent: oklch(64% 0.14 245);
+[data-accent="mono"] {
+  --accent: oklch(97% 0 0);
   --accent-foreground: oklch(14.5% 0.004 286);
 }
 
@@ -183,6 +186,82 @@
 [data-theme="dark"] {
   --focus: var(--accent);
   --link: var(--accent);
+}
+
+/* ── Light theme ─────────────────────────────────────────────────────────────
+ * Same variables, on `data-theme="light"` — set from the Chiaro/Scuro/Sistema
+ * choice in Impostazioni (lib/theme-mode.ts). Declared after the dark block and
+ * at the same specificity as `:root`, so it wins whenever the attribute is on.
+ *
+ * Status colours are darker here: the dark-theme values are tuned for light text
+ * on a dark page and fall under 3:1 as text on white.
+ */
+[data-theme="light"] {
+  color-scheme: light;
+
+  --background: oklch(98.2% 0.003 265);
+  --foreground: oklch(21% 0.012 265);
+
+  --surface: oklch(100% 0 0);
+  --surface-secondary: oklch(97.2% 0.004 265);
+  --surface-tertiary: oklch(94.8% 0.005 265);
+  --overlay: oklch(100% 0 0);
+
+  --muted: oklch(49% 0.016 265);
+  --default: oklch(95.2% 0.005 265);
+
+  --border: oklch(25% 0.02 265 / 11%);
+  --separator: oklch(25% 0.02 265 / 7%);
+  --scrollbar: oklch(25% 0.02 265 / 18%);
+
+  --field-background: oklch(100% 0 0);
+  --field-placeholder: oklch(62% 0.012 265);
+  --field-border: oklch(25% 0.02 265 / 15%);
+
+  --backdrop: oklch(20% 0.02 265 / 35%);
+
+  --success: oklch(56% 0.15 155);
+  --success-foreground: oklch(99% 0 0);
+  --warning: oklch(60% 0.14 65);
+  --warning-foreground: oklch(99% 0 0);
+  --danger: oklch(55% 0.21 25);
+  --danger-foreground: oklch(99% 0 0);
+
+  /* A hairline of depth: on white, surface steps alone are too faint to tell a
+     card from the page. */
+  --surface-shadow: 0 1px 2px 0 oklch(25% 0.02 265 / 5%);
+  --overlay-shadow: 0 16px 48px -12px oklch(25% 0.02 265 / 22%);
+
+  --selected-bg: color-mix(in oklab, var(--accent) 9%, transparent);
+  --selected-ring: inset 0 0 0 1px color-mix(in oklab, var(--accent) 30%, transparent);
+  --nav-sheen: linear-gradient(
+    180deg,
+    color-mix(in oklab, var(--accent) 5%, transparent) 0%,
+    transparent 200px
+  );
+}
+
+/* Each accent, darkened for a white page; the foreground flips to white where
+   the accent is now dark enough to carry it. */
+[data-theme="light"][data-accent="blue"] {
+  --accent: oklch(54% 0.18 255);
+  --accent-foreground: oklch(99% 0 0);
+}
+[data-theme="light"][data-accent="mono"] {
+  --accent: oklch(22% 0.012 265);
+  --accent-foreground: oklch(99% 0 0);
+}
+[data-theme="light"][data-accent="teal"] {
+  --accent: oklch(52% 0.1 190);
+  --accent-foreground: oklch(99% 0 0);
+}
+[data-theme="light"][data-accent="amber"] {
+  --accent: oklch(62% 0.14 62);
+  --accent-foreground: oklch(18% 0.02 60);
+}
+[data-theme="light"][data-accent="violet"] {
+  --accent: oklch(52% 0.19 295);
+  --accent-foreground: oklch(99% 0 0);
 }
 
 @layer base {
@@ -219,7 +298,7 @@
     border-radius: 9999px;
   }
   *::-webkit-scrollbar-thumb:hover {
-    background: oklch(100% 0 0 / 24%);
+    background: color-mix(in oklab, var(--foreground) 24%, transparent);
   }
 
   /* One focus treatment everywhere, driven by the active accent. */

@@ -1,12 +1,19 @@
 "use client";
 
-import { createContext, useCallback, useContext, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useState } from "react";
 import { RouterProvider } from "@heroui/react";
 import { addCollection } from "@iconify/react";
 import { useRouter } from "next/navigation";
 import { Toaster } from "sonner";
 import { solarSubset } from "@/lib/icons.generated";
 import { DEFAULT_ACCENT, type AccentPreset } from "@/lib/themes";
+import {
+  DEFAULT_THEME_MODE,
+  THEME_COOKIE,
+  applyPalette,
+  systemPalette,
+  type ThemeMode,
+} from "@/lib/theme-mode";
 
 // Registered at module scope so icons are available before the first render.
 // Without this @iconify/react fetches every icon from api.iconify.design at
@@ -32,12 +39,28 @@ export function useAccent(): AccentContextValue {
   return useContext(AccentContext);
 }
 
+interface ThemeModeContextValue {
+  mode: ThemeMode;
+  setMode: (mode: ThemeMode) => void;
+}
+
+const ThemeModeContext = createContext<ThemeModeContextValue>({
+  mode: DEFAULT_THEME_MODE,
+  setMode: () => {},
+});
+
+export function useThemeMode(): ThemeModeContextValue {
+  return useContext(ThemeModeContext);
+}
+
 export function Providers({
   children,
   accent: initialAccent,
+  themeMode: initialThemeMode,
 }: {
   children: React.ReactNode;
   accent: AccentPreset;
+  themeMode: ThemeMode;
 }) {
   const router = useRouter();
   const [accent, setAccentState] = useState<AccentPreset>(initialAccent);
@@ -50,7 +73,28 @@ export function Providers({
     document.documentElement.setAttribute("data-accent", preset);
   }, []);
 
+  const [themeMode, setThemeModeState] = useState<ThemeMode>(initialThemeMode);
+
+  const setThemeMode = useCallback((mode: ThemeMode) => {
+    setThemeModeState(mode);
+    // A year, and Lax: it only picks a palette, it authorises nothing.
+    document.cookie = `${THEME_COOKIE}=${mode}; path=/; max-age=31536000; samesite=lax`;
+    document.documentElement.setAttribute("data-theme-mode", mode);
+    applyPalette(mode === "system" ? systemPalette() : mode);
+  }, []);
+
+  // Follows the operating system while it is in charge, so switching the OS to
+  // dark at sunset does not need a reload.
+  useEffect(() => {
+    if (themeMode !== "system") return;
+    const query = window.matchMedia("(prefers-color-scheme: light)");
+    const onChange = () => applyPalette(query.matches ? "light" : "dark");
+    query.addEventListener("change", onChange);
+    return () => query.removeEventListener("change", onChange);
+  }, [themeMode]);
+
   return (
+    <ThemeModeContext.Provider value={{ mode: themeMode, setMode: setThemeMode }}>
     <AccentContext.Provider value={{ accent, setAccent }}>
       <RouterProvider navigate={router.push}>
         {children}
@@ -76,5 +120,6 @@ export function Providers({
         />
       </RouterProvider>
     </AccentContext.Provider>
+    </ThemeModeContext.Provider>
   );
 }

@@ -35,7 +35,9 @@ export function Panel({
     <div
       className={cn(
         "border-border rounded-[var(--radius)] border",
-        nested ? "bg-surface-secondary" : "bg-surface",
+        // The shadow is transparent in the dark theme and a hairline in the
+        // light one, where surface steps alone barely separate card from page.
+        nested ? "bg-surface-secondary" : "bg-surface shadow-[var(--surface-shadow)]",
         PADDING[padding],
         interactive && "hover:border-separator hover:bg-surface-hover transition-colors",
         className
@@ -64,7 +66,7 @@ export function PanelHeader({
         <h2 className="text-foreground truncate text-sm font-medium">{title}</h2>
         {description && <p className="text-muted mt-0.5 text-xs">{description}</p>}
       </div>
-      {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
+      {actions && <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">{actions}</div>}
     </div>
   );
 }

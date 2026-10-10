@@ -13,16 +13,16 @@
 
 export const ACCENT_PRESETS = [
   {
-    id: "mono",
-    label: "Mono",
-    description: "Nessun accento cromatico. L'azione primaria è bianca su nero e il colore compare solo negli stati.",
-    swatch: "oklch(97% 0 0)",
-  },
-  {
     id: "blue",
     label: "Blu",
-    description: "Blu freddo desaturato. Look da infrastruttura, molto leggibile.",
-    swatch: "oklch(64% 0.14 245)",
+    description: "Il blu del logo. Predefinito.",
+    swatch: "oklch(66% 0.15 250)",
+  },
+  {
+    id: "mono",
+    label: "Mono",
+    description: "Nessun accento cromatico. L'azione primaria è bianca su nero (nera su bianco nel tema chiaro) e il colore compare solo negli stati.",
+    swatch: "oklch(97% 0 0)",
   },
   {
     id: "teal",
@@ -46,7 +46,7 @@ export const ACCENT_PRESETS = [
 
 export type AccentPreset = (typeof ACCENT_PRESETS)[number]["id"];
 
-export const DEFAULT_ACCENT: AccentPreset = "mono";
+export const DEFAULT_ACCENT: AccentPreset = "blue";
 
 /** The settings key the chosen preset is stored under. */
 export const ACCENT_SETTING_KEY = "accent_preset";

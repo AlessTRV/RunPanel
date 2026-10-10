@@ -20,7 +20,7 @@ export function Background() {
         className="absolute inset-0"
         style={{
           background:
-            "radial-gradient(120% 80% at 50% -20%, oklch(100% 0 0 / 4%) 0%, transparent 60%)",
+            "radial-gradient(120% 80% at 50% -20%, color-mix(in oklab, var(--accent) 7%, transparent) 0%, transparent 60%)",
         }}
       />
       {/* Grid, fading out before it reaches the edges so it never draws
@@ -29,8 +29,8 @@ export function Background() {
         className="absolute inset-0 opacity-[0.35]"
         style={{
           backgroundImage:
-            "linear-gradient(to right, oklch(100% 0 0 / 2.5%) 1px, transparent 1px)," +
-            "linear-gradient(to bottom, oklch(100% 0 0 / 2.5%) 1px, transparent 1px)",
+            "linear-gradient(to right, color-mix(in oklab, var(--foreground) 3%, transparent) 1px, transparent 1px)," +
+            "linear-gradient(to bottom, color-mix(in oklab, var(--foreground) 3%, transparent) 1px, transparent 1px)",
           backgroundSize: "56px 56px",
           maskImage: "radial-gradient(100% 70% at 50% 0%, black 0%, transparent 75%)",
           WebkitMaskImage: "radial-gradient(100% 70% at 50% 0%, black 0%, transparent 75%)",

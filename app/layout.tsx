@@ -1,18 +1,20 @@
 import type { Metadata, Viewport } from "next";
-import { Inter, JetBrains_Mono } from "next/font/google";
+import { Geist, Geist_Mono } from "next/font/google";
+import { cookies } from "next/headers";
 import { Providers } from "@/components/Providers";
 import { Background } from "@/components/Background";
 import { getSetting } from "@/lib/settings";
 import { ACCENT_SETTING_KEY, DEFAULT_ACCENT, resolveAccent } from "@/lib/themes";
+import { THEME_BOOT_SCRIPT, THEME_COOKIE, resolveThemeMode, serverPalette } from "@/lib/theme-mode";
 import "./globals.css";
 
-const sans = Inter({
+const sans = Geist({
   subsets: ["latin"],
   variable: "--font-app-sans",
   display: "swap",
 });
 
-const mono = JetBrains_Mono({
+const mono = Geist_Mono({
   subsets: ["latin"],
   variable: "--font-app-mono",
   display: "swap",
@@ -27,7 +29,10 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#09090b",
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#f9fafb" },
+    { media: "(prefers-color-scheme: dark)", color: "#0b0c10" },
+  ],
   width: "device-width",
   initialScale: 1,
 };
@@ -48,16 +53,28 @@ export default async function RootLayout({
     /* first run, or the store is still starting up */
   }
 
+  const themeMode = resolveThemeMode((await cookies()).get(THEME_COOKIE)?.value);
+  const palette = serverPalette(themeMode);
+
   return (
     <html
       lang="it"
-      className={`dark ${sans.variable} ${mono.variable}`}
+      className={`${palette === "dark" ? "dark " : ""}${sans.variable} ${mono.variable}`}
       data-accent={accent}
+      data-theme={palette}
+      data-theme-mode={themeMode}
       suppressHydrationWarning
     >
+      <head>
+        {/* Before anything paints: resolves "Sistema" to the OS palette, which
+            the server cannot know. */}
+        <script dangerouslySetInnerHTML={{ __html: THEME_BOOT_SCRIPT }} />
+      </head>
       <body>
         <Background />
-        <Providers accent={accent}>{children}</Providers>
+        <Providers accent={accent} themeMode={themeMode}>
+          {children}
+        </Providers>
       </body>
     </html>
   );
