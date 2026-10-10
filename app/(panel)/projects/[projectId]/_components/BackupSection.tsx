@@ -2,14 +2,15 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { Button, Input, Label, TextField } from "@heroui/react";
-import { toast } from "sonner";
+import { Input, Label, TextField } from "@heroui/react";
 import { Section } from "@/components/ui/Section";
 import { Segmented } from "@/components/ui/Segmented";
 import { SettingToggle } from "@/components/ui/SettingToggle";
 import { CommandField } from "@/components/ui/CommandField";
 import { Code, FieldHint, Hint } from "@/components/ui/Hint";
 import { InfoTip } from "@/components/ui/Tooltip";
+import { SelectField } from "@/components/ui/SelectField";
+import { FormError } from "@/components/ui/FormError";
 import { useResource } from "@/lib/hooks/useResource";
 import {
   DEFAULT_PRE_BACKUP_TIMEOUT_SEC,
@@ -20,13 +21,16 @@ import {
   type VolumeConsistency,
 } from "@/lib/backup-settings";
 import type { Project } from "./types";
+import { usePendingSave, type RegisterPendingSave } from "./pending-saves";
 
 /**
  * How this project's volumes go into a backup.
  *
- * Saved on its own, like the scheduled restart, rather than through the sticky
- * bar: none of it touches the deploy, and a policy reads it at 03:00 whether or
- * not the settings form was saved. The closed summary is read from the row, so
+ * Saved to its own endpoint, independently of the deploy fields: none of it
+ * touches the deploy, and a policy reads it at 03:00 whether or not the rest of
+ * the form was saved. It is triggered from the tab's save bar (see
+ * `pending-saves.ts`), only while it has edits, so a failure in one part never
+ * holds back the other. The closed summary is read from the row, so
  * opening the tab asks Docker nothing; the volumes, who mounts them and which
  * policies cover them are fetched only once the section is opened.
  */
@@ -69,9 +73,12 @@ const lines = (text: string) =>
 export function BackupSection({
   project,
   onSaved,
+  registerPending,
 }: {
   project: Project;
   onSaved: (backupSettings: string) => void;
+  /** Hands this section's unsaved edits to the tab's save bar. */
+  registerPending?: RegisterPendingSave;
 }) {
   const stored = useMemo(() => parseBackupSettings(project.backup_settings), [project.backup_settings]);
 
@@ -102,6 +109,11 @@ export function BackupSection({
   const [baseline, setBaseline] = useState(project.backup_settings);
   if (project.backup_settings !== baseline) {
     setBaseline(project.backup_settings);
+    resetToStored();
+  }
+
+  function resetToStored() {
+    setError(null);
     setConsistency(stored.consistency);
     setHookEnabled(stored.preBackup !== null);
     setService(stored.preBackup?.service ?? "");
@@ -122,15 +134,57 @@ export function BackupSection({
       .flatMap(([volume, text]) => lines(text).map((line) => ({ volume, line })))
       .find(({ line }) => normalizeExcludePath(line) === null) ?? null;
 
-  async function save() {
+  /** Exactly the body the PUT has always sent. */
+  const timeoutSecValue = Number.parseInt(timeout, 10);
+  const payload = {
+    consistency,
+    preBackup: hookEnabled
+      ? {
+          service,
+          command,
+          timeoutSec: Number.isFinite(timeoutSecValue) ? timeoutSecValue : DEFAULT_PRE_BACKUP_TIMEOUT_SEC,
+        }
+      : null,
+    excludes: Object.fromEntries(
+      Object.entries(excludes)
+        .map(([volume, text]) => [volume, lines(text)] as const)
+        .filter(([, list]) => list.length > 0)
+    ),
+  };
+
+  /*
+    Dirty when what would be sent differs from what is stored, compared in the
+    same shape (volumes sorted, empty lists dropped). An untouched section stays
+    out of the save bar, so it is never sent over the stored value.
+  */
+  const comparable = (value: {
+    consistency: VolumeConsistency;
+    preBackup: { service: string; command: string; timeoutSec?: number } | null;
+    excludes: Record<string, string[]>;
+  }) =>
+    JSON.stringify({
+      consistency: value.consistency,
+      preBackup: value.preBackup
+        ? {
+            service: value.preBackup.service,
+            command: value.preBackup.command,
+            timeoutSec: value.preBackup.timeoutSec ?? DEFAULT_PRE_BACKUP_TIMEOUT_SEC,
+          }
+        : null,
+      excludes: Object.entries(value.excludes)
+        .filter(([, list]) => list.length > 0)
+        .sort(([a], [b]) => a.localeCompare(b)),
+    });
+  const dirty = comparable(payload) !== comparable(stored);
+
+  async function save(): Promise<boolean> {
     if (invalid) {
       setError(`«${invalid.line}» non è un percorso valido. ${EXCLUDE_PATH_RULE}`);
-      return;
+      return false;
     }
-    const timeoutSec = Number.parseInt(timeout, 10);
     if (hookEnabled && (!service || !command.trim())) {
       setError("Scegli il servizio e scrivi il comando da eseguire prima del backup");
-      return;
+      return false;
     }
 
     setSaving(true);
@@ -138,33 +192,22 @@ export function BackupSection({
       const res = await fetch(`/api/projects/${project.id}/backup`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          consistency,
-          preBackup: hookEnabled
-            ? {
-                service,
-                command,
-                timeoutSec: Number.isFinite(timeoutSec) ? timeoutSec : DEFAULT_PRE_BACKUP_TIMEOUT_SEC,
-              }
-            : null,
-          excludes: Object.fromEntries(
-            Object.entries(excludes)
-              .map(([volume, text]) => [volume, lines(text)] as const)
-              .filter(([, list]) => list.length > 0)
-          ),
-        }),
+        body: JSON.stringify(payload),
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(body.error ?? "Salvataggio non riuscito");
       setError(null);
       onSaved(JSON.stringify(body.settings));
-      toast.success("Impostazioni di backup salvate");
+      return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Salvataggio non riuscito");
+      return false;
     } finally {
       setSaving(false);
     }
   }
+
+  usePendingSave(registerPending, "backup", "Backup", dirty, save, resetToStored);
 
   const coverage = view?.coverage ?? [];
   const active = coverage.filter((policy) => policy.enabled);
@@ -230,24 +273,15 @@ export function BackupSection({
           {hookEnabled && (
             <>
               <div className="grid gap-3 sm:grid-cols-[1fr_8rem]">
-                <div>
-                  <label className="text-muted mb-1 block text-sm font-medium" htmlFor={`prebackup-${project.id}`}>
-                    Servizio
-                  </label>
-                  <select
-                    id={`prebackup-${project.id}`}
-                    value={service}
-                    onChange={(event) => setService(event.target.value)}
-                    className="border-border bg-surface text-foreground h-9 w-full rounded-[var(--radius)] border px-2 text-sm"
-                  >
-                    <option value="">Scegli…</option>
-                    {serviceChoices.map((name) => (
-                      <option key={name} value={name}>
-                        {name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                <SelectField
+                  label="Servizio"
+                  value={service}
+                  onChange={setService}
+                  options={[
+                    { value: "", label: "Scegli…" },
+                    ...serviceChoices.map((name) => ({ value: name, label: name })),
+                  ]}
+                />
                 <TextField value={timeout} onChange={setTimeoutSec}>
                   <Label>Timeout (s)</Label>
                   <Input inputMode="numeric" />
@@ -314,17 +348,9 @@ export function BackupSection({
         </FieldHint>
       </div>
 
-      {error && (
-        <p className="text-danger text-xs" role="alert">
-          {error}
-        </p>
-      )}
-
-      <div className="flex items-center justify-end">
-        <Button variant="primary" size="sm" isPending={saving} onPress={() => void save()}>
-          Salva impostazioni di backup
-        </Button>
-      </div>
+      <FormError>{error}</FormError>
+      {/* Saved with the rest of the tab, from the bar at the bottom. */}
+      {saving && <p className="text-muted text-xs">Salvataggio delle impostazioni di backup…</p>}
     </Section>
   );
 }

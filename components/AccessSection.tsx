@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { Section } from "@/components/ui/Section";
 import { SettingToggle } from "@/components/ui/SettingToggle";
 import { Field } from "@/components/ui/Field";
+import { CheckboxField } from "@/components/ui/CheckboxField";
 import { Code, FieldHint, Hint } from "@/components/ui/Hint";
 import { InfoTip } from "@/components/ui/Tooltip";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
@@ -278,47 +279,43 @@ export function AccessSection({
                 </div>
 
                 {networks.map((network) => (
-                  <label
+                  <CheckboxField
                     key={network.cidr}
                     className={cn(
-                      "border-separator hover:bg-surface-hover flex cursor-pointer items-center gap-2.5 rounded-[var(--radius)] border px-3 py-2 transition-colors",
+                      "border-separator hover:bg-surface-hover w-full items-stretch rounded-[var(--radius)] border px-3 py-2 transition-colors",
                       // Quiet, because this is the one multi-select here: several
                       // rows are lit at once, and haloing each would turn a
                       // choice into wallpaper.
                       allow.includes(network.cidr) && "selected-quiet border-transparent"
                     )}
-                  >
-                    <input
-                      type="checkbox"
-                      className="accent-accent"
-                      checked={allow.includes(network.cidr)}
-                      onChange={() => toggleRule(network.cidr)}
-                    />
-                    <span className="min-w-0 flex-1">
-                      <span className="text-foreground block truncate text-sm">
-                        {network.label || network.iface}
-                        <span className="text-muted font-mono"> — {network.cidr}</span>
+                    isSelected={allow.includes(network.cidr)}
+                    onChange={() => toggleRule(network.cidr)}
+                    label={
+                      <span className="min-w-0 flex-1 font-normal">
+                        <span className="text-foreground block truncate text-sm">
+                          {network.label || network.iface}
+                          <span className="text-muted font-mono"> — {network.cidr}</span>
+                        </span>
+                        <span className="text-muted block truncate text-meta">
+                          {KIND_LABEL[network.kind]} · questa macchina è {network.address}
+                        </span>
                       </span>
-                      <span className="text-muted block truncate text-meta">
-                        {KIND_LABEL[network.kind]} · questa macchina è {network.address}
-                      </span>
-                    </span>
-                  </label>
+                    }
+                  />
                 ))}
 
                 {clientIp && (
-                  <label className="border-separator hover:bg-surface-hover flex cursor-pointer items-center gap-2.5 rounded-[var(--radius)] border px-3 py-2 transition-colors">
-                    <input
-                      type="checkbox"
-                      className="accent-accent"
-                      checked={allow.includes(clientIp)}
-                      onChange={() => toggleRule(clientIp)}
-                    />
-                    <span className="text-foreground flex-1 text-sm">
-                      Il tuo indirizzo ora
-                      <span className="text-muted font-mono"> — {clientIp}</span>
-                    </span>
-                  </label>
+                  <CheckboxField
+                    className="border-separator hover:bg-surface-hover w-full items-stretch rounded-[var(--radius)] border px-3 py-2 transition-colors"
+                    isSelected={allow.includes(clientIp)}
+                    onChange={() => toggleRule(clientIp)}
+                    label={
+                      <span className="text-foreground min-w-0 flex-1 text-sm font-normal">
+                        Il tuo indirizzo ora
+                        <span className="text-muted font-mono"> — {clientIp}</span>
+                      </span>
+                    }
+                  />
                 )}
 
                 {/* Rules typed by hand or carried over from another host. */}

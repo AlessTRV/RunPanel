@@ -5,6 +5,7 @@ import { Icon } from "@iconify/react";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { LoadError } from "@/components/ui/LoadError";
 import { Hint } from "@/components/ui/Hint";
 import { LinkButton } from "@/components/ui/LinkButton";
 import { LogViewer, type LogLine } from "@/components/ui/LogViewer";
@@ -70,7 +71,7 @@ export default function RestorePage({ params }: { params: Promise<{ restoreId: s
   if (loading && !data) {
     return (
       <>
-        <PageHeader title="Ripristino" />
+        <PageHeader title="Ripristino" back={{ href: "/backups", label: "Torna ai backup" }} />
         <div className="space-y-4">
           <SkeletonBlock className="h-24" />
           <SkeletonBlock className="h-64" />
@@ -79,10 +80,19 @@ export default function RestorePage({ params }: { params: Promise<{ restoreId: s
     );
   }
 
+  if (error && error !== "HTTP 404") {
+    return (
+      <>
+        <PageHeader title="Ripristino" back={{ href: "/backups", label: "Torna ai backup" }} />
+        <LoadError what="il ripristino" error={error} onRetry={() => void refresh()} />
+      </>
+    );
+  }
+
   if (error || !data) {
     return (
       <>
-        <PageHeader title="Ripristino" />
+        <PageHeader title="Ripristino" back={{ href: "/backups", label: "Torna ai backup" }} />
         <Panel>
           <EmptyState
             icon="solar:danger-triangle-linear"
@@ -97,6 +107,7 @@ export default function RestorePage({ params }: { params: Promise<{ restoreId: s
   return (
     <>
       <PageHeader
+        back={{ href: "/backups", label: "Torna ai backup" }}
         title="Ripristino"
         description={`${formatWhen(data.startedAt)} · ${
           data.source === "upload" ? "da archivio caricato" : "da un backup in catalogo"

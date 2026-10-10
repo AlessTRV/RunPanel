@@ -171,14 +171,12 @@ export function ConnectionPanel({
           ) : (
             "il progetto"
           )}{" "}
-          riceve <Code>{service.envKey}</Code> con queste credenziali, se l&apos;iniezione è accesa: non
-          serve copiarla nelle variabili. L&apos;interruttore è nella scheda Variabili del progetto.
+          riceve <Code>{service.envKey}</Code> da solo, finché l&apos;iniezione è accesa nelle sue
+          Variabili: non serve copiarla.
         </Hint>
       ) : (
         <Hint icon="solar:database-linear" title="Servizio autonomo">
-          Non appartiene a nessun progetto, quindi RunPanel non inietta niente da nessuna parte —
-          ed è utilizzabile da quanti progetti vuoi. Copia la riga pronta qui sotto e incollala
-          tra le variabili di chi lo deve usare.
+          Nessun progetto lo riceve da solo: copia la riga qui sotto nelle variabili di chi lo usa.
         </Hint>
       )}
 

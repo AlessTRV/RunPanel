@@ -5,6 +5,7 @@ import { Button } from "@heroui/react";
 import { Icon } from "@iconify/react";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { LogViewer, type LogLine } from "@/components/ui/LogViewer";
+import { ShellInput } from "@/components/ui/ShellInput";
 import { Hint } from "@/components/ui/Hint";
 import { Segmented } from "@/components/ui/Segmented";
 import type { ConsoleMode } from "@/lib/hooks/useServiceStream";
@@ -159,22 +160,7 @@ export function ConsolePanel({
 
       {active ? (
         !readOnly && (
-          <div className="flex items-center gap-2">
-            <span className="text-muted shrink-0 font-mono text-xs" aria-hidden>
-              {PROMPT[mode]}
-            </span>
-            <input
-              type="text"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") send();
-              }}
-              placeholder="Scrivi un comando…"
-              aria-label="Comando da eseguire"
-              className="border-border bg-background text-foreground focus:border-accent min-w-0 flex-1 rounded-[var(--radius)] border px-3 py-2 font-mono text-xs outline-none"
-            />
-          </div>
+          <ShellInput value={input} onChange={setInput} onSubmit={send} prompt={PROMPT[mode]} />
         )
       ) : (
         <div className="flex flex-wrap items-center gap-2">

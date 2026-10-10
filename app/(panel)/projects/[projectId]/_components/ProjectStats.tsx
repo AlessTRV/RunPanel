@@ -11,29 +11,30 @@ import { type ProcessInfo } from "./types";
  * many times a second.
  */
 export const ProjectStats = memo(function ProjectStats({ info }: { info: ProcessInfo | null }) {
+  // Nothing to measure while the process is down, and the status badge in the
+  // header already says so. Four tiles of dashes used to fill the space where
+  // the log should have been. The "Stato" tile is gone for the same reason: it
+  // repeated the badge.
+  if (!info?.running) return null;
+
   return (
-    <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
-      <StatTile
-        icon="solar:shield-check-linear"
-        label="Stato"
-        value={info?.running ? "Online" : "Offline"}
-        hint={info?.pid ? `PID ${info.pid}` : undefined}
-      />
+    <div className="mb-6 grid grid-cols-3 gap-3">
       <StatTile
         icon="solar:clock-circle-linear"
         label="Uptime"
-        value={formatUptime(info?.uptime)}
+        value={formatUptime(info.uptime)}
+        hint={info.pid ? `PID ${info.pid}` : undefined}
       />
       <StatTile
         icon="solar:server-linear"
         label="Memoria"
-        value={formatBytes(info?.memory)}
+        value={formatBytes(info.memory)}
       />
       <StatTile
         icon="solar:cpu-linear"
         label="CPU"
-        value={info?.cpu != null ? `${info.cpu}%` : "—"}
-        percent={info?.cpu ?? undefined}
+        value={info.cpu != null ? `${info.cpu}%` : "—"}
+        percent={info.cpu ?? undefined}
       />
     </div>
   );

@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { Button } from "@heroui/react";
 import { Icon } from "@iconify/react";
-import type { LogLine } from "@/components/ui/LogViewer";
+import { LogViewer, type LogLine } from "@/components/ui/LogViewer";
+import { ShellInput } from "@/components/ui/ShellInput";
 
 /**
  * A shell inside the project's container.
@@ -28,12 +29,6 @@ export function TerminalTab({
 }) {
   const [starting, setStarting] = useState(false);
   const [input, setInput] = useState("");
-  const scrollRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [lines]);
 
   async function start() {
     setStarting(true);
@@ -94,44 +89,18 @@ export function TerminalTab({
         )}
       </div>
 
-      <div
-        ref={scrollRef}
-        role="log"
-        aria-label="Output del terminale"
-        className="border-border bg-background h-[320px] overflow-auto rounded-[var(--radius)] border p-3 font-mono text-xs leading-relaxed sm:h-[440px]"
-      >
-        {lines.length === 0 ? (
-          <p className="text-muted">Avvia la shell per aprire un terminale dentro il container.</p>
-        ) : (
-          // Keyed by id, not index: this buffer is trimmed from the FRONT, so
-          // an index key shifts under every row and React rewrites the whole
-          // list. Same mistake LogViewer documents having fixed.
-          lines.map((line) => (
-            <span key={line.id} className="text-foreground/85 break-all whitespace-pre-wrap">
-              {line.text}
-            </span>
-          ))
-        )}
-      </div>
+      {/* The shared viewer, inline: the shell streams chunks, not lines. It
+          also brings "Segui output", which this tab's own copy never had —
+          scrolling up to read stopped working the moment a new chunk arrived. */}
+      <LogViewer
+        lines={lines}
+        inline
+        ariaLabel="Output del terminale"
+        emptyMessage="Avvia la shell per aprire un terminale dentro il container."
+        className="h-[320px] sm:h-[440px]"
+      />
 
-      {active && (
-        <div className="flex items-center gap-2">
-          <span className="text-muted font-mono text-sm" aria-hidden>
-            $
-          </span>
-          <input
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") send();
-            }}
-            placeholder="Scrivi un comando…"
-            aria-label="Comando da eseguire"
-            className="border-border bg-surface text-foreground focus:border-accent/60 flex-1 rounded-[var(--radius)] border px-3 py-2 font-mono text-sm outline-none"
-          />
-        </div>
-      )}
+      {active && <ShellInput value={input} onChange={setInput} onSubmit={send} />}
     </div>
   );
 }

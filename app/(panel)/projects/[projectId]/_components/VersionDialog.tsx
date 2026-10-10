@@ -5,6 +5,7 @@ import { Button, Input, Label, TextField } from "@heroui/react";
 import { Icon } from "@iconify/react";
 import { FormDialog } from "@/components/ui/FormDialog";
 import { Field } from "@/components/ui/Field";
+import { SelectField } from "@/components/ui/SelectField";
 import { Hint } from "@/components/ui/Hint";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { SkeletonBlock } from "@/components/ui/Skeletons";
@@ -99,43 +100,35 @@ export function VersionDialog({
     >
       <Field
         label="Branch"
-        htmlFor="version-branch"
         hint="Cambiare branch qui cambia il branch del progetto: da qui in avanti sarà quello che l'auto-deploy segue."
       >
-        {/* A native select rather than a listbox: the branch list is plain data,
-            and this is keyboard- and screen-reader-correct for free. */}
         {branches.length > 0 ? (
-          <select
-            id="version-branch"
+          <SelectField
+            ariaLabel="Branch"
             value={branches.some((b) => b.name === branch) ? branch : ""}
-            onChange={(e) => {
-              setBranch(e.target.value);
+            onChange={(next) => {
+              setBranch(next);
               // The selection belonged to the old timeline.
               setSelected(null);
               setSize(PAGE_SIZE);
             }}
-            className="border-border bg-background text-foreground focus:border-accent/60 w-full rounded-[var(--radius)] border px-3 py-2 font-mono text-sm outline-none"
-          >
-            {!branches.some((b) => b.name === branch) && (
-              <option value="">{branch}</option>
-            )}
-            {branches.map((b) => (
-              <option key={b.name} value={b.name}>
-                {b.name}
-              </option>
-            ))}
-          </select>
+            options={[
+              ...(branches.some((b) => b.name === branch) ? [] : [{ value: "", label: branch }]),
+              ...branches.map((b) => ({ value: b.name, label: b.name })),
+            ]}
+          />
         ) : (
           // Same degradation as the app form: without a list, the name is typed.
-          <input
-            id="version-branch"
+          <TextField
+            aria-label="Branch"
             value={branch}
-            onChange={(e) => {
-              setBranch(e.target.value);
+            onChange={(value) => {
+              setBranch(value);
               setSelected(null);
             }}
-            className="border-border bg-background text-foreground focus:border-accent/60 w-full rounded-[var(--radius)] border px-3 py-2 font-mono text-sm outline-none"
-          />
+          >
+            <Input className="font-mono text-sm" />
+          </TextField>
         )}
       </Field>
 

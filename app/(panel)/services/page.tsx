@@ -12,7 +12,8 @@ import { LoadError } from "@/components/ui/LoadError";
 import { LinkButton } from "@/components/ui/LinkButton";
 import { Panel } from "@/components/ui/Panel";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { Code, Hint } from "@/components/ui/Hint";
+import { Code } from "@/components/ui/Hint";
+import { Section } from "@/components/ui/Section";
 import { PageSkeleton } from "@/components/ui/Skeletons";
 import { StatusBadge } from "@/components/StatusBadge";
 import { serviceDisplayName } from "@/lib/service-name";
@@ -61,7 +62,7 @@ const ServiceRow = memo(function ServiceRow({
           <span className="text-foreground truncate text-sm font-medium">{serviceDisplayName(service)}</span>
           <StatusBadge status={service.status} />
         </div>
-        <p className="text-muted mt-0.5 flex flex-wrap items-center gap-x-2 truncate text-xs">
+        <p className="text-muted mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 text-xs">
           <span className="font-mono">
             {service.type} {service.version} · :{service.port}
           </span>
@@ -169,13 +170,21 @@ export default function ServicesPage() {
         }
       />
 
-      <Hint tone="tip" icon="solar:link-circle-linear" className="mb-4">
-        Un servizio creato dentro un progetto gli si collega da solo: al deploy l&apos;app riceve{" "}
-        <Code>DATABASE_URL</Code> (o <Code>REDIS_URL</Code>, <Code>MONGODB_URL</Code>) con host,
-        porta e password già giusti. Uno senza progetto resta autonomo e lo usa chiunque: apri la
-        sua pagina e copia la riga pronta — da un container si raggiunge su{" "}
-        <Code>host.docker.internal</Code>, dalla macchina su <Code>localhost</Code>.
-      </Hint>
+      {/* Read once, then known: closed, so it stops pushing the list down on
+          every visit. */}
+      <Section
+        title="Come si collegano i servizi"
+        summary="Dentro un progetto: variabili automatiche. Autonomi: riga di connessione da copiare."
+        className="mb-4"
+      >
+        <p className="text-muted text-sm">
+          Un servizio creato dentro un progetto gli si collega da solo: al deploy l&apos;app riceve{" "}
+          <Code>DATABASE_URL</Code> (o <Code>REDIS_URL</Code>, <Code>MONGODB_URL</Code>) con host,
+          porta e password già giusti. Uno senza progetto resta autonomo e lo usa chiunque: apri la
+          sua pagina e copia la riga pronta — da un container si raggiunge su{" "}
+          <Code>host.docker.internal</Code>, dalla macchina su <Code>localhost</Code>.
+        </p>
+      </Section>
 
       {services.length > 3 && (
         <div className="mb-4 max-w-sm">

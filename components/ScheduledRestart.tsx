@@ -180,8 +180,8 @@ export function ScheduledRestart({
           <FieldHint>
             Cinque campi: minuto, ora, giorno del mese, mese, giorno della settimana. L&apos;ora è quella
             del fuso scelto in{" "}
-            <Link href="/account" className="text-accent hover:underline">
-              Impostazioni
+            <Link href="/settings" className="text-accent hover:underline">
+              Impostazioni › Pannello
             </Link>
             .
           </FieldHint>

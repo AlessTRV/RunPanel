@@ -7,6 +7,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { LinkButton } from "@/components/ui/LinkButton";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { LoadError } from "@/components/ui/LoadError";
 import { Hint } from "@/components/ui/Hint";
 import { LogViewer, type LogLine } from "@/components/ui/LogViewer";
 import { SkeletonBlock } from "@/components/ui/Skeletons";
@@ -85,7 +86,7 @@ export default function BackupRunPage({ params }: { params: Promise<{ runId: str
   if (loading && !data) {
     return (
       <>
-        <PageHeader title="Backup" />
+        <PageHeader title="Backup" back={{ href: "/backups", label: "Torna ai backup" }} />
         <div className="space-y-4">
           <SkeletonBlock className="h-28" />
           <SkeletonBlock className="h-48" />
@@ -95,10 +96,19 @@ export default function BackupRunPage({ params }: { params: Promise<{ runId: str
     );
   }
 
+  if (error && error !== "HTTP 404") {
+    return (
+      <>
+        <PageHeader title="Backup" back={{ href: "/backups", label: "Torna ai backup" }} />
+        <LoadError what="il backup" error={error} onRetry={() => void refresh()} />
+      </>
+    );
+  }
+
   if (error || !data) {
     return (
       <>
-        <PageHeader title="Backup" />
+        <PageHeader title="Backup" back={{ href: "/backups", label: "Torna ai backup" }} />
         <Panel>
           <EmptyState
             icon="solar:danger-triangle-linear"
@@ -120,6 +130,7 @@ export default function BackupRunPage({ params }: { params: Promise<{ runId: str
   return (
     <>
       <PageHeader
+        back={{ href: "/backups", label: "Torna ai backup" }}
         title={data.policyName ?? "Esecuzione manuale"}
         description={`${formatWhen(data.startedAt)} · ${triggerLabel(data.trigger)}`}
         actions={

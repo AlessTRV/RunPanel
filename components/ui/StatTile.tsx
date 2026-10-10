@@ -28,7 +28,7 @@ export function StatTile({
   return (
     <div
       className={cn(
-        "border-border bg-surface rounded-[var(--radius)] border p-4",
+        "border-border bg-surface rounded-[var(--radius)] border px-4 py-3.5 shadow-[var(--surface-shadow)]",
         className
       )}
     >
@@ -37,8 +37,8 @@ export function StatTile({
         <span className="text-muted text-xs font-medium">{label}</span>
       </div>
 
-      <div className="mt-2 flex items-baseline gap-1.5">
-        <span className="text-foreground text-2xl font-semibold tabular-nums tracking-tight">
+      <div className="mt-1.5 flex min-w-0 flex-wrap items-baseline gap-x-1.5">
+        <span className="text-foreground text-xl font-semibold tabular-nums tracking-tight">
           {value}
         </span>
         {hint && <span className="text-muted text-xs">{hint}</span>}
@@ -46,7 +46,7 @@ export function StatTile({
 
       {clamped !== undefined && (
         <div
-          className="bg-default mt-3 h-1 w-full overflow-hidden rounded-full"
+          className="bg-default mt-2.5 h-1 w-full overflow-hidden rounded-full"
           role="meter"
           aria-valuenow={Math.round(clamped)}
           aria-valuemin={0}

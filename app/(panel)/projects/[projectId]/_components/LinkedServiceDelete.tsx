@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Icon } from "@iconify/react";
 import { toast } from "sonner";
 import { DeleteButton } from "@/components/ui/DangerAction";
+import { CheckboxField } from "@/components/ui/CheckboxField";
 import { serviceLabel } from "@/lib/service-env";
 import { serviceDisplayName } from "@/lib/service-name";
 
@@ -62,18 +63,17 @@ export function LinkedServiceDelete({
                 {deleteData
                   ? "Il container e il volume con i dati vengono eliminati. I dati non sono recuperabili."
                   : "Il container viene eliminato. Il volume con i dati resta, e un servizio ricreato con lo stesso nome in questo progetto lo ritrova."}
-                <label className="mt-3 flex cursor-pointer items-start gap-2.5">
-                  <input
-                    type="checkbox"
-                    checked={deleteData}
-                    onChange={(e) => setDeleteData(e.target.checked)}
-                    className="accent-danger mt-0.5 size-4"
-                  />
-                  <span className="text-xs leading-relaxed">
-                    Elimina anche il volume con i dati.{" "}
-                    <strong className="text-foreground">Non è recuperabile.</strong>
-                  </span>
-                </label>
+                <CheckboxField
+                  className="mt-3"
+                  isSelected={deleteData}
+                  onChange={setDeleteData}
+                  label={
+                    <span className="text-xs leading-relaxed">
+                      Elimina anche il volume con i dati.{" "}
+                      <strong className="text-foreground">Non è recuperabile.</strong>
+                    </span>
+                  }
+                />
               </>
             ),
           }}

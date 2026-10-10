@@ -121,13 +121,13 @@ export default function NewProjectPage() {
           projectId={project!.id}
           submitLabel="Salva e apri il progetto"
           secondaryAction={
-            <button
-              type="button"
-              onClick={() => router.push(`/projects/${project!.id}`)}
-              className="text-muted hover:text-foreground text-sm transition-colors"
+            <Button
+              variant="ghost"
+              size="sm"
+              onPress={() => router.push(`/projects/${project!.id}`)}
             >
               Configuro dopo
-            </button>
+            </Button>
           }
         />
       )}

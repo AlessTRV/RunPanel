@@ -1,6 +1,16 @@
 import { nanoid } from "nanoid";
 import { clsx, type ClassValue } from "clsx";
-import { twMerge } from "tailwind-merge";
+import { extendTailwindMerge } from "tailwind-merge";
+
+/**
+ * `text-meta` is a font size declared in globals.css. tailwind-merge does not
+ * read the stylesheet, so it took the class for a colour and dropped the
+ * `text-muted` before it: `cn("text-muted text-meta")` came out as plain
+ * foreground text, which is why field hints and row metadata were white.
+ */
+const twMerge = extendTailwindMerge({
+  extend: { theme: { text: ["meta"] } },
+});
 
 /**
  * Merge class names, letting a later conflicting Tailwind utility win.

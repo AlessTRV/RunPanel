@@ -6,6 +6,8 @@ import { Input, Label, TextField } from "@heroui/react";
 import { FormDialog } from "@/components/ui/FormDialog";
 import { toast } from "sonner";
 import { Hint } from "@/components/ui/Hint";
+import { SelectField } from "@/components/ui/SelectField";
+import { CheckboxField } from "@/components/ui/CheckboxField";
 import { useResource } from "@/lib/hooks/useResource";
 import { formatBytes } from "@/lib/format";
 import type { ArtifactView, TargetCatalog } from "./types";
@@ -151,49 +153,44 @@ export function RestoreDialog({
 
                 return (
                   <li key={artifact.id} className="p-3">
-                    <label className="flex items-start gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        className="mt-1"
-                        checked={on}
-                        onChange={(event) =>
-                          setChoices((current) => ({
-                            ...current,
-                            [artifact.id]: {
-                              action: event.target.checked ? "restore" : "skip",
-                              targetId: current[artifact.id]?.targetId ?? artifact.refId ?? "",
-                            },
-                          }))
-                        }
-                      />
-                      <span className="min-w-0 flex-1">
-                        <span className="text-foreground block truncate">{artifact.refName}</span>
-                        <span className="text-muted text-xs">
-                          {KIND_LABELS[artifact.kind] ?? artifact.kind} ·{" "}
-                          {formatBytes(artifact.bytes)}
+                    <CheckboxField
+                      isSelected={on}
+                      onChange={(next) =>
+                        setChoices((current) => ({
+                          ...current,
+                          [artifact.id]: {
+                            action: next ? "restore" : "skip",
+                            targetId: current[artifact.id]?.targetId ?? artifact.refId ?? "",
+                          },
+                        }))
+                      }
+                      label={
+                        <span className="block min-w-0 flex-1">
+                          <span className="text-foreground block truncate">{artifact.refName}</span>
+                          <span className="text-muted text-xs">
+                            {KIND_LABELS[artifact.kind] ?? artifact.kind} ·{" "}
+                            {formatBytes(artifact.bytes)}
+                          </span>
                         </span>
-                      </span>
-                    </label>
+                      }
+                    />
 
                     {on && options.length > 0 && (
                       <div className="mt-2 pl-6">
-                        <select
+                        <SelectField
+                          ariaLabel={`Dove ripristinare ${artifact.refName}`}
                           value={choice.targetId}
-                          onChange={(event) =>
+                          onChange={(targetId) =>
                             setChoices((current) => ({
                               ...current,
-                              [artifact.id]: { action: "restore", targetId: event.target.value },
+                              [artifact.id]: { action: "restore", targetId },
                             }))
                           }
-                          className="border-border bg-surface text-foreground h-8 w-full rounded-[var(--radius)] border px-2 text-xs"
-                        >
-                          <option value="">— scegli la destinazione —</option>
-                          {options.map((option) => (
-                            <option key={option.id} value={option.id}>
-                              {option.label}
-                            </option>
-                          ))}
-                        </select>
+                          options={[
+                            { value: "", label: "— scegli la destinazione —" },
+                            ...options.map((option) => ({ value: option.id, label: option.label })),
+                          ]}
+                        />
                       </div>
                     )}
 
@@ -209,22 +206,13 @@ export function RestoreDialog({
               })}
             </ul>
 
-            <label className="mt-4 flex items-start gap-2 text-sm">
-              <input
-                type="checkbox"
-                className="mt-1"
-                checked={skipSafety}
-                onChange={(event) => setSkipSafety(event.target.checked)}
-              />
-              <span>
-                <span className="text-foreground">Procedi anche senza backup di sicurezza</span>
-                <span className="text-muted block text-xs">
-                  Di norma il pannello salva prima quello che sta per sovrascrivere, e si ferma se
-                  non ci riesce. Togliere questa rete significa che un ripristino sbagliato non ha
-                  ritorno.
-                </span>
-              </span>
-            </label>
+            <CheckboxField
+              className="mt-4"
+              isSelected={skipSafety}
+              onChange={setSkipSafety}
+              label="Procedi anche senza backup di sicurezza"
+              description="Di norma il pannello salva prima quello che sta per sovrascrivere, e si ferma se non ci riesce. Togliere questa rete significa che un ripristino sbagliato non ha ritorno."
+            />
 
             {selected.length > 0 && (
               <div className="mt-4">

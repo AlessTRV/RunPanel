@@ -32,16 +32,18 @@ interface StatusMeta {
 }
 
 const STATUS_META: Record<KnownStatus, StatusMeta> = {
-  running: { tone: "success", label: "Running" },
-  stopped: { tone: "neutral", label: "Stopped" },
-  deploying: { tone: "warning", label: "Deploying", active: true },
-  building: { tone: "warning", label: "Building", active: true },
-  pending: { tone: "neutral", label: "Pending", active: true },
-  checking: { tone: "neutral", label: "Checking", active: true },
-  error: { tone: "danger", label: "Error" },
-  failed: { tone: "danger", label: "Failed" },
-  // Not a lifecycle token like `running` — this one is narration, and it was
-  // the only English word in a map whose other outcomes are already Italian.
+  // Italian like the rest of the panel. The lifecycle states were left as the
+  // English tokens the API uses, which put "Stopped" next to "Riuscito" on the
+  // same screen; the tokens are still what the code compares, only the label
+  // changed.
+  running: { tone: "success", label: "In esecuzione" },
+  stopped: { tone: "neutral", label: "Fermo" },
+  deploying: { tone: "warning", label: "Deploy in corso", active: true },
+  building: { tone: "warning", label: "Build in corso", active: true },
+  pending: { tone: "neutral", label: "In attesa", active: true },
+  checking: { tone: "neutral", label: "Verifica", active: true },
+  error: { tone: "danger", label: "Errore" },
+  failed: { tone: "danger", label: "Fallito" },
   superseded: { tone: "neutral", label: "Sostituito" },
   success: { tone: "success", label: "Riuscito" },
   // A backup where some targets failed still has value, so it is not an error —

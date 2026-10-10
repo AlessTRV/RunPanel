@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { toast } from "sonner";
+import { CheckboxField } from "@/components/ui/CheckboxField";
 import { DangerZone } from "@/components/ui/DangerAction";
 import type { LogLine } from "@/components/ui/LogViewer";
 import type { MountApply } from "@/lib/hooks/useServiceStream";
@@ -102,20 +103,18 @@ export function DataSection({
           }
         }}
       >
-        <label className="flex cursor-pointer items-start gap-2.5">
-          <input
-            type="checkbox"
-            checked={deleteData}
-            onChange={(e) => setDeleteData(e.target.checked)}
-            className="accent-danger mt-0.5 size-4"
-          />
-          <span className="text-muted text-xs leading-relaxed">
-            Elimina anche il volume con i dati.{" "}
-            <strong className="text-foreground">Non è recuperabile.</strong> I dati di questo
-            servizio stanno in un volume Docker dedicato: senza la spunta resta lì, e un servizio
-            ricreato con lo stesso nome li ritrova.
-          </span>
-        </label>
+        <CheckboxField
+          isSelected={deleteData}
+          onChange={setDeleteData}
+          label={
+            <span className="text-muted text-xs leading-relaxed">
+              Elimina anche il volume con i dati.{" "}
+              <strong className="text-foreground">Non è recuperabile.</strong> I dati di questo
+              servizio stanno in un volume Docker dedicato: senza la spunta resta lì, e un servizio
+              ricreato con lo stesso nome li ritrova.
+            </span>
+          }
+        />
       </DangerZone>
     </div>
   );

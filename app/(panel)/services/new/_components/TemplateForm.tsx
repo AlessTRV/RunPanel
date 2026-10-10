@@ -4,8 +4,9 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button, Input, Label, TextField } from "@heroui/react";
 import { toast } from "sonner";
-import { cn } from "@/lib/utils";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
+import { ChoiceCard, ChoiceGroup } from "@/components/ui/ChoiceCard";
+import { Field } from "@/components/ui/Field";
 import type { DockerTemplate } from "../_data/catalog";
 
 /**
@@ -64,33 +65,26 @@ export function TemplateForm({
   }
 
   return (
-    <div className="max-w-2xl space-y-4">
+    <div className="max-w-3xl space-y-4">
       <Panel className="space-y-4">
         <PanelHeader title={template.label} description={template.description} />
 
-        <div>
-          <span className="text-muted mb-2 block text-sm font-medium">Versione</span>
-          {/* Same quiet treatment as the database version picker — they are the
-              same control and used to disagree only by accident. */}
-          <div className="flex flex-wrap gap-2">
+        {/* Same control as the database version picker — they used to disagree
+            only by accident. */}
+        <Field label="Versione">
+          <ChoiceGroup label="Versione" className="flex flex-wrap">
             {template.versions.map((v) => (
-              <button
+              <ChoiceCard
                 key={v}
-                type="button"
-                aria-pressed={version === v}
-                onClick={() => setVersion(v)}
-                className={cn(
-                  "rounded-[var(--radius)] border px-2.5 py-1 font-mono text-xs transition-colors",
-                  version === v
-                    ? "selected-quiet text-accent border-transparent"
-                    : "border-border text-muted hover:bg-surface-hover"
-                )}
-              >
-                {v}
-              </button>
+                compact
+                selected={version === v}
+                onSelect={() => setVersion(v)}
+                title={v}
+                className="font-mono"
+              />
             ))}
-          </div>
-        </div>
+          </ChoiceGroup>
+        </Field>
 
         <TextField value={port} onChange={setPort}>
           <Label>Porta sull&apos;host</Label>

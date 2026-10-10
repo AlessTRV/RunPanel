@@ -10,6 +10,8 @@ import { CopyField } from "@/components/ui/CopyField";
 import { DeleteButton } from "@/components/ui/DangerAction";
 import { Code, FieldHint, Hint } from "@/components/ui/Hint";
 import { Field } from "@/components/ui/Field";
+import { LoadError } from "@/components/ui/LoadError";
+import { SkeletonBlock } from "@/components/ui/Skeletons";
 import { buildConnectionString } from "@/lib/service-env";
 import { DATABASE_NAME_RULE } from "@/lib/validation";
 
@@ -50,7 +52,7 @@ export function DatabasesPanel({
   /** Null until the operator reveals them; the URLs stay hidden until then. */
   credentials: { user?: string; password?: string } | null;
 }) {
-  const { data, loading, refresh } = useResource<{
+  const { data, loading, error, refresh } = useResource<{
     supported: boolean;
     running: boolean;
     databases: ServiceDatabase[];
@@ -129,8 +131,15 @@ export function DatabasesPanel({
           description="Più database nello stesso servizio, ognuno con la sua URL"
         />
 
-        {loading && !data ? (
-          <p className="text-muted text-sm">Carico…</p>
+        {/* A failed read used to fall through to "Nessun database", which is
+            the one thing it must not say about a service holding data. */}
+        {error && !data ? (
+          <LoadError what="i database" error={error} onRetry={() => void refresh()} />
+        ) : loading && !data ? (
+          <div className="space-y-2">
+            <SkeletonBlock className="h-12" />
+            <SkeletonBlock className="h-12" />
+          </div>
         ) : databases.length === 0 ? (
           <p className="text-muted text-sm">Nessun database.</p>
         ) : (

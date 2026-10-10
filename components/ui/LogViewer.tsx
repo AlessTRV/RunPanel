@@ -24,11 +24,19 @@ export function LogViewer({
   emptyMessage = "Nessun output.",
   className,
   ariaLabel = "Log",
+  inline = false,
 }: {
   lines: LogLine[];
   emptyMessage?: string;
   className?: string;
   ariaLabel?: string;
+  /**
+   * For a raw terminal stream, whose chunks are not lines: a prompt, half a
+   * line, then the rest. As blocks each chunk would start a new row and split
+   * the output where the bytes happened to arrive; inline, the newlines in the
+   * text decide.
+   */
+  inline?: boolean;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [following, setFollowing] = useState(true);
@@ -60,17 +68,18 @@ export function LogViewer({
         {lines.length === 0 ? (
           <p className="text-muted">{emptyMessage}</p>
         ) : (
-          lines.map((line) => (
-            <div
-              key={line.id}
-              className={cn(
-                "break-words whitespace-pre-wrap",
-                line.stream === "stderr" ? "text-danger" : "text-foreground/80"
-              )}
-            >
-              {line.text}
-            </div>
-          ))
+          lines.map((line) => {
+            const tone = line.stream === "stderr" ? "text-danger" : "text-foreground/80";
+            return inline ? (
+              <span key={line.id} className={cn("break-all whitespace-pre-wrap", tone)}>
+                {line.text}
+              </span>
+            ) : (
+              <div key={line.id} className={cn("break-words whitespace-pre-wrap", tone)}>
+                {line.text}
+              </div>
+            );
+          })
         )}
       </div>
 

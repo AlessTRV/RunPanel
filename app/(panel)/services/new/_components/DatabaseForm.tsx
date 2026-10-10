@@ -3,14 +3,15 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button, Input, Label, TextField } from "@heroui/react";
-import { Icon } from "@iconify/react";
 import { toast } from "sonner";
 import { useResource } from "@/lib/hooks/useResource";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { Code, FieldHint, Hint } from "@/components/ui/Hint";
 import { SettingToggle } from "@/components/ui/SettingToggle";
+import { SelectField } from "@/components/ui/SelectField";
+import { ChoiceCard, ChoiceGroup } from "@/components/ui/ChoiceCard";
+import { Field } from "@/components/ui/Field";
 import { connectionEnvKey } from "@/lib/service-env";
-import { cn } from "@/lib/utils";
 import { DATABASE_OPTIONS, databaseOption, type ServiceType } from "../_data/catalog";
 
 /** Mirrors `serviceNameSchema`: a bad name should not need a round trip. */
@@ -113,7 +114,7 @@ export function DatabaseForm({ projectId }: { projectId?: string }) {
   const envKey = connectionEnvKey(type);
 
   return (
-    <div className="max-w-2xl space-y-4">
+    <div className="max-w-3xl space-y-4">
       {project ? (
         <Hint tone="tip" icon="solar:link-circle-linear" title="Cosa succede dopo">
           Il container viene creato subito, con un volume dedicato per i dati. Dal deploy successivo
@@ -134,25 +135,16 @@ export function DatabaseForm({ projectId }: { projectId?: string }) {
       <Panel className="space-y-4">
         <PanelHeader title="Progetto" description="Facoltativo: decide solo chi lo riceve in automatico" />
 
-        {/* A native select, like the branch picker in AppForm: the list is plain
-            data, and this is keyboard- and screen-reader-correct for free. */}
         <div>
-          <label htmlFor="service-project" className="text-muted mb-1 block text-sm font-medium">
-            Progetto
-          </label>
-          <select
-            id="service-project"
+          <SelectField
+            label="Progetto"
             value={project}
-            onChange={(e) => setProject(e.target.value)}
-            className="border-border bg-background text-foreground focus:border-accent/60 w-full rounded-[var(--radius)] border px-3 py-2 text-sm outline-none"
-          >
-            <option value="">Nessuno — servizio autonomo</option>
-            {projects.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
+            onChange={setProject}
+            options={[
+              { value: "", label: "Nessuno — servizio autonomo" },
+              ...projects.map((p) => ({ value: p.id, label: p.name })),
+            ]}
+          />
           <FieldHint>
             Con un progetto: stessa rete Docker e <Code>{envKey}</Code> iniettata a ogni deploy.
             Senza: il servizio resta a sé e lo colleghi copiando la sua URL dove serve.
@@ -163,30 +155,17 @@ export function DatabaseForm({ projectId }: { projectId?: string }) {
       <Panel className="space-y-4">
         <PanelHeader title="Tipo" description="Il container viene provisionato con un volume dedicato" />
 
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <ChoiceGroup label="Tipo di database" className="grid-cols-2 sm:grid-cols-4">
           {DATABASE_OPTIONS.map((opt) => (
-            <button
+            <ChoiceCard
               key={opt.type}
-              type="button"
-              onClick={() => chooseType(opt.type)}
-              aria-pressed={type === opt.type}
-              className={cn(
-                "flex flex-col items-center gap-2 rounded-[var(--radius)] border px-3 py-4 transition-colors",
-                type === opt.type
-                  ? "selected border-transparent"
-                  : "border-border hover:bg-surface-hover"
-              )}
-            >
-              <Icon
-                icon={opt.icon}
-                width={22}
-                className={cn(type === opt.type ? "text-accent" : "text-muted")}
-                aria-hidden
-              />
-              <span className="text-foreground text-xs">{opt.label}</span>
-            </button>
+              selected={type === opt.type}
+              onSelect={() => chooseType(opt.type)}
+              title={opt.label}
+              icon={opt.icon}
+            />
           ))}
-        </div>
+        </ChoiceGroup>
 
         <div className="grid gap-4 sm:grid-cols-2">
           <div>
@@ -205,34 +184,28 @@ export function DatabaseForm({ projectId }: { projectId?: string }) {
             </FieldHint>
           </div>
 
-          <div>
-            <span className="text-muted mb-2 block text-sm font-medium">Versione</span>
-            {/* Quiet rather than the full recipe: a version list can run to
-                eight pills, and a halo on one of eight sitting shoulder to
-                shoulder bleeds into its neighbours. */}
-            <div className="flex flex-wrap gap-2">
+          <Field
+            label="Versione"
+            hint={
+              <>
+                Il tag dell&apos;immagine ufficiale. Sceglila uguale a quella che usi in sviluppo: un
+                dump ripristinato su una major diversa è il modo classico per perdere un pomeriggio.
+              </>
+            }
+          >
+            <ChoiceGroup label="Versione" className="flex flex-wrap">
               {option.versions.map((v) => (
-                <button
+                <ChoiceCard
                   key={v}
-                  type="button"
-                  aria-pressed={version === v}
-                  onClick={() => setVersion(v)}
-                  className={cn(
-                    "rounded-[var(--radius)] border px-2.5 py-1 font-mono text-xs transition-colors",
-                    version === v
-                      ? "selected-quiet text-accent border-transparent"
-                      : "border-border text-muted hover:bg-surface-hover"
-                  )}
-                >
-                  {v}
-                </button>
+                  compact
+                  selected={version === v}
+                  onSelect={() => setVersion(v)}
+                  title={v}
+                  className="font-mono"
+                />
               ))}
-            </div>
-            <FieldHint>
-              Il tag dell&apos;immagine ufficiale. Sceglila uguale a quella che usi in sviluppo: un
-              dump ripristinato su una major diversa è il modo classico per perdere un pomeriggio.
-            </FieldHint>
-          </div>
+            </ChoiceGroup>
+          </Field>
         </div>
 
         <div>

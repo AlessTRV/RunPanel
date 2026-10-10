@@ -331,6 +331,65 @@ export default function BackupsPage() {
           )}
         </Panel>
 
+        {/* Above the history, not under it: the nightly preset needs a destination,
+            and below 25 rows of runs nobody found where to add one. */}
+        <Panel padding="flush">
+          <div className="p-4 sm:p-5">
+            <PanelHeader
+              title="Destinazioni"
+              description="Dove finiscono gli archivi"
+              actions={
+                <Button size="sm" variant="secondary" onPress={() => setAddingDestination(true)}>
+                  <Icon icon="solar:add-circle-linear" width={16} aria-hidden />
+                  Aggiungi
+                </Button>
+              }
+            />
+          </div>
+          {destinations.error && !destinations.data ? (
+            <LoadError
+              what="le destinazioni"
+              error={destinations.error}
+              onRetry={() => void destinations.refresh()}
+              className="px-4 pb-4 sm:px-5"
+            />
+          ) : !destinations.data ? (
+            <div className="space-y-2 px-4 pb-4 sm:px-5">
+              <SkeletonBlock className="h-12" />
+            </div>
+          ) : destinations.data.destinations.length === 0 ? (
+            <EmptyState
+              icon="solar:folder-linear"
+              title="Nessuna destinazione"
+              description="Una destinazione è dove finiscono gli archivi: una cartella su questa macchina o uno storage remoto."
+              className="py-8"
+            />
+          ) : (
+          <ul className="divide-border divide-y">
+            {destinations.data.destinations.map((destination) => (
+              <li
+                key={destination.id}
+                className="flex items-center gap-3 px-4 py-3 sm:px-5"
+              >
+                <Icon icon="solar:folder-linear" width={16} className="text-muted" aria-hidden />
+                <div className="min-w-0 flex-1">
+                  <p className="text-foreground truncate text-sm">{destination.name}</p>
+                  <p className="text-muted text-xs">{destination.type}</p>
+                </div>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onPress={() => testDestination(destination)}
+                  isPending={busy === `/api/backups/destinations/${destination.id}`}
+                >
+                  Verifica
+                </Button>
+              </li>
+            ))}
+          </ul>
+          )}
+        </Panel>
+
         <Panel padding="flush">
           <div className="p-4 sm:p-5">
             <PanelHeader
@@ -404,43 +463,6 @@ export default function BackupsPage() {
               ))}
             </ul>
           )}
-        </Panel>
-
-        <Panel padding="flush">
-          <div className="p-4 sm:p-5">
-            <PanelHeader
-              title="Destinazioni"
-              description="Dove finiscono gli archivi"
-              actions={
-                <Button size="sm" variant="secondary" onPress={() => setAddingDestination(true)}>
-                  <Icon icon="solar:add-circle-linear" width={16} aria-hidden />
-                  Aggiungi
-                </Button>
-              }
-            />
-          </div>
-          <ul className="divide-border divide-y">
-            {(destinations.data?.destinations ?? []).map((destination) => (
-              <li
-                key={destination.id}
-                className="flex items-center gap-3 px-4 py-3 sm:px-5"
-              >
-                <Icon icon="solar:folder-linear" width={16} className="text-muted" aria-hidden />
-                <div className="min-w-0 flex-1">
-                  <p className="text-foreground truncate text-sm">{destination.name}</p>
-                  <p className="text-muted text-xs">{destination.type}</p>
-                </div>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  onPress={() => testDestination(destination)}
-                  isPending={busy === `/api/backups/destinations/${destination.id}`}
-                >
-                  Verifica
-                </Button>
-              </li>
-            ))}
-          </ul>
         </Panel>
 
         <DestinationForm

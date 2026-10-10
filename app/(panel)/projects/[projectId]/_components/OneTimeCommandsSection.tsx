@@ -11,6 +11,9 @@ import { Section } from "@/components/ui/Section";
 import { CommandField } from "@/components/ui/CommandField";
 import { Code, FieldHint, Hint } from "@/components/ui/Hint";
 import { DeleteButton } from "@/components/ui/DangerAction";
+import { SelectField } from "@/components/ui/SelectField";
+import { CheckboxField } from "@/components/ui/CheckboxField";
+import { FormError } from "@/components/ui/FormError";
 import {
   DEFAULT_PHASE,
   DEPLOY_PHASES,
@@ -21,6 +24,7 @@ import {
   type DeployPhase,
 } from "@/lib/deploy-phases";
 import type { OneTimeCommand } from "./types";
+import { usePendingSave, type RegisterPendingSave } from "./pending-saves";
 
 /**
  * Comandi che girano una volta sola, al punto scelto del prossimo deploy.
@@ -85,6 +89,7 @@ export function OneTimeCommandsSection({
   queued,
   isDeploying,
   onChanged,
+  registerPending,
 }: {
   projectId: string;
   runtimeType: string;
@@ -92,6 +97,8 @@ export function OneTimeCommandsSection({
   isDeploying: boolean;
   /** Con la coda appena salvata quando c'è, senza per chiedere di rileggere il progetto. */
   onChanged: (queued?: OneTimeCommand[]) => void;
+  /** Passa le modifiche non salvate alla barra di salvataggio della scheda. */
+  registerPending?: RegisterPendingSave;
 }) {
   const [rows, setRows] = useState<Row[]>(() => queued.map(toRow));
   const [error, setError] = useState<string | null>(null);
@@ -142,7 +149,12 @@ export function OneTimeCommandsSection({
   const patch = (index: number, change: Partial<Row>) =>
     setRows((prev) => prev.map((row, i) => (i === index ? { ...row, ...change } : row)));
 
-  async function save() {
+  async function save(): Promise<boolean> {
+    // Prima il pulsante era spento durante un deploy: la coda è in uso.
+    if (isDeploying) {
+      setError("Durante un deploy la coda è in uso: salvala quando finisce.");
+      return false;
+    }
     setBusy(true);
     try {
       const res = await fetch(`/api/projects/${projectId}/one-time-commands`, {
@@ -168,17 +180,27 @@ export function OneTimeCommandsSection({
           setRows(queued.map(toRow));
           onChanged();
         }
-        return;
+        return false;
       }
       setError(null);
-      toast.success("Coda salvata");
+      // The rows take the ids the server just gave the new commands. Without
+      // this a new row kept no id, still differed from the stored queue, and a
+      // second save sent it again as another new command.
+      if (Array.isArray(data.queued)) setRows((data.queued as OneTimeCommand[]).map(toRow));
       onChanged(Array.isArray(data.queued) ? (data.queued as OneTimeCommand[]) : undefined);
+      return true;
     } catch {
       setError(MSG.saveFailed);
+      return false;
     } finally {
       setBusy(false);
     }
   }
+
+  usePendingSave(registerPending, "one-time", "Comandi una tantum", dirty, save, () => {
+    setRows(queued.map(toRow));
+    setError(null);
+  });
 
   async function clearHistory() {
     const res = await fetch(`/api/projects/${projectId}/one-time-commands`, { method: "DELETE" });
@@ -214,38 +236,21 @@ export function OneTimeCommandsSection({
                 }`}
               >
                 <div className="grid gap-2 sm:grid-cols-2">
-                  <div>
-                    <label
-                      className="text-muted mb-1 block text-sm font-medium"
-                      htmlFor={`phase-${index}`}
-                    >
-                      Quando
-                    </label>
-                    <select
-                      id={`phase-${index}`}
-                      value={row.phase}
-                      disabled={isDeploying}
-                      onChange={(event) =>
-                        patch(index, { phase: event.target.value as DeployPhase })
-                      }
-                      className="border-border bg-surface text-foreground h-9 w-full rounded-[var(--radius)] border px-2 text-sm disabled:opacity-60"
-                    >
-                      {DEPLOY_PHASES.map((phase) => (
-                        <option
-                          key={phase.id}
-                          value={phase.id}
-                          // Disabilitata e non nascosta: dice che il punto
-                          // esiste, e che non esiste per QUESTO runtime.
-                          disabled={!phaseAvailable(phase.id, runtimeType)}
-                        >
-                          {phase.label}
-                          {phaseAvailable(phase.id, runtimeType)
-                            ? ""
-                            : ` — non disponibile con ${runtimeType}`}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                  <SelectField<DeployPhase>
+                    label="Quando"
+                    value={row.phase}
+                    isDisabled={isDeploying}
+                    onChange={(phase) => patch(index, { phase })}
+                    options={DEPLOY_PHASES.map((phase) => ({
+                      value: phase.id,
+                      label: phaseAvailable(phase.id, runtimeType)
+                        ? phase.label
+                        : `${phase.label} — non disponibile con ${runtimeType}`,
+                      // Disabilitata e non nascosta: dice che il punto
+                      // esiste, e che non esiste per QUESTO runtime.
+                      isDisabled: !phaseAvailable(phase.id, runtimeType),
+                    }))}
+                  />
 
                   <TextField
                     value={row.label}
@@ -271,16 +276,12 @@ export function OneTimeCommandsSection({
                 />
 
                 <div className="flex flex-wrap items-center gap-4">
-                  <label className="flex cursor-pointer items-center gap-2 text-xs">
-                    <input
-                      type="checkbox"
-                      checked={row.continueOnError}
-                      disabled={isDeploying}
-                      onChange={(event) => patch(index, { continueOnError: event.target.checked })}
-                      className="accent-accent size-4"
-                    />
-                    Continua anche se fallisce
-                  </label>
+                  <CheckboxField
+                    label="Continua anche se fallisce"
+                    isSelected={row.continueOnError}
+                    isDisabled={isDeploying}
+                    onChange={(continueOnError) => patch(index, { continueOnError })}
+                  />
                   <div className="ml-auto">
                     {/*
                       Nessuna conferma: la riga esce dallo stato locale e non
@@ -318,11 +319,7 @@ export function OneTimeCommandsSection({
         </div>
       )}
 
-      {error && (
-        <p className="text-danger text-xs" role="alert">
-          {error}
-        </p>
-      )}
+      <FormError>{error}</FormError>
 
       <div className="flex flex-wrap gap-2">
         <Button
@@ -334,15 +331,8 @@ export function OneTimeCommandsSection({
           <Icon icon="solar:add-circle-linear" width={16} aria-hidden />
           Aggiungi un comando
         </Button>
-        <Button
-          variant="primary"
-          size="sm"
-          isPending={busy}
-          isDisabled={isDeploying || !dirty}
-          onPress={save}
-        >
-          Salva la coda
-        </Button>
+        {/* No save button of its own: the tab's bar saves the queue with the rest. */}
+        {busy && <span className="text-muted self-center text-xs">Salvataggio della coda…</span>}
         <Button variant="ghost" size="sm" onPress={() => setShowHistory((open) => !open)}>
           <Icon icon="solar:history-linear" width={16} aria-hidden />
           {showHistory ? "Nascondi la cronologia" : "Mostra la cronologia"}

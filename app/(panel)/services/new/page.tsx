@@ -3,10 +3,12 @@
 import { useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
+import { Button } from "@heroui/react";
 import { Icon } from "@iconify/react";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Code, Hint } from "@/components/ui/Hint";
-import { cn } from "@/lib/utils";
+import { ChoiceCard, ChoiceGroup } from "@/components/ui/ChoiceCard";
+import { Panel } from "@/components/ui/Panel";
 import { DOCKER_TEMPLATES, dockerTemplate } from "./_data/catalog";
 import { AppForm } from "@/components/AppForm";
 import { DatabaseForm } from "./_components/DatabaseForm";
@@ -48,14 +50,10 @@ export default function NewServicePage() {
         <PageHeader
           title={title}
           actions={
-            <button
-              type="button"
-              onClick={() => setChoice(null)}
-              className="text-muted hover:text-foreground flex items-center gap-1.5 text-sm transition-colors"
-            >
+            <Button variant="ghost" size="sm" onPress={() => setChoice(null)}>
               <Icon icon="solar:arrow-left-linear" width={16} aria-hidden />
               Cambia
-            </button>
+            </Button>
           }
         />
 
@@ -92,9 +90,6 @@ export default function NewServicePage() {
     })),
   ];
 
-  const cardClass =
-    "border-border bg-surface flex flex-col gap-2 rounded-[var(--radius)] border p-4 text-left transition-colors";
-
   return (
     <>
       <PageHeader
@@ -118,42 +113,35 @@ export default function NewServicePage() {
         </Hint>
       )}
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      <ChoiceGroup label="Cosa aggiungere" className="gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {cards.map((card) => {
           const needsProject = card.key !== "database" && !projectId;
 
-          const inner = (
-            <>
-              <Icon icon={card.icon} width={22} className="text-muted" aria-hidden />
-              <span className={cn("text-sm font-medium", needsProject ? "text-muted" : "text-foreground")}>
-                {card.title}
-              </span>
-              <span className="text-muted text-xs">
-                {needsProject ? "Si configura da dentro un progetto" : card.description}
-              </span>
-            </>
-          );
-
+          // A link, not a choice: it leads to where this option lives.
           return needsProject ? (
-            <Link
-              key={card.key}
-              href="/projects"
-              className={cn(cardClass, "border-dashed hover:bg-surface-hover")}
-            >
-              {inner}
+            <Link key={card.key} href="/projects" className="block min-w-0">
+              <Panel interactive padding="compact" className="flex h-full items-start gap-3 border-dashed">
+                <Icon icon={card.icon} width={20} className="text-muted mt-0.5 shrink-0" aria-hidden />
+                <span className="min-w-0 flex-1">
+                  <span className="text-muted block truncate text-sm font-medium">{card.title}</span>
+                  <span className="text-muted mt-0.5 block text-xs">
+                    Si configura da dentro un progetto
+                  </span>
+                </span>
+              </Panel>
             </Link>
           ) : (
-            <button
+            <ChoiceCard
               key={card.key}
-              type="button"
-              onClick={card.onSelect}
-              className={cn(cardClass, "hover:border-separator hover:bg-surface-hover")}
-            >
-              {inner}
-            </button>
+              selected={false}
+              onSelect={card.onSelect}
+              title={card.title}
+              description={card.description}
+              icon={card.icon}
+            />
           );
         })}
-      </div>
+      </ChoiceGroup>
     </>
   );
 }

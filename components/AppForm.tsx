@@ -13,8 +13,11 @@ import { InfoTip } from "@/components/ui/Tooltip";
 import { formatRelative } from "@/lib/format";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { Code, FieldHint, Hint } from "@/components/ui/Hint";
+import { SelectField } from "@/components/ui/SelectField";
+import { Field } from "@/components/ui/Field";
+import { ChoiceCard, ChoiceGroup } from "@/components/ui/ChoiceCard";
+import { CommandField } from "@/components/ui/CommandField";
 import { PortHint, ServiceLinkHint } from "@/components/DeployHints";
-import { cn } from "@/lib/utils";
 
 type SourceType = "github" | "upload";
 type RuntimeType = "node" | "docker" | "compose" | "custom";
@@ -242,18 +245,19 @@ export function AppForm({
                 {selectedRepo.private && (
                   <Icon icon="solar:lock-linear" width={14} className="text-muted shrink-0" aria-label="privato" />
                 )}
-                <button
-                  type="button"
-                  onClick={() => setSelectedRepo(null)}
-                  className="text-muted hover:text-foreground shrink-0 text-sm transition-colors"
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="shrink-0"
+                  onPress={() => setSelectedRepo(null)}
                 >
                   Cambia
-                </button>
+                </Button>
               </div>
             ) : connected ? (
               <div>
-                <div className="mb-2 flex items-center justify-between gap-2">
-                  <span className="text-muted text-sm font-medium">
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-muted min-w-0 text-sm font-medium">
                     I tuoi repository{repos.length > 0 ? ` (${filteredRepos.length})` : ""}
                   </span>
                   <Input
@@ -261,7 +265,7 @@ export function AppForm({
                     onChange={(e) => setRepoSearch(e.target.value)}
                     placeholder="Cerca…"
                     aria-label="Cerca repository"
-                    className="max-w-[180px]"
+                    className="min-w-0 max-w-[180px]"
                   />
                 </div>
 
@@ -301,13 +305,14 @@ export function AppForm({
                   </ul>
                 )}
 
-                <button
-                  type="button"
-                  onClick={() => setManualUrl((v) => !v)}
-                  className="text-muted hover:text-foreground mt-2 text-xs transition-colors"
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="mt-2"
+                  onPress={() => setManualUrl((v) => !v)}
                 >
                   {manualUrl ? "Nascondi" : "Oppure incolla un URL"}
-                </button>
+                </Button>
               </div>
             ) : reposError && !repoData ? (
               // A failed list (rate limit, network) is not "no account": the
@@ -332,27 +337,16 @@ export function AppForm({
               </TextField>
             )}
 
-            {/* A native select rather than a listbox: the branch list is plain
-                data, and this is keyboard- and screen-reader-correct for free. */}
             {selectedRepo && branches.length > 0 ? (
-              <div>
-                <label htmlFor="branch-select" className="text-muted mb-1 block text-sm font-medium">
-                  Branch
-                </label>
-                <select
-                  id="branch-select"
-                  value={branch}
-                  onChange={(e) => setBranch(e.target.value)}
-                  className="border-border bg-background text-foreground focus:border-accent/60 w-full rounded-[var(--radius)] border px-3 py-2 font-mono text-sm outline-none"
-                >
-                  {branches.map((b) => (
-                    <option key={b.name} value={b.name}>
-                      {b.name}
-                      {b.name === selectedRepo.default_branch ? "  (default)" : ""}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              <SelectField
+                label="Branch"
+                value={branch}
+                onChange={setBranch}
+                options={branches.map((b) => ({
+                  value: b.name,
+                  label: `${b.name}${b.name === selectedRepo.default_branch ? "  (default)" : ""}`,
+                }))}
+              />
             ) : (
               <TextField value={branch} onChange={setBranch}>
                 <Label>Branch</Label>
@@ -369,8 +363,18 @@ export function AppForm({
             </FieldHint>
           </>
         ) : (
-          <div>
-            <span className="text-muted mb-2 block text-sm font-medium">Archivio ZIP</span>
+          <Field
+            label="Archivio ZIP"
+            hint={
+              <>
+                Massimo 100 MB. Se l&apos;archivio contiene una sola cartella al primo livello viene
+                aperta da sola, quindi <Code>progetto.zip → progetto/package.json</Code> va bene
+                quanto averlo in cima. Ogni upload sostituisce i file precedenti del progetto, e
+                senza repository collegato non c&apos;è auto-deploy: ricarichi lo ZIP a ogni
+                modifica.
+              </>
+            }
+          >
             <input
               ref={zipInputRef}
               type="file"
@@ -382,14 +386,7 @@ export function AppForm({
               <Icon icon="solar:upload-linear" width={16} aria-hidden />
               {zipFile ? zipFile.name : "Scegli un file"}
             </Button>
-            <FieldHint>
-              Massimo 100 MB. Se l&apos;archivio contiene una sola cartella al primo livello viene
-              aperta da sola, quindi <Code>progetto.zip → progetto/package.json</Code> va bene
-              quanto averlo in cima. Ogni upload sostituisce i file precedenti del progetto, e
-              senza repository collegato non c&apos;è auto-deploy: ricarichi lo ZIP a ogni
-              modifica.
-            </FieldHint>
-          </div>
+          </Field>
         )}
       </Panel>
 
@@ -408,8 +405,14 @@ export function AppForm({
         />
 
         {presets.length > 0 && (
-          <div>
-            <span className="text-muted mb-2 block text-sm font-medium">Preset</span>
+          <Field
+            label="Preset"
+            hint={
+              presetId
+                ? presets.find((preset) => preset.id === presetId)?.description
+                : "RunPanel guarda i file del repository e sceglie la configurazione che gli somiglia."
+            }
+          >
             <Segmented
               label="Preset di deploy"
               value={presetId ?? "auto"}
@@ -430,41 +433,21 @@ export function AppForm({
                 ...presets.map((preset) => ({ value: preset.id, label: preset.label })),
               ]}
             />
-            <FieldHint>
-              {presetId
-                ? presets.find((preset) => preset.id === presetId)?.description
-                : "RunPanel guarda i file del repository e sceglie la configurazione che gli somiglia."}
-            </FieldHint>
-          </div>
+          </Field>
         )}
 
-        <div className="grid gap-2 sm:grid-cols-3">
+        <ChoiceGroup label="Runtime" className="sm:grid-cols-3">
           {RUNTIMES.map((r) => (
-            <button
+            <ChoiceCard
               key={r.id}
-              type="button"
-              onClick={() => setRuntime(r.id)}
-              aria-pressed={runtime === r.id}
-              className={cn(
-                "rounded-[var(--radius)] border px-3 py-3 text-left transition-colors",
-                runtime === r.id
-                  ? "selected border-transparent"
-                  : "border-border hover:bg-surface-hover"
-              )}
-            >
-              <span className="text-foreground flex items-center gap-2 text-sm">
-                <Icon
-                  icon={r.icon}
-                  width={16}
-                  className={cn(runtime === r.id ? "text-accent" : "text-muted")}
-                  aria-hidden
-                />
-                {r.label}
-              </span>
-              <span className="text-muted mt-1 block text-meta">{r.hint}</span>
-            </button>
+              selected={runtime === r.id}
+              onSelect={() => setRuntime(r.id)}
+              icon={r.icon}
+              title={r.label}
+              description={r.hint}
+            />
           ))}
-        </div>
+        </ChoiceGroup>
 
         <Hint>{RUNTIME_REQUIREMENTS[runtime]}</Hint>
 
@@ -500,18 +483,16 @@ export function AppForm({
               { label: "Build", value: buildCmd, set: setBuildCmd, slot: "build" as const, fallback: "npm run build" },
               { label: "Start", value: startCmd, set: setStartCmd, slot: "start" as const, fallback: "npm start" },
             ].map((field) => (
-              <div key={field.label}>
-                <label className="text-muted mb-1 block text-sm font-medium">{field.label}</label>
-                <textarea
-                  value={field.value}
-                  onChange={(e) => field.set(e.target.value)}
-                  rows={field.label === "Start" ? 1 : 2}
-                  placeholder={
-                    selectedPreset ? (selectedPreset.commands[field.slot] ?? "") : field.fallback
-                  }
-                  className="border-border bg-background text-foreground focus:border-accent/60 w-full resize-y rounded-[var(--radius)] border px-3 py-2 font-mono text-sm outline-none"
-                />
-              </div>
+              <CommandField
+                key={field.label}
+                label={field.label}
+                value={field.value}
+                onChange={field.set}
+                rows={field.label === "Start" ? 1 : 2}
+                placeholder={
+                  selectedPreset ? (selectedPreset.commands[field.slot] ?? "") : field.fallback
+                }
+              />
             ))}
           </div>
         )}

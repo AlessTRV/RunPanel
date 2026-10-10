@@ -8,7 +8,6 @@ import { usePollInterval } from "@/lib/hooks/usePollingInterval";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { LoadError } from "@/components/ui/LoadError";
 import { Panel } from "@/components/ui/Panel";
-import { StatTile } from "@/components/ui/StatTile";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { PageSkeleton } from "@/components/ui/Skeletons";
 import { statusMeta, TONE_DOT } from "@/lib/status";
@@ -162,14 +161,15 @@ export default function MonitorPage() {
     });
   }, []);
 
-  if (loading && !data) return <PageSkeleton />;
+  if (loading && !data) return <PageSkeleton title="Monitor" description="Processi e servizi in esecuzione su questo host" tiles={0} />;
   if (!data) {
-    return <LoadError what="il monitor" error={loadError ?? "Nessuna risposta"} onRetry={() => void refresh()} />;
+    return (
+      <>
+        <PageHeader title="Monitor" description="Processi e servizi in esecuzione su questo host" />
+        <LoadError what="il monitor" error={loadError ?? "Nessuna risposta"} onRetry={() => void refresh()} />
+      </>
+    );
   }
-
-  const memoryPercent = data.server.memory.total
-    ? (data.server.memory.used / data.server.memory.total) * 100
-    : 0;
 
   const standalone = data.services ?? [];
 
@@ -177,17 +177,26 @@ export default function MonitorPage() {
     <>
       <PageHeader title="Monitor" description="Processi e servizi in esecuzione su questo host" />
 
-      <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-3">
-        <StatTile label="CPU host" value={`${data.server.cpu.toFixed(1)}%`} percent={data.server.cpu} icon="solar:cpu-linear" />
-        <StatTile
-          label="Memoria"
-          value={formatBytes(data.server.memory.used)}
-          hint={`di ${formatBytes(data.server.memory.total)}`}
-          percent={memoryPercent}
-          icon="solar:server-linear"
-        />
-        <StatTile label="Uptime" value={formatUptime(data.server.uptime)} icon="solar:clock-circle-linear" />
-      </div>
+      {/* The host in one line. The same three numbers are tiles on the
+          Panoramica; here the page is about the processes, so the machine is
+          context rather than the headline. */}
+      <p className="text-muted mb-4 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs tabular-nums">
+        <span className="flex items-center gap-1.5">
+          <Icon icon="solar:cpu-linear" width={14} aria-hidden />
+          CPU host <span className="text-foreground">{data.server.cpu.toFixed(1)}%</span>
+        </span>
+        <span className="flex items-center gap-1.5">
+          <Icon icon="solar:server-linear" width={14} aria-hidden />
+          Memoria{" "}
+          <span className="text-foreground">
+            {formatBytes(data.server.memory.used)} di {formatBytes(data.server.memory.total)}
+          </span>
+        </span>
+        <span className="flex items-center gap-1.5">
+          <Icon icon="solar:clock-circle-linear" width={14} aria-hidden />
+          Uptime <span className="text-foreground">{formatUptime(data.server.uptime)}</span>
+        </span>
+      </p>
 
       {data.projects.length === 0 && standalone.length === 0 ? (
         <Panel>

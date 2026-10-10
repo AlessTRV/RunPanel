@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { MSG } from "@/lib/copy";
 import { formatBytes } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { SkeletonText } from "@/components/ui/Skeletons";
 
 interface FileEntry {
   name: string;
@@ -141,13 +142,15 @@ export function FileManager({ projectId, runtimeType }: { projectId: string; run
         >
           <nav
             aria-label="Percorso dei file"
-            className="border-border text-muted flex shrink-0 items-center gap-1 border-b px-3 py-2 text-xs"
+            // Scrolls sideways rather than clipping: a deep path was cut off by
+            // the panel's overflow-hidden with no way to reach the last level.
+            className="border-border text-muted flex shrink-0 items-center gap-1 overflow-x-auto border-b px-3 py-2 text-xs whitespace-nowrap"
           >
             <button onClick={() => { setLoadingDir(true); void loadDir("/"); }} className="hover:text-foreground">
               /
             </button>
             {crumbs.map((crumb, i) => (
-              <span key={`${crumb}-${i}`} className="flex items-center gap-1">
+              <span key={`${crumb}-${i}`} className="flex shrink-0 items-center gap-1">
                 <span aria-hidden>/</span>
                 <button
                   onClick={() => { setLoadingDir(true); void loadDir(`/${crumbs.slice(0, i + 1).join("/")}`); }}
@@ -173,11 +176,25 @@ export function FileManager({ projectId, runtimeType }: { projectId: string; run
           )}
 
           {loadingDir ? (
-            <div className="flex justify-center py-8">
-              <Spinner />
+            <div className="space-y-3 px-3 py-3" aria-busy>
+              <SkeletonText className="w-2/3" />
+              <SkeletonText className="w-1/2" />
+              <SkeletonText className="w-3/5" />
             </div>
           ) : dirError ? (
-            <p className="text-danger px-3 py-8 text-center text-xs">{dirError}</p>
+            <div role="alert" className="flex flex-col items-center gap-2 px-3 py-8 text-center">
+              <p className="text-danger text-xs">{dirError}</p>
+              <Button
+                size="sm"
+                variant="secondary"
+                onPress={() => {
+                  setLoadingDir(true);
+                  void loadDir(currentPath);
+                }}
+              >
+                Riprova
+              </Button>
+            </div>
           ) : entries.length === 0 ? (
             <p className="text-muted py-8 text-center text-xs">Cartella vuota</p>
           ) : (

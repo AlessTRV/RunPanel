@@ -4,6 +4,7 @@ import { use } from "react";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Panel } from "@/components/ui/Panel";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { LoadError } from "@/components/ui/LoadError";
 import { SkeletonBlock } from "@/components/ui/Skeletons";
 import { useResource } from "@/lib/hooks/useResource";
 import { PolicyForm } from "../../_components/PolicyForm";
@@ -15,12 +16,12 @@ export default function EditBackupPolicyPage({
   params: Promise<{ policyId: string }>;
 }) {
   const { policyId } = use(params);
-  const { data, loading, error } = useResource<PolicyView>(`/api/backups/policies/${policyId}`);
+  const { data, loading, error, refresh } = useResource<PolicyView>(`/api/backups/policies/${policyId}`);
 
   if (loading && !data) {
     return (
       <>
-        <PageHeader title="Pianificazione" />
+        <PageHeader title="Pianificazione" back={{ href: "/backups", label: "Torna ai backup" }} />
         <div className="space-y-4">
           {Array.from({ length: 3 }, (_, i) => (
             <SkeletonBlock key={i} className="h-40" />
@@ -30,10 +31,19 @@ export default function EditBackupPolicyPage({
     );
   }
 
+  if (error && error !== "HTTP 404") {
+    return (
+      <>
+        <PageHeader title="Pianificazione" back={{ href: "/backups", label: "Torna ai backup" }} />
+        <LoadError what="la pianificazione" error={error} onRetry={() => void refresh()} />
+      </>
+    );
+  }
+
   if (error || !data) {
     return (
       <>
-        <PageHeader title="Pianificazione" />
+        <PageHeader title="Pianificazione" back={{ href: "/backups", label: "Torna ai backup" }} />
         <Panel>
           <EmptyState
             icon="solar:danger-triangle-linear"
@@ -48,6 +58,7 @@ export default function EditBackupPolicyPage({
   return (
     <>
       <PageHeader
+        back={{ href: "/backups", label: "Torna ai backup" }}
         title={data.name}
         description={data.schedule}
       />

@@ -59,6 +59,11 @@ export function UpdateBanner() {
   const active = isUpdateActive(data);
   const available = hasUpdate(data);
   const target = data.check?.remoteSha ?? null;
+  // The same gate the /updates page applies to its own button. The banner used
+  // to offer "Aggiorna" regardless, so a blocked host started a run that the
+  // page would have refused.
+  const manual = data.canUpdate.restart === "manual";
+  const blocked = Boolean(data.blocker) || (!data.canUpdate.ok && !manual);
 
   if (!active && (!available || (target && dismissed === target))) return null;
 
@@ -132,9 +137,11 @@ export function UpdateBanner() {
           <LinkButton href="/updates">{active ? "Segui" : "Dettagli"}</LinkButton>
           {!active && (
             <>
-              <Button size="sm" variant="primary" onPress={() => setConfirming(true)}>
-                Aggiorna
-              </Button>
+              {!blocked && (
+                <Button size="sm" variant="primary" onPress={() => setConfirming(true)}>
+                  {manual ? "Prepara" : "Aggiorna"}
+                </Button>
+              )}
               <Button size="sm" variant="ghost" onPress={dismiss} aria-label="Nascondi l'avviso">
                 <Icon icon="solar:close-circle-linear" width={16} aria-hidden />
               </Button>
@@ -147,12 +154,14 @@ export function UpdateBanner() {
         isOpen={confirming}
         onOpenChange={setConfirming}
         title="Aggiornare RunPanel?"
-        confirmLabel="Aggiorna e riavvia"
+        confirmLabel={manual ? "Prepara l'aggiornamento" : "Aggiorna e riavvia"}
         description={
           <>
-            Il pannello scarica la nuova versione, installa, builda e si riavvia. Le modifiche
-            locali non committate in questa installazione vengono scartate. I progetti e i servizi
-            in esecuzione non vengono toccati.
+            {manual
+              ? "Il pannello scarica la nuova versione, installa e builda; il riavvio su questo host lo fai tu."
+              : "Il pannello scarica la nuova versione, installa, builda e si riavvia."}{" "}
+            Le modifiche locali non committate in questa installazione vengono scartate. I progetti
+            e i servizi in esecuzione non vengono toccati.
           </>
         }
         onConfirm={apply}

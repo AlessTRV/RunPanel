@@ -10,6 +10,8 @@ import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { Section } from "@/components/ui/Section";
 import { Code, FieldHint, Hint } from "@/components/ui/Hint";
 import { Segmented, SegmentedMulti } from "@/components/ui/Segmented";
+import { SelectField } from "@/components/ui/SelectField";
+import { CheckboxField } from "@/components/ui/CheckboxField";
 import { useResource } from "@/lib/hooks/useResource";
 import { formatWhen } from "@/lib/format";
 import type {
@@ -340,21 +342,15 @@ export function PolicyForm({ policy }: Props) {
           </TextField>
 
           <div>
-            <label className="text-foreground mb-1.5 block text-sm" htmlFor="destination">
-              Destinazione
-            </label>
-            <select
-              id="destination"
-              value={destinationId}
-              onChange={(event) => setChosenDestination(event.target.value)}
-              className="border-border bg-surface text-foreground h-9 w-full rounded-[var(--radius)] border px-2 text-sm"
-            >
-              {(destinations.data?.destinations ?? []).map((destination) => (
-                <option key={destination.id} value={destination.id}>
-                  {destination.name}
-                </option>
-              ))}
-            </select>
+            <SelectField
+              label="Destinazione"
+              value={destinationId || null}
+              onChange={setChosenDestination}
+              options={(destinations.data?.destinations ?? []).map((destination) => ({
+                value: destination.id,
+                label: destination.name,
+              }))}
+            />
             <FieldHint>Gli archivi restano su questa macchina, in data/backups.</FieldHint>
           </div>
         </div>
@@ -448,32 +444,28 @@ export function PolicyForm({ policy }: Props) {
                 const databases = selectedServices[service.id];
                 return (
                   <div key={service.id} className="p-3">
-                    <label className="flex items-center gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={chosen}
-                        onChange={() => toggleService(service.id)}
-                      />
-                      <span className="text-foreground">{serviceDisplayName(service)}</span>
-                      <span className="text-muted text-xs">
-                        {service.type} {service.version}
-                      </span>
-                    </label>
+                    <CheckboxField
+                      isSelected={chosen}
+                      onChange={() => toggleService(service.id)}
+                      label={
+                        <span className="flex min-w-0 flex-wrap items-center gap-x-2">
+                          <span className="text-foreground">{serviceDisplayName(service)}</span>
+                          <span className="text-muted text-xs">
+                            {service.type} {service.version}
+                          </span>
+                        </span>
+                      }
+                    />
 
                     {chosen && service.databases.length > 0 && (
-                      <div className="mt-2 flex flex-wrap gap-2 pl-6">
+                      <div className="mt-2 flex flex-wrap items-center gap-2 pl-6">
                         {service.databases.map((database) => (
-                          <label
+                          <CheckboxField
                             key={database}
-                            className="text-muted flex items-center gap-1.5 text-xs"
-                          >
-                            <input
-                              type="checkbox"
-                              checked={Boolean(databases?.includes(database))}
-                              onChange={() => toggleDatabase(service.id, database)}
-                            />
-                            {database}
-                          </label>
+                            isSelected={Boolean(databases?.includes(database))}
+                            onChange={() => toggleDatabase(service.id, database)}
+                            label={<span className="text-muted text-xs">{database}</span>}
+                          />
                         ))}
                         <span className="text-muted text-meta">
                           {databases?.length
@@ -491,14 +483,11 @@ export function PolicyForm({ policy }: Props) {
 
         {/* Panel store */}
         <div className="border-border mt-5 border-t pt-4">
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={includePanel}
-              onChange={(event) => setIncludePanel(event.target.checked)}
-            />
-            <span className="text-foreground font-medium">Store del pannello</span>
-          </label>
+          <CheckboxField
+            isSelected={includePanel}
+            onChange={setIncludePanel}
+            label={<span className="text-foreground font-medium">Store del pannello</span>}
+          />
           <FieldHint>
             Progetti, servizi, variabili cifrate e impostazioni. Senza questo un ripristino rimette i
             dati ma non chi li possedeva.
@@ -506,14 +495,11 @@ export function PolicyForm({ policy }: Props) {
 
           {includePanel && (
             <div className="mt-3 pl-6">
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={includeSecretKey}
-                  onChange={(event) => setIncludeSecretKey(event.target.checked)}
-                />
-                <span className="text-foreground">Includi la chiave di cifratura</span>
-              </label>
+              <CheckboxField
+                isSelected={includeSecretKey}
+                onChange={setIncludeSecretKey}
+                label="Includi la chiave di cifratura"
+              />
               {includeSecretKey && (
                 <Hint tone="warn" className="mt-2">
                   Con la chiave dentro, l&apos;archivio si decifra da solo: è quello che serve per
@@ -564,27 +550,30 @@ export function PolicyForm({ policy }: Props) {
                 <p className="text-muted p-3 text-xs">Nessun progetto configurato.</p>
               )}
               {projects.map((project) => (
-                <label key={project.id} className="flex items-center gap-2 p-3 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={Boolean(selectedProjects[project.id])}
-                    onChange={(event) =>
+                <div key={project.id} className="p-3">
+                  <CheckboxField
+                    isSelected={Boolean(selectedProjects[project.id])}
+                    onChange={(next) =>
                       setSelectedProjects((current) => ({
                         ...current,
-                        [project.id]: event.target.checked,
+                        [project.id]: next,
                       }))
                     }
+                    label={
+                      <span className="flex min-w-0 flex-wrap items-center gap-x-2">
+                        <span className="text-foreground">{project.slug}</span>
+                        {project.volumes.length > 0 && (
+                          <span className="text-muted text-xs">
+                            {project.volumes.length} volum{project.volumes.length === 1 ? "e" : "i"}
+                          </span>
+                        )}
+                        {project.sourceType === "upload" && (
+                          <span className="text-muted text-meta">da ZIP</span>
+                        )}
+                      </span>
+                    }
                   />
-                  <span className="text-foreground">{project.slug}</span>
-                  {project.volumes.length > 0 && (
-                    <span className="text-muted text-xs">
-                      {project.volumes.length} volum{project.volumes.length === 1 ? "e" : "i"}
-                    </span>
-                  )}
-                  {project.sourceType === "upload" && (
-                    <span className="text-muted text-meta">da ZIP</span>
-                  )}
-                </label>
+                </div>
               ))}
             </div>
           )}
