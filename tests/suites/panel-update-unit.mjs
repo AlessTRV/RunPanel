@@ -177,6 +177,15 @@ export async function run({ repoRoot }) {
     "removing it would make the next self-update overwrite the running build"
   );
 
+  const updateTsconfig = JSON.parse(readFileSync(join(repoRoot, "tsconfig.update.json"), "utf8"));
+  r.check(
+    "the staged build type-checks without the live .next/types",
+    realConfig.includes("tsconfig.update.json") &&
+      !updateTsconfig.include.some((p) => p.startsWith(".next/")) &&
+      updateTsconfig.exclude.includes(".next"),
+    "the running build's route types point at pages an update may have moved (TS2307)"
+  );
+
   const gitignore = readFileSync(join(repoRoot, ".gitignore"), "utf8");
   r.check(
     ".gitignore still hides the staging directory",

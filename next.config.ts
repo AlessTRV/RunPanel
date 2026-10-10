@@ -80,6 +80,19 @@ const nextConfig: NextConfig = {
   distDir,
 
   /**
+   * A staged build type-checks without the live `.next/types`.
+   *
+   * Those are the route types of the build that is running, and they import
+   * every page by its path. An update that moves a page left them pointing at
+   * a file that no longer exists, and the build failed on TS2307 with the new
+   * code itself perfectly sound. `tsconfig.update.json` is `tsconfig.json`
+   * minus `.next/`.
+   */
+  typescript: {
+    tsconfigPath: distDir === ".next" ? "tsconfig.json" : "tsconfig.update.json",
+  },
+
+  /**
    * Lower the peak memory of a webpack build, for a small cost in build time.
    *
    * Not a micro-optimisation. The panel builds itself on the machine it runs
