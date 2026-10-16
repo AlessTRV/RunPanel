@@ -98,7 +98,7 @@ Una pagina che dice cosa non va in questa installazione e cosa premere per siste
 <td valign="top" colspan="2">
 
 ### 🌐 Più server
-Collega altre installazioni di RunPanel a questa: stessi account ovunque, un selettore del server nella barra, deploy con log in diretta, database, backup e aggiornamenti di ogni server da un solo pannello — sulla tua rete privata, con richieste firmate e niente esposto su internet.
+Collega altre installazioni di RunPanel a questa: stessi account ovunque, progetti, database, backup, monitor, diagnostica e aggiornamenti di ogni server nelle stesse liste, con una scheda per server per carico, disco e avvisi, tutto da un solo pannello — sulla tua rete privata, con richieste firmate e niente esposto su internet.
 
 </td>
 </tr>
@@ -155,11 +155,11 @@ Sistema, Accessi e Impostazioni raggruppano più pagine in schede, ognuna con il
 
 | Voce | A cosa serve |
 |---|---|
-| **Panoramica** | stato di tutto, in una schermata: cartelle per raggruppare progetti e servizi, più i servizi senza progetto |
+| **Panoramica** | stato di tutto, in una schermata: cartelle per raggruppare progetti e servizi, più i servizi senza progetto; con più server, una scheda per server e tutto diviso per server |
 | **Progetti** | deploy, log in diretta, storico, variabili, file, terminale, impostazioni |
 | **Servizi** | database gestiti, i loro database interni, collegamenti ai progetti |
 | **Backup** | policy, destinazioni, esecuzioni, archivi, ripristini |
-| **Monitor** | processi e container con CPU, memoria e uptime, più il riepilogo dell'host |
+| **Monitor** | processi e container con CPU, memoria e uptime, più il riepilogo dell'host (di ogni server, se sono più d'uno) |
 | **Sistema** | *Diagnostica* (cosa manca e cosa premere), *Avvio automatico* (cosa torna su dopo un riavvio), *Aggiornamenti* (versione, commit nuovi, il pulsante che li applica), *Pulizia Docker* (cosa occupa il disco e cosa si recupera), *Server* (le installazioni collegate: stato, versione, diagnosi, ruolo, revoca) |
 | **Accessi** | *Utenti* (inviti con link a scadenza, permessi per account) e *Registro attività* (chi ha fatto cosa) |
 | **Impostazioni** | *Account* (email, password, sessioni, tema chiaro o scuro), *Pannello* (frequenza di refresh, fuso, indirizzo pubblico, intervallo del controllo periodico, colore d'accento, notifiche Telegram, registry privati), *GitHub* (token, repository, branch) |

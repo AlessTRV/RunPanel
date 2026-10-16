@@ -27,9 +27,16 @@ Si collega solo un'installazione al primo avvio, con una `data/` vuota. I proget
 
 Il ruolo si cambia da **Sistema › Server** e vale per tutti. Un pannello che diventa nodo chiude le sessioni aperte.
 
-## Il selettore
+## Tutti i server nel pannello
 
-In alto a destra (nel menu, su telefono) c'è il server selezionato, ricordato per browser. Progetti, servizi, backup, monitor, Sistema, registro attività e impostazioni del server seguono la selezione: una pagina mostra un server alla volta, e il pannello inoltra le chiamate a quel server, log in diretta compresi. La **Panoramica** aggiunge una riga con tutti i server e quanti progetti girano su ciascuno; cliccarne uno lo seleziona.
+Il server di una pagina sta nel suo indirizzo (`?server=…`): un link a un progetto di or apre sempre or, chiunque lo apra. Il selettore in alto a destra (nel menu, su telefono) cambia quel parametro.
+
+- **Liste di tutti i server.** **Panoramica**, **Progetti**, **Servizi**, **Backup**, **Monitor**, **Diagnostica** e **Aggiornamenti** mostrano tutti i server insieme, ogni riga con il nome del suo server; il filtro "Tutti i server" li restringe a uno. Un server che non risponde compare come "non raggiungibile" e non blocca la lista.
+- **Panoramica.** Una scheda per server con CPU, memoria, disco, Docker, versione, progetti attivi e avvisi (disco quasi pieno, versione diversa, cose da sistemare, aggiornamento disponibile). Sotto, progetti e servizi divisi per server, ognuno con le sue cartelle. Le stesse schede sono in **Sistema › Server**.
+- **Azioni.** Avviare un servizio, eseguire un backup, scaricare un archivio, applicare una correzione della diagnostica o aggiornare un server partono sempre dal server della riga.
+- **Creare.** Nuovo progetto, nuovo database, nuova cartella e nuova pianificazione di backup chiedono su quale server.
+- **Pagine di un server.** La pagina di un progetto o di un servizio, Avvio automatico, Pulizia Docker, Impostazioni e Registro attività riguardano un server alla volta: il nome del server compare nel percorso in alto. Un link a un progetto che sta su un altro server porta lì da solo.
+- **Palette dei comandi** (Ctrl+K) cerca progetti e servizi su tutti i server, **Notifiche Telegram** iniziano con il nome del server che le manda, e il banner degli aggiornamenti dice su quale server ce n'è uno.
 
 I permessi sono quelli dell'account anche sull'altro server: chi può leggere un progetto lo legge ovunque esso stia.
 
@@ -64,6 +71,5 @@ Il server revocato conosce ancora il segreto, quindi la revoca propone di **rige
 
 ## Limiti
 
-- I link alle pagine non dicono su quale server stanno: `/projects/abc` aperto con un altro server selezionato dà "non trovato". Cambia server e ricarica.
 - Lo stato "invitato" di un utente non è replicato: su un altro pannello compare come "invito scaduto" finché non imposta la password.
 - Una cartella appartiene al server su cui è stata creata.

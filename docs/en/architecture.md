@@ -36,6 +36,8 @@ lib/
   cluster-directory.ts  merge of the replicated directory, no imports
   cluster-auth.ts       signature verification, each accepted once
   node-api.ts           /api/x → /api/nodes/<id>/x for the selected server
+  server-url.ts         the server in the page's address (?server=)
+  cluster-merge.ts      merging the servers' answers and per-server warnings, no imports
   deploy-contract.ts    the contract, its parser and preflight checks
   deploy-phases.ts      the points a one-time command can pin to
   ip-access.ts          CIDR matching, and the host's own networks
@@ -47,7 +49,7 @@ services/
   deploy-poll.ts        polling-based auto-deploy
   one-time-commands.ts  the one-time queue: claim, run, outcome, history
   access.ts, access-gate.ts  the TCP gates in front of restricted ports
-  cluster/              cluster state, signed client, directory, join, sync
+  cluster/              cluster state, signed client, fan-out to every server, directory, join, sync
   backup/               policies, dumps, archives, destinations, restore
   autostart/            detection, unit generation, reconcile
   panel-update/         check, staged build, swap, restart exit

@@ -98,7 +98,7 @@ One page that says what is wrong with this installation and what to press to fix
 <td valign="top" colspan="2">
 
 ### 🌐 More than one server
-Link other RunPanel installs to this one: the same accounts everywhere, a server selector in the bar, deploys with their live log, databases, backups and updates of every server from one panel — over your private network, with signed requests and nothing exposed to the internet.
+Link other RunPanel installs to this one: the same accounts everywhere, every server's projects, databases, backups, monitor, diagnostics and updates in the same lists, with a card per server for load, disk and warnings, all from one panel — over your private network, with signed requests and nothing exposed to the internet.
 
 </td>
 </tr>
@@ -158,11 +158,11 @@ System, Access and Settings group several pages as tabs, each with its own addre
 
 | Entry | What it is for |
 |---|---|
-| **Overview** | the state of everything, on one screen: folders to group projects and services, plus the services that belong to no project |
+| **Overview** | the state of everything, on one screen: folders to group projects and services, plus the services that belong to no project; with several servers, a card per server and everything split by server |
 | **Projects** | deploys, live logs, history, variables, files, terminal, settings |
 | **Services** | managed databases, the databases inside them, project links |
 | **Backups** | policies, destinations, runs, archives, restores |
-| **Monitor** | processes and containers with CPU, memory and uptime, plus a summary of the host |
+| **Monitor** | processes and containers with CPU, memory and uptime, plus a summary of the host (of every server, with several) |
 | **System** | *Diagnostics* (what is missing and what to press), *Autostart* (what comes back after a reboot), *Updates* (version, waiting commits, the button that applies them), *Docker cleanup* (what is using the disk and what can be reclaimed), *Servers* (the linked installs: status, version, diagnosis, role, revocation) |
 | **Access** | *Users* (invitations with expiring links, per-account permissions) and *Activity log* (who did what) |
 | **Settings** | *Account* (email, password, sessions, light or dark theme), *Panel* (refresh rate, timezone, public address, polling interval, accent colour, Telegram notifications, private registries), *GitHub* (token, repositories, branches) |

@@ -36,6 +36,8 @@ lib/
   cluster-directory.ts  merge della directory replicata, nessun import
   cluster-auth.ts       verifica delle firme, una sola volta ciascuna
   node-api.ts           /api/x → /api/nodes/<id>/x per il server selezionato
+  server-url.ts         il server nell'indirizzo della pagina (?server=)
+  cluster-merge.ts      unione delle risposte dei server e avvisi per server, nessun import
   deploy-contract.ts    il contratto, il suo parser e i controlli preliminari
   deploy-phases.ts      i punti a cui si aggancia un comando una tantum
   ip-access.ts          confronto CIDR, e le reti della macchina
@@ -47,7 +49,7 @@ services/
   deploy-poll.ts        il deploy automatico a polling
   one-time-commands.ts  la coda una tantum: presa, esecuzione, esito, cronologia
   access.ts, access-gate.ts  i gate TCP davanti alle porte limitate
-  cluster/              stato del cluster, client firmato, directory, join, sync
+  cluster/              stato del cluster, client firmato, fan-out su tutti i server, directory, join, sync
   backup/               policy, dump, archivi, destinazioni, ripristino
   autostart/            rilevamento, generazione della unit, riconciliazione
   panel-update/         controllo, build in staging, scambio, uscita per riavvio

@@ -27,9 +27,16 @@ Only an install on its first run, with an empty `data/`, can join. A server's pr
 
 The role is changed from **Sistema › Server** and applies everywhere. A panel that becomes a node closes its open sessions.
 
-## The selector
+## Every server in the panel
 
-Top right (in the menu, on a phone) is the selected server, remembered per browser. Projects, services, backups, monitor, System, the activity log and the server's settings follow the selection: a page shows one server at a time, and the panel forwards the calls to that server, live logs included. The **Panoramica** (overview) adds a row with every server and how many projects run on each; clicking one selects it.
+A page's server is part of its address (`?server=…`): a link to a project on "or" always opens on "or", whoever opens it. The selector top right (in the menu, on a phone) changes that parameter.
+
+- **Lists of every server.** **Panoramica** (overview), **Progetti**, **Servizi**, **Backup**, **Monitor**, **Diagnostica** and **Aggiornamenti** show every server at once, each row with its server's name; the "Tutti i server" filter narrows them to one. A server that does not answer shows as unreachable and never blocks the list.
+- **Overview.** One card per server with CPU, memory, disk, Docker, version, running projects and warnings (disk nearly full, different version, things to fix, update available). Below, projects and services split by server, each with its own folders. The same cards are on **Sistema › Server**.
+- **Actions.** Starting a service, running a backup, downloading an archive, applying a diagnostics fix or updating a server always go to the row's server.
+- **Creating.** New project, new database, new folder and new backup policy ask which server.
+- **Single-server pages.** A project or service page, Autostart, Docker cleanup, Settings and the Activity log are about one server at a time: its name shows in the breadcrumb. A link to a project on another server takes you there by itself.
+- The **command palette** (Ctrl+K) searches projects and services on every server, **Telegram notifications** start with the name of the server that sent them, and the update banner says which server has one.
 
 Permissions are the account's on the other server too: whoever may read a project reads it wherever it lives.
 
@@ -64,6 +71,5 @@ The revoked server still knows the secret, so revoking offers to **regenerate th
 
 ## Limits
 
-- Page links do not say which server they are on: `/projects/abc` opened with another server selected says "not found". Switch server and reload.
 - A user's "invited" state is not replicated: on another panel it shows as "invitation expired" until they set a password.
 - A folder belongs to the server it was created on.
