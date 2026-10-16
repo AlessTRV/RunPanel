@@ -19,7 +19,7 @@ import { formatBytes, formatDuration, formatWhen } from "@/lib/format";
 import { RestoreDialog } from "../../_components/RestoreDialog";
 import { triggerLabel } from "../../_components/format";
 import type { ArtifactView, RunDetail } from "../../_components/types";
-import { useNodeApi } from "@/lib/hooks/useNode";
+import { useNodeApi, useServerHref } from "@/lib/hooks/useNode";
 
 type OpsEvent =
   | { type: "ready"; runId: string; status: string }
@@ -38,6 +38,7 @@ const KIND_LABELS: Record<string, string> = {
 export default function BackupRunPage({ params }: { params: Promise<{ runId: string }> }) {
   const poll4000 = usePollInterval(4000);
   const api = useNodeApi();
+  const href = useServerHref();
   const { runId } = use(params);
 
   const { data, loading, error, refresh } = useResource<RunDetail>(
@@ -88,7 +89,7 @@ export default function BackupRunPage({ params }: { params: Promise<{ runId: str
   if (loading && !data) {
     return (
       <>
-        <PageHeader title="Backup" back={{ href: "/backups", label: "Torna ai backup" }} />
+        <PageHeader title="Backup" back={{ href: href("/backups"), label: "Torna ai backup" }} />
         <div className="space-y-4">
           <SkeletonBlock className="h-28" />
           <SkeletonBlock className="h-48" />
@@ -101,7 +102,7 @@ export default function BackupRunPage({ params }: { params: Promise<{ runId: str
   if (error && error !== "HTTP 404") {
     return (
       <>
-        <PageHeader title="Backup" back={{ href: "/backups", label: "Torna ai backup" }} />
+        <PageHeader title="Backup" back={{ href: href("/backups"), label: "Torna ai backup" }} />
         <LoadError what="il backup" error={error} onRetry={() => void refresh()} />
       </>
     );
@@ -110,14 +111,14 @@ export default function BackupRunPage({ params }: { params: Promise<{ runId: str
   if (error || !data) {
     return (
       <>
-        <PageHeader title="Backup" back={{ href: "/backups", label: "Torna ai backup" }} />
+        <PageHeader title="Backup" back={{ href: href("/backups"), label: "Torna ai backup" }} />
         <Panel>
           <EmptyState
             icon="solar:danger-triangle-linear"
             title="Backup non trovato"
             description="Potrebbe essere stato eliminato, insieme al suo archivio."
             action={
-              <LinkButton href="/backups">Torna ai backup</LinkButton>
+              <LinkButton href={href("/backups")}>Torna ai backup</LinkButton>
             }
           />
         </Panel>
@@ -132,7 +133,7 @@ export default function BackupRunPage({ params }: { params: Promise<{ runId: str
   return (
     <>
       <PageHeader
-        back={{ href: "/backups", label: "Torna ai backup" }}
+        back={{ href: href("/backups"), label: "Torna ai backup" }}
         title={data.policyName ?? "Esecuzione manuale"}
         description={`${formatWhen(data.startedAt)} · ${triggerLabel(data.trigger)}`}
         actions={
@@ -149,7 +150,7 @@ export default function BackupRunPage({ params }: { params: Promise<{ runId: str
                 Scarica
               </LinkButton>
             )}
-            <LinkButton href="/backups" variant="ghost">
+            <LinkButton href={href("/backups")} variant="ghost">
               Tutti i backup
             </LinkButton>
           </div>

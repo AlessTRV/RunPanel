@@ -31,7 +31,7 @@ import { WebhookSection } from "./WebhookSection";
 import { parseContractJson, type DeployContract } from "@/lib/deploy-contract";
 import type { RuntimeType } from "@/lib/validation";
 import type { Project } from "./types";
-import { useNodeApi } from "@/lib/hooks/useNode";
+import { useNodeApi, useServerHref } from "@/lib/hooks/useNode";
 
 type RawContract = Record<string, unknown>;
 
@@ -121,6 +121,7 @@ export function SettingsTab({
   onRefresh: () => void;
 }) {
   const api = useNodeApi();
+  const href = useServerHref();
   const router = useRouter();
   const [contract, setContract] = useState<DeployContract>(() =>
     parseContractJson(project.builder_config)
@@ -853,7 +854,7 @@ export function SettingsTab({
           const res = await fetch(api(`/api/projects/${project.id}/app`), { method: "DELETE" });
           if (res.ok) {
             toast.success("App rimossa");
-            router.push("/home");
+            router.push(href("/home"));
           } else {
             toast.error(MSG.removeFailed);
           }
@@ -891,7 +892,7 @@ export function SettingsTab({
           );
           if (res.ok) {
             toast.success("Progetto eliminato");
-            router.push("/home");
+            router.push(href("/home"));
           } else {
             toast.error(MSG.deleteFailed);
           }

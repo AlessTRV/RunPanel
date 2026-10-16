@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 import { NAV_PAGES } from "@/lib/nav";
 import { useAllowedNav } from "@/lib/hooks/useMe";
 import { serviceDisplayName } from "@/lib/service-name";
-import { useNodeApi } from "@/lib/hooks/useNode";
+import { useNode, useNodeApi, useServerHref } from "@/lib/hooks/useNode";
 
 /**
  * Ctrl/Cmd+K: go anywhere, do the frequent things.
@@ -31,12 +31,14 @@ interface Command {
 
 
 interface Indexed {
-  projects: { id: string; name: string; slug: string }[];
-  services: { id: string; name: string; type: string }[];
+  projects: { id: string; name: string; slug: string; memberId?: string; memberName?: string }[];
+  services: { id: string; name: string; type: string; memberId?: string; memberName?: string }[];
 }
 
 export function CommandPalette() {
   const api = useNodeApi();
+  const href = useServerHref();
+  const { isSolo } = useNode();
   const router = useRouter();
   // The same destinations the sidebar shows, from the same list and filter.
   const allowed = useAllowedNav();
@@ -50,18 +52,18 @@ export function CommandPalette() {
 
   const load = useCallback(async () => {
     try {
+      // In a cluster, every server's projects and services, each with its server.
+      const read = (url: string) =>
+        fetch(url).then((res) => (res.ok ? res.json() : null)).then((body) => (Array.isArray(body) ? body : (body?.items ?? [])));
       const [projects, services] = await Promise.all([
-        fetch(api("/api/projects")).then((res) => (res.ok ? res.json() : [])),
-        fetch(api("/api/services")).then((res) => (res.ok ? res.json() : [])),
+        read(isSolo ? api("/api/projects") : "/api/cluster/projects"),
+        read(isSolo ? api("/api/services") : "/api/cluster/services"),
       ]);
-      setIndex({
-        projects: Array.isArray(projects) ? projects : [],
-        services: Array.isArray(services) ? services : [],
-      });
+      setIndex({ projects, services });
     } catch {
       /* the static pages are still worth offering */
     }
-  }, [api]);
+  }, [api, isSolo]);
 
   // Opening, and the `g x` chords. The guard matters: without it, typing "g"
   // into any field on any page would start a navigation chord.
@@ -99,7 +101,7 @@ export function CommandPalette() {
         const page = PAGES.find((candidate) => candidate.keys === `g ${event.key.toLowerCase()}`);
         if (page) {
           event.preventDefault();
-          router.push(page.href);
+          router.push(href(page.href));
         }
         return;
       }
@@ -113,7 +115,7 @@ export function CommandPalette() {
 
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, router, load, PAGES]);
+  }, [open, router, load, PAGES, href]);
 
   useEffect(() => {
     // Focus only: the input exists only once open is true, so this cannot be
@@ -127,26 +129,26 @@ export function CommandPalette() {
       label: page.label,
       hint: page.keys,
       icon: page.icon,
-      run: () => router.push(page.href),
+      run: () => router.push(href(page.href)),
     }));
 
     for (const project of index.projects) {
       list.push({
-        id: `project:${project.id}`,
+        id: `project:${project.memberId ?? ""}:${project.id}`,
         label: project.name,
-        hint: `progetto · ${project.slug}`,
+        hint: `progetto · ${project.slug}${project.memberName ? ` · ${project.memberName}` : ""}`,
         icon: "solar:folder-linear",
-        run: () => router.push(`/projects/${project.id}`),
+        run: () => router.push(href(`/projects/${project.id}`, project.memberId)),
       });
     }
 
     for (const service of index.services) {
       list.push({
-        id: `service:${service.id}`,
+        id: `service:${service.memberId ?? ""}:${service.id}`,
         label: serviceDisplayName(service),
-        hint: `servizio · ${service.type}`,
+        hint: `servizio · ${service.type}${service.memberName ? ` · ${service.memberName}` : ""}`,
         icon: "solar:database-linear",
-        run: () => router.push(`/services/${service.id}`),
+        run: () => router.push(href(`/services/${service.id}`, service.memberId)),
       });
     }
 
@@ -155,14 +157,14 @@ export function CommandPalette() {
       label: "Nuovo progetto",
       hint: "azione",
       icon: "solar:add-circle-linear",
-      run: () => router.push("/projects/new"),
+      run: () => router.push(href("/projects/new")),
     });
     list.push({
       id: "action:new-backup",
       label: "Nuova pianificazione di backup",
       hint: "azione",
       icon: "solar:archive-linear",
-      run: () => router.push("/backups/new"),
+      run: () => router.push(href("/backups/new")),
     });
     list.push({
       id: "action:reconcile",
@@ -187,7 +189,7 @@ export function CommandPalette() {
     });
 
     return list;
-  }, [index, router, PAGES, api]);
+  }, [index, router, PAGES, api, href]);
 
   // Keeps the highlighted row in view while the arrows walk past the fold.
   useEffect(() => {

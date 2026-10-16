@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 import { NAV_GROUPS, isActiveNav, navItemsIn, type NavItem } from "@/lib/nav";
 import { useAllowedNav } from "@/lib/hooks/useMe";
 import { usePanelUpdate } from "@/lib/hooks/usePanelUpdate";
+import { useServerHref } from "@/lib/hooks/useNode";
 import { hasUpdate } from "@/lib/panel-update";
 
 /**
@@ -31,9 +32,10 @@ import { hasUpdate } from "@/lib/panel-update";
 
 /** One row of the rail. Shared by both the scrolling list and the pinned footer. */
 function NavLink({ item, active }: { item: NavItem; active: boolean }) {
+  const href = useServerHref();
   return (
     <Link
-      href={item.href}
+      href={href(item.href)}
       aria-current={active ? "page" : undefined}
       className={cn(
         "group relative flex items-center gap-3 rounded-[var(--radius)] px-3 py-2 text-sm transition-colors",

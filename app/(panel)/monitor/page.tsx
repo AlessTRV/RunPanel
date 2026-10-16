@@ -14,7 +14,10 @@ import { statusMeta, TONE_DOT } from "@/lib/status";
 import { formatBytes, formatUptime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { serviceDisplayName } from "@/lib/service-name";
-import { useNodeApi } from "@/lib/hooks/useNode";
+import { useNode, useServerHref } from "@/lib/hooks/useNode";
+import { ServerFilter } from "@/components/cluster/ServerBits";
+import { Hint } from "@/components/ui/Hint";
+import type { PerServer } from "@/lib/cluster-merge";
 
 interface ProcessInfo {
   running: boolean;
@@ -144,41 +147,23 @@ const Row = memo(function Row({
   return <div className={className}>{content}</div>;
 });
 
-export default function MonitorPage() {
-  const api = useNodeApi();
-  const poll3000 = usePollInterval(3000);
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
-
-  // Polls, but stops while the tab is hidden — this endpoint inspects
-  // containers, so an idle background tab was doing real work on the host
-  // every three seconds forever.
-  const { data, loading, error: loadError, refresh } = useResource<MonitorData>(api("/api/monitor"), { intervalMs: poll3000 });
-
-  const toggle = useCallback((id: string) => {
-    setCollapsed((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }, []);
-
-  if (loading && !data) return <PageSkeleton title="Monitor" description="Processi e servizi in esecuzione su questo host" tiles={0} />;
-  if (!data) {
-    return (
-      <>
-        <PageHeader title="Monitor" description="Processi e servizi in esecuzione su questo host" />
-        <LoadError what="il monitor" error={loadError ?? "Nessuna risposta"} onRetry={() => void refresh()} />
-      </>
-    );
-  }
-
+/** One server's processes: the host in one line, then projects and standalone services. */
+function HostMonitor({
+  data,
+  link,
+  collapsed,
+  toggle,
+  keyPrefix,
+}: {
+  data: MonitorData;
+  link: (href: string) => string;
+  collapsed: Set<string>;
+  toggle: (id: string) => void;
+  keyPrefix: string;
+}) {
   const standalone = data.services ?? [];
-
   return (
     <>
-      <PageHeader title="Monitor" description="Processi e servizi in esecuzione su questo host" />
-
       {/* The host in one line. The same three numbers are tiles on the
           Panoramica; here the page is about the processes, so the machine is
           context rather than the headline. */}
@@ -208,7 +193,7 @@ export default function MonitorPage() {
             description="I progetti creati compariranno qui con i loro processi e servizi."
           />
         </Panel>
-      ) : (
+      ) : data.projects.length > 0 ? (
         <Panel padding="flush" className="divide-border divide-y overflow-hidden">
           <div className="text-muted flex items-center gap-3 px-3 py-2 text-meta font-medium">
             <span className="flex-1">Progetto</span>
@@ -220,7 +205,8 @@ export default function MonitorPage() {
           </div>
 
           {data.projects.map((project) => {
-            const isCollapsed = collapsed.has(project.id);
+            const key = `${keyPrefix}${project.id}`;
+            const isCollapsed = collapsed.has(key);
             const hasChildren = project.services.length > 0;
 
             return (
@@ -232,8 +218,8 @@ export default function MonitorPage() {
                   cpu={project.process?.cpu}
                   memory={project.process?.memory}
                   uptime={project.process?.uptime}
-                  href={hasChildren ? undefined : `/projects/${project.id}`}
-                  onToggle={hasChildren ? () => toggle(project.id) : undefined}
+                  href={hasChildren ? undefined : link(`/projects/${project.id}`)}
+                  onToggle={hasChildren ? () => toggle(key) : undefined}
                   collapsed={isCollapsed}
                 />
 
@@ -249,7 +235,7 @@ export default function MonitorPage() {
                         cpu={service.cpu}
                         memory={service.memory}
                         uptime={service.uptime}
-                        href={`/services/${service.id}`}
+                        href={link(`/services/${service.id}`)}
                       />
                     ))}
                   </div>
@@ -258,7 +244,7 @@ export default function MonitorPage() {
             );
           })}
         </Panel>
-      )}
+      ) : null}
 
       {/* Services with no project have no row to nest under, and used to be
           filtered out of this page entirely — a running container with no
@@ -276,11 +262,93 @@ export default function MonitorPage() {
                 cpu={service.cpu}
                 memory={service.memory}
                 uptime={service.uptime}
-                href={`/services/${service.id}`}
+                href={link(`/services/${service.id}`)}
               />
             ))}
           </Panel>
         </>
+      )}
+    </>
+  );
+}
+
+export default function MonitorPage() {
+  const href = useServerHref();
+  const { isSolo, serverParam, selfId } = useNode();
+  const poll3000 = usePollInterval(3000);
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+
+  // Polls, but stops while the tab is hidden — this endpoint inspects
+  // containers, so an idle background tab was doing real work on the host
+  // every three seconds forever. In a cluster the panel asks every server.
+  const solo = useResource<MonitorData>(isSolo ? "/api/monitor" : null, { intervalMs: poll3000 });
+  const cluster = useResource<{ servers: PerServer<MonitorData>[] }>(isSolo ? null : "/api/cluster/monitor", {
+    intervalMs: Math.max(poll3000, 5000),
+  });
+
+  const toggle = useCallback((id: string) => {
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const description = isSolo ? "Processi e servizi in esecuzione su questo host" : "Processi e servizi in esecuzione su ogni server";
+  const loading = isSolo ? solo.loading && !solo.data : cluster.loading && !cluster.data;
+  if (loading) return <PageSkeleton title="Monitor" description={description} tiles={0} />;
+
+  if (isSolo) {
+    if (!solo.data) {
+      return (
+        <>
+          <PageHeader title="Monitor" description={description} />
+          <LoadError what="il monitor" error={solo.error ?? "Nessuna risposta"} onRetry={() => void solo.refresh()} />
+        </>
+      );
+    }
+    return (
+      <>
+        <PageHeader title="Monitor" description={description} />
+        <HostMonitor data={solo.data} link={(h) => h} collapsed={collapsed} toggle={toggle} keyPrefix="" />
+      </>
+    );
+  }
+
+  const servers = (cluster.data?.servers ?? []).filter((s) => !serverParam || s.memberId === serverParam);
+  return (
+    <>
+      <PageHeader title="Monitor" description={description} actions={<ServerFilter />} />
+      {!cluster.data && cluster.error ? (
+        <LoadError what="il monitor" error={cluster.error} onRetry={() => void cluster.refresh()} />
+      ) : (
+        <div className="space-y-8">
+          {servers.map((server) => (
+            <section key={server.memberId} aria-label={`Server ${server.memberName}`}>
+              <h2 className="text-foreground mb-2 flex items-center gap-2 text-sm font-semibold">
+                <Icon icon="solar:server-2-linear" width={16} className="text-muted" aria-hidden />
+                {server.memberName}
+                {server.memberId === selfId && <span className="text-muted font-normal">(questo)</span>}
+              </h2>
+              {server.data ? (
+                <HostMonitor
+                  data={server.data}
+                  link={(h) => href(h, server.memberId)}
+                  collapsed={collapsed}
+                  toggle={toggle}
+                  keyPrefix={`${server.memberId}:`}
+                />
+              ) : (
+                <Hint tone={server.reachable ? "info" : "warn"}>
+                  {server.reachable
+                    ? `Il monitor di ${server.memberName} non è disponibile per il tuo account (${server.error ?? "accesso negato"}).`
+                    : `${server.memberName} non raggiungibile. ${server.error ?? ""}`}
+                </Hint>
+              )}
+            </section>
+          ))}
+        </div>
       )}
     </>
   );

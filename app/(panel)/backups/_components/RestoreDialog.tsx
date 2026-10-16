@@ -12,7 +12,7 @@ import { useResource } from "@/lib/hooks/useResource";
 import { formatBytes } from "@/lib/format";
 import type { ArtifactView, TargetCatalog } from "./types";
 import { serviceDisplayName } from "@/lib/service-name";
-import { useNodeApi } from "@/lib/hooks/useNode";
+import { useNodeApi, useServerHref } from "@/lib/hooks/useNode";
 
 /**
  * The confirmation in front of the only operation that can destroy production
@@ -50,6 +50,7 @@ export function RestoreDialog({
   onOpenChange: (open: boolean) => void;
 }) {
   const api = useNodeApi();
+  const href = useServerHref();
   const router = useRouter();
   const catalog = useResource<TargetCatalog>(isOpen ? api("/api/backups/targets") : null);
 
@@ -127,7 +128,7 @@ export function RestoreDialog({
     }
 
     toast.success("Ripristino avviato");
-    router.push(`/backups/restore/${body.restoreId}`);
+    router.push(href(`/backups/restore/${body.restoreId}`));
   }
 
   return (

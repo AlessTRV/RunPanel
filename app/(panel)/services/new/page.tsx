@@ -13,6 +13,7 @@ import { DOCKER_TEMPLATES, dockerTemplate } from "./_data/catalog";
 import { AppForm } from "@/components/AppForm";
 import { DatabaseForm } from "./_components/DatabaseForm";
 import { TemplateForm } from "./_components/TemplateForm";
+import { useServerHref } from "@/lib/hooks/useNode";
 
 type Choice = { kind: "app" } | { kind: "database" } | { kind: "template"; id: string };
 
@@ -32,6 +33,7 @@ type Choice = { kind: "app" } | { kind: "database" } | { kind: "template"; id: s
  */
 export default function NewServicePage() {
   const searchParams = useSearchParams();
+  const href = useServerHref();
   const projectId = searchParams.get("projectId") ?? "";
   const [choice, setChoice] = useState<Choice | null>(null);
 
@@ -119,7 +121,7 @@ export default function NewServicePage() {
 
           // A link, not a choice: it leads to where this option lives.
           return needsProject ? (
-            <Link key={card.key} href="/projects" className="block min-w-0">
+            <Link key={card.key} href={href("/projects")} className="block min-w-0">
               <Panel interactive padding="compact" className="flex h-full items-start gap-3 border-dashed">
                 <Icon icon={card.icon} width={20} className="text-muted mt-0.5 shrink-0" aria-hidden />
                 <span className="min-w-0 flex-1">

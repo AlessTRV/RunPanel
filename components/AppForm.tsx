@@ -18,7 +18,7 @@ import { Field } from "@/components/ui/Field";
 import { ChoiceCard, ChoiceGroup } from "@/components/ui/ChoiceCard";
 import { CommandField } from "@/components/ui/CommandField";
 import { PortHint, ServiceLinkHint } from "@/components/DeployHints";
-import { useNodeApi } from "@/lib/hooks/useNode";
+import { useNodeApi, useServerHref } from "@/lib/hooks/useNode";
 
 type SourceType = "github" | "upload";
 type RuntimeType = "node" | "docker" | "compose" | "custom";
@@ -88,6 +88,7 @@ export function AppForm({
   secondaryAction?: ReactNode;
 }) {
   const api = useNodeApi();
+  const href = useServerHref();
   const router = useRouter();
   const [saving, setSaving] = useState(false);
 
@@ -206,7 +207,7 @@ export function AppForm({
       }
 
       toast.success("App configurata");
-      router.push(`/projects/${projectId}`);
+      router.push(href(`/projects/${projectId}`));
     } catch {
       toast.error("Configurazione fallita");
     } finally {

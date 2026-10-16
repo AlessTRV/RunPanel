@@ -22,7 +22,8 @@ import type {
   TargetCatalog,
 } from "./types";
 import { serviceDisplayName } from "@/lib/service-name";
-import { useNodeApi } from "@/lib/hooks/useNode";
+import { ServerPicker } from "@/components/cluster/ServerBits";
+import { useNodeApi, useServerHref } from "@/lib/hooks/useNode";
 
 /**
  * Creating and editing a schedule.
@@ -127,6 +128,7 @@ const SCOPE_OPTIONS = [
 
 export function PolicyForm({ policy }: Props) {
   const api = useNodeApi();
+  const href = useServerHref();
   const router = useRouter();
   const catalog = useResource<TargetCatalog>(api("/api/backups/targets"));
   const destinations = useResource<{ destinations: DestinationView[] }>(api("/api/backups/destinations"));
@@ -322,7 +324,7 @@ export function PolicyForm({ policy }: Props) {
       }
 
       toast.success(policy ? "Pianificazione aggiornata" : "Pianificazione creata");
-      router.push("/backups");
+      router.push(href("/backups"));
     } catch {
       toast.error(MSG.saveFailed);
     } finally {
@@ -355,6 +357,9 @@ export function PolicyForm({ policy }: Props) {
             />
             <FieldHint>Gli archivi restano su questa macchina, in data/backups.</FieldHint>
           </div>
+
+          {/* Only when creating: an existing schedule belongs to the server it was made on. */}
+          {!policy && <ServerPicker description="La pianificazione gira su questo server e salva i suoi progetti e servizi." />}
         </div>
       </Panel>
 
@@ -614,7 +619,7 @@ export function PolicyForm({ policy }: Props) {
           <Icon icon="solar:diskette-linear" width={16} aria-hidden />
           {policy ? "Salva le modifiche" : "Crea la pianificazione"}
         </Button>
-        <Button variant="secondary" onPress={() => router.push("/backups")}>
+        <Button variant="secondary" onPress={() => router.push(href("/backups"))}>
           Annulla
         </Button>
       </div>

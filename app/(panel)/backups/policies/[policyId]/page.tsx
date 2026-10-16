@@ -9,7 +9,7 @@ import { SkeletonBlock } from "@/components/ui/Skeletons";
 import { useResource } from "@/lib/hooks/useResource";
 import { PolicyForm } from "../../_components/PolicyForm";
 import type { PolicyView } from "../../_components/types";
-import { useNodeApi } from "@/lib/hooks/useNode";
+import { useNodeApi, useServerHref } from "@/lib/hooks/useNode";
 
 export default function EditBackupPolicyPage({
   params,
@@ -17,13 +17,14 @@ export default function EditBackupPolicyPage({
   params: Promise<{ policyId: string }>;
 }) {
   const api = useNodeApi();
+  const href = useServerHref();
   const { policyId } = use(params);
   const { data, loading, error, refresh } = useResource<PolicyView>(api(`/api/backups/policies/${policyId}`));
 
   if (loading && !data) {
     return (
       <>
-        <PageHeader title="Pianificazione" back={{ href: "/backups", label: "Torna ai backup" }} />
+        <PageHeader title="Pianificazione" back={{ href: href("/backups"), label: "Torna ai backup" }} />
         <div className="space-y-4">
           {Array.from({ length: 3 }, (_, i) => (
             <SkeletonBlock key={i} className="h-40" />
@@ -36,7 +37,7 @@ export default function EditBackupPolicyPage({
   if (error && error !== "HTTP 404") {
     return (
       <>
-        <PageHeader title="Pianificazione" back={{ href: "/backups", label: "Torna ai backup" }} />
+        <PageHeader title="Pianificazione" back={{ href: href("/backups"), label: "Torna ai backup" }} />
         <LoadError what="la pianificazione" error={error} onRetry={() => void refresh()} />
       </>
     );
@@ -45,7 +46,7 @@ export default function EditBackupPolicyPage({
   if (error || !data) {
     return (
       <>
-        <PageHeader title="Pianificazione" back={{ href: "/backups", label: "Torna ai backup" }} />
+        <PageHeader title="Pianificazione" back={{ href: href("/backups"), label: "Torna ai backup" }} />
         <Panel>
           <EmptyState
             icon="solar:danger-triangle-linear"
@@ -60,7 +61,7 @@ export default function EditBackupPolicyPage({
   return (
     <>
       <PageHeader
-        back={{ href: "/backups", label: "Torna ai backup" }}
+        back={{ href: href("/backups"), label: "Torna ai backup" }}
         title={data.name}
         description={data.schedule}
       />

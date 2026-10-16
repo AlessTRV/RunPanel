@@ -13,13 +13,15 @@ import { ChoiceCard, ChoiceGroup } from "@/components/ui/ChoiceCard";
 import { Field } from "@/components/ui/Field";
 import { connectionEnvKey } from "@/lib/service-env";
 import { DATABASE_OPTIONS, databaseOption, type ServiceType } from "../_data/catalog";
-import { useNodeApi } from "@/lib/hooks/useNode";
+import { ServerPicker } from "@/components/cluster/ServerBits";
+import { useNodeApi, useServerHref } from "@/lib/hooks/useNode";
 
 /** Mirrors `serviceNameSchema`: a bad name should not need a round trip. */
 const NAME_PATTERN = /^[a-z0-9][a-z0-9_-]*$/;
 
 export function DatabaseForm({ projectId }: { projectId?: string }) {
   const api = useNodeApi();
+  const href = useServerHref();
   const router = useRouter();
   const [saving, setSaving] = useState(false);
 
@@ -40,7 +42,7 @@ export function DatabaseForm({ projectId }: { projectId?: string }) {
   const [restrict, setRestrict] = useState(false);
   // Seeded from the entry point, then editable: arriving from a project
   // pre-selects it, arriving from Servizi starts on "nessuno".
-  const [project, setProject] = useState(projectId ?? "");
+  const [projectChoice, setProject] = useState(projectId ?? "");
 
   const { data: networkData } = useResource<{ networks: { cidr: string; kind: string }[] }>(
     api("/api/network/suggestions")
@@ -53,6 +55,8 @@ export function DatabaseForm({ projectId }: { projectId?: string }) {
     api("/api/projects")
   );
   const projects = Array.isArray(projectsData) ? projectsData : [];
+  // Switching server swaps the list: a project picked on the other one no longer exists here.
+  const project = projectsData && !projects.some((p) => p.id === projectChoice) ? "" : projectChoice;
   const projectSlug = projects.find((p) => p.id === project)?.slug;
 
   const option = databaseOption(type);
@@ -105,7 +109,7 @@ export function DatabaseForm({ projectId }: { projectId?: string }) {
       toast.success("Servizio creato");
       // Without a project there is nowhere else to go that shows what was just
       // made — and the connection string is the reason someone created it.
-      router.push(project ? `/projects/${project}` : `/services/${data.id}`);
+      router.push(href(project ? `/projects/${project}` : `/services/${data.id}`));
     } catch {
       toast.error("Creazione non riuscita");
     } finally {
@@ -136,6 +140,8 @@ export function DatabaseForm({ projectId }: { projectId?: string }) {
 
       <Panel className="space-y-4">
         <PanelHeader title="Progetto" description="Facoltativo: decide solo chi lo riceve in automatico" />
+
+        <ServerPicker description="Il servizio gira su questo server, insieme ai progetti che lo usano." />
 
         <div>
           <SelectField

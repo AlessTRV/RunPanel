@@ -10,7 +10,7 @@ import { LinkButton } from "@/components/ui/LinkButton";
 import { usePanelUpdate } from "@/lib/hooks/usePanelUpdate";
 import { MSG } from "@/lib/copy";
 import { hasUpdate, isUpdateActive } from "@/lib/panel-update";
-import { useNodeApi } from "@/lib/hooks/useNode";
+import { useMemberApi, useServerHref } from "@/lib/hooks/useNode";
 
 /**
  * "There is a new version", on every screen.
@@ -45,10 +45,15 @@ function readDismissed(): string | null {
 }
 
 export function UpdateBanner() {
-  const api = useNodeApi();
+  const memberApi = useMemberApi();
+  const href = useServerHref();
   const pathname = usePathname();
   const router = useRouter();
-  const { status: data, refresh } = usePanelUpdate();
+  const { status: data, refresh, memberId, memberName, pending } = usePanelUpdate();
+  // In a cluster: which server this is about, and how many others wait too.
+  const where = memberId ? ` su ${memberName}` : "";
+  const others = pending.filter((p) => p.memberId !== memberId).length;
+  const updatesHref = href("/updates", memberId ?? undefined);
   // Read once, in the initialiser rather than in an effect. There is no
   // hydration risk: nothing renders until the fetch lands, which is client-only.
   const [dismissed, setDismissed] = useState<string | null>(readDismissed);
@@ -81,7 +86,7 @@ export function UpdateBanner() {
 
   async function apply() {
     try {
-      const res = await fetch(api("/api/updates/apply"), {
+      const res = await fetch(memberApi(memberId, "/api/updates/apply"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ expectedSha: target }),
@@ -96,7 +101,7 @@ export function UpdateBanner() {
 
       // Straight to the log. From here on the interesting thing is the output,
       // and shortly after that the panel stops answering at all.
-      router.push("/updates");
+      router.push(updatesHref);
     } catch {
       toast.error(MSG.unreachable);
     }
@@ -117,12 +122,13 @@ export function UpdateBanner() {
 
         {active ? (
           <span className="text-foreground min-w-0 flex-1">
-            Aggiornamento del pannello in corso
+            Aggiornamento del pannello in corso{where}
             {data.run?.step ? <span className="text-muted"> — {data.run.step}</span> : null}
           </span>
         ) : (
           <span className="text-foreground min-w-0 flex-1">
-            Aggiornamento disponibile
+            Aggiornamento disponibile{where}
+            {others > 0 && <span className="text-muted"> (e su altri {others})</span>}
             <span className="text-muted">
               {" — "}
               {data.check?.behind === 1 ? "1 commit" : `${data.check?.behind} commit`}
@@ -136,7 +142,7 @@ export function UpdateBanner() {
         )}
 
         <div className="flex shrink-0 items-center gap-2">
-          <LinkButton href="/updates">{active ? "Segui" : "Dettagli"}</LinkButton>
+          <LinkButton href={updatesHref}>{active ? "Segui" : "Dettagli"}</LinkButton>
           {!active && (
             <>
               {!blocked && (
@@ -155,7 +161,7 @@ export function UpdateBanner() {
       <ConfirmDialog
         isOpen={confirming}
         onOpenChange={setConfirming}
-        title="Aggiornare RunPanel?"
+        title={`Aggiornare RunPanel${where}?`}
         confirmLabel={manual ? "Prepara l'aggiornamento" : "Aggiorna e riavvia"}
         description={
           <>

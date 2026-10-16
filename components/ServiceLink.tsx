@@ -12,7 +12,7 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { serviceEnvKey, serviceLabel } from "@/lib/service-env";
 import { serviceDisplayName } from "@/lib/service-name";
-import { useNodeApi } from "@/lib/hooks/useNode";
+import { useNodeApi, useServerHref } from "@/lib/hooks/useNode";
 
 /**
  * A database attached to a project, and what that attachment does.
@@ -57,6 +57,7 @@ export function ServiceLink({
   onChanged: () => void;
 }) {
   const api = useNodeApi();
+  const href = useServerHref();
   const [injecting, setInjecting] = useState(service.inject_env === 1);
   const [pending, setPending] = useState(false);
   const [unlinking, setUnlinking] = useState(false);
@@ -109,7 +110,7 @@ export function ServiceLink({
           aria-hidden
         />
         <Link
-          href={`/services/${service.id}`}
+          href={href(`/services/${service.id}`)}
           className="text-foreground hover:text-accent min-w-0 truncate text-sm transition-colors"
         >
           {serviceDisplayName(service)}

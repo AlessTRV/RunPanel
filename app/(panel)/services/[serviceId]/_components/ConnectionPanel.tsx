@@ -13,6 +13,7 @@ import { AccessSection } from "@/components/AccessSection";
 import { buildConnectionString } from "@/lib/service-env";
 import type { Credentials, From, Service } from "./types";
 import { serviceDisplayName } from "@/lib/service-name";
+import { useServerHref } from "@/lib/hooks/useNode";
 
 /**
  * How an application gets to this service — the question the page exists to
@@ -132,6 +133,7 @@ export function ConnectionPanel({
   onReveal: () => void;
   onSaved: () => void;
 }) {
+  const href = useServerHref();
   // Three ways in, and which one is right depends on where the caller runs.
   const hostUrl = buildConnectionString(service.type, {
     host: "localhost",
@@ -165,7 +167,7 @@ export function ConnectionPanel({
         <Hint tone="tip" icon="solar:link-circle-linear" title="Già collegato">
           A ogni deploy{" "}
           {project ? (
-            <Link href={`/projects/${service.project_id}`} className="text-accent hover:underline">
+            <Link href={href(`/projects/${service.project_id}`)} className="text-accent hover:underline">
               {project.name}
             </Link>
           ) : (

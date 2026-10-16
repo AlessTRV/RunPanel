@@ -28,7 +28,8 @@ import { SettingsTab } from "./_components/SettingsTab";
 import { VersionDialog } from "./_components/VersionDialog";
 import { FileManager } from "./_components/FileManager";
 import type { Deployment, EnvVar, ProcessInfo, Project, TabId } from "./_components/types";
-import { useNodeApi } from "@/lib/hooks/useNode";
+import { useNode, useNodeApi, useServerHref } from "@/lib/hooks/useNode";
+import { locateMember } from "@/lib/locate-member";
 
 /**
  * Orchestrates the project view: it owns the single event stream and the shared
@@ -50,6 +51,8 @@ function toLine(text: string, stream: LogLine["stream"] = "stdout"): LogLine {
 
 export default function ProjectDetailPage() {
   const api = useNodeApi();
+  const href = useServerHref();
+  const { isSolo, selected } = useNode();
   const poll5000 = usePollInterval(5000);
   const params = useParams();
   const router = useRouter();
@@ -87,11 +90,23 @@ export default function ProjectDetailPage() {
   const refreshProject = useCallback(
     (signal?: AbortSignal) =>
       fetch(api(`/api/projects/${projectId}`), { signal })
-        .then((res) => {
+        .then(async (res) => {
           // Only a 404 means the project is gone. Anything else (a 500, a
           // dropped connection mid-deploy) keeps the page where it is.
           if (res.status === 404) {
-            router.push("/home");
+            // In a cluster the link may have been made on another server:
+            // follow the project there before giving up.
+            if (!isSolo) {
+              const memberId = await locateMember("project", projectId);
+              if (memberId && memberId !== selected) {
+                // Read at the moment of the redirect, so a tab change does not refetch.
+                const tabNow = new URLSearchParams(window.location.search).get("tab");
+                const tab = tabNow ? `?tab=${encodeURIComponent(tabNow)}` : "";
+                router.replace(href(`/projects/${projectId}${tab}`, memberId));
+                return null;
+              }
+            }
+            router.push(href("/home"));
             return null;
           }
           if (!res.ok) throw new Error(`Il server ha risposto ${res.status}`);
@@ -109,7 +124,7 @@ export default function ProjectDetailPage() {
           if (err instanceof DOMException && err.name === "AbortError") return;
           setLoadError(err instanceof Error ? err.message : MSG.unreachable);
         }),
-    [projectId, router, api]
+    [projectId, router, api, href, isSolo, selected]
   );
 
   useEffect(() => {

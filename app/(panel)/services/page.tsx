@@ -5,7 +5,6 @@ import Link from "next/link";
 import { Button, Input } from "@heroui/react";
 import { Icon } from "@iconify/react";
 import { toast } from "sonner";
-import { useResource } from "@/lib/hooks/useResource";
 import { usePollInterval } from "@/lib/hooks/usePollingInterval";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { LoadError } from "@/components/ui/LoadError";
@@ -17,7 +16,10 @@ import { Section } from "@/components/ui/Section";
 import { PageSkeleton } from "@/components/ui/Skeletons";
 import { StatusBadge } from "@/components/StatusBadge";
 import { serviceDisplayName } from "@/lib/service-name";
-import { useNodeApi } from "@/lib/hooks/useNode";
+import { useMemberApi, useServerHref } from "@/lib/hooks/useNode";
+import { useClusterList } from "@/lib/hooks/useClusterList";
+import type { Located } from "@/lib/cluster-merge";
+import { ServerBadge, ServerFilter, UnreachableServers } from "@/components/cluster/ServerBits";
 
 interface Service {
   id: string;
@@ -39,13 +41,15 @@ const TYPE_ICONS: Record<string, string> = {
 
 const ServiceRow = memo(function ServiceRow({
   service,
+  href,
   projectName,
   onControl,
 }: {
-  service: Service;
+  service: Located<Service>;
+  href: string;
   /** Undefined when the service belongs to no project — which is worth showing. */
   projectName?: string;
-  onControl: (id: string, action: "start" | "stop" | "restart") => void;
+  onControl: (service: Located<Service>, action: "start" | "stop" | "restart") => void;
 }) {
   const running = service.status === "running";
 
@@ -58,10 +62,11 @@ const ServiceRow = memo(function ServiceRow({
         aria-hidden
       />
 
-      <Link href={`/services/${service.id}`} className="min-w-0 flex-1">
+      <Link href={href} className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <span className="text-foreground truncate text-sm font-medium">{serviceDisplayName(service)}</span>
           <StatusBadge status={service.status} />
+          <ServerBadge memberId={service.memberId} />
         </div>
         <p className="text-muted mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 text-xs">
           <span className="font-mono">
@@ -90,15 +95,15 @@ const ServiceRow = memo(function ServiceRow({
       <div className="flex shrink-0 gap-1.5">
         {running ? (
           <>
-            <Button variant="ghost" size="sm" isIconOnly aria-label="Riavvia" onPress={() => onControl(service.id, "restart")}>
+            <Button variant="ghost" size="sm" isIconOnly aria-label="Riavvia" onPress={() => onControl(service, "restart")}>
               <Icon icon="solar:refresh-linear" width={16} />
             </Button>
-            <Button variant="ghost" size="sm" isIconOnly aria-label="Ferma" onPress={() => onControl(service.id, "stop")}>
+            <Button variant="ghost" size="sm" isIconOnly aria-label="Ferma" onPress={() => onControl(service, "stop")}>
               <Icon icon="solar:stop-linear" width={16} className="text-danger" />
             </Button>
           </>
         ) : (
-          <Button variant="ghost" size="sm" isIconOnly aria-label="Avvia" onPress={() => onControl(service.id, "start")}>
+          <Button variant="ghost" size="sm" isIconOnly aria-label="Avvia" onPress={() => onControl(service, "start")}>
             <Icon icon="solar:play-linear" width={16} className="text-success" />
           </Button>
         )}
@@ -108,19 +113,20 @@ const ServiceRow = memo(function ServiceRow({
 });
 
 export default function ServicesPage() {
-  const api = useNodeApi();
+  const memberApi = useMemberApi();
+  const href = useServerHref();
   const poll5000 = usePollInterval(5000);
   const [search, setSearch] = useState("");
-  const { data, loading, error: loadError, refresh } = useResource<Service[]>(api("/api/services"), { intervalMs: poll5000 });
+  const { items: data, failed, loading, error: loadError, refresh } = useClusterList<Service>("/api/cluster/services", "/api/services", { intervalMs: poll5000 });
 
   // Names only, and without polling: a service's project does not change while
   // the page is open, but "which project is this database attached to" is the
   // one thing this list was not answering.
-  const { data: projectsData } = useResource<{ id: string; name: string }[]>(api("/api/projects"));
+  const { items: projectsData } = useClusterList<{ id: string; name: string }>("/api/cluster/projects", "/api/projects");
   const projectNames = useMemo(() => {
     const map = new Map<string, string>();
     for (const project of Array.isArray(projectsData) ? projectsData : []) {
-      map.set(project.id, project.name);
+      map.set(`${project.memberId}:${project.id}`, project.name);
     }
     return map;
   }, [projectsData]);
@@ -138,9 +144,9 @@ export default function ServicesPage() {
     );
   }, [services, search]);
 
-  async function handleControl(serviceId: string, action: "start" | "stop" | "restart") {
+  async function handleControl(service: Located<Service>, action: "start" | "stop" | "restart") {
     try {
-      const res = await fetch(api(`/api/services/${serviceId}/control`), {
+      const res = await fetch(memberApi(service.memberId, `/api/services/${service.id}/control`), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action }),
@@ -165,10 +171,13 @@ export default function ServicesPage() {
         title="Servizi"
         description="Database e cache provisionati da RunPanel"
         actions={
-          <LinkButton href="/services/new" variant="secondary">
-            <Icon icon="solar:add-circle-linear" width={16} aria-hidden />
-            Nuovo servizio
-          </LinkButton>
+          <>
+            <ServerFilter />
+            <LinkButton href={href("/services/new")} variant="secondary">
+              <Icon icon="solar:add-circle-linear" width={16} aria-hidden />
+              Nuovo servizio
+            </LinkButton>
+          </>
         }
       />
 
@@ -199,6 +208,8 @@ export default function ServicesPage() {
         </div>
       )}
 
+      <UnreachableServers failed={failed} what="i servizi" className="mb-4" />
+
       {!data && loadError ? (
         <LoadError what="i servizi" error={loadError} onRetry={() => void refresh()} />
       ) : filtered.length === 0 ? (
@@ -217,9 +228,10 @@ export default function ServicesPage() {
         <div className="space-y-2">
           {filtered.map((service) => (
             <ServiceRow
-              key={service.id}
+              key={`${service.memberId}:${service.id}`}
               service={service}
-              projectName={service.project_id ? projectNames.get(service.project_id) : undefined}
+              href={href(`/services/${service.id}`, service.memberId)}
+              projectName={service.project_id ? projectNames.get(`${service.memberId}:${service.project_id}`) : undefined}
               onControl={handleControl}
             />
           ))}

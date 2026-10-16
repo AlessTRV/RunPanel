@@ -22,6 +22,7 @@ import { TONE_DOT, type StatusTone } from "@/lib/status";
 import { cn } from "@/lib/utils";
 import type { ClusterView, ClusterMemberView } from "@/app/api/cluster/route";
 import type { MemberDiagnosis } from "@/app/api/cluster/members/[memberId]/diagnose/route";
+import { ClusterOverview } from "@/components/ClusterOverview";
 
 /**
  * The other RunPanel installs this one is linked with.
@@ -196,6 +197,8 @@ export default function ServersPage() {
           />
         </Panel>
       ) : (
+        <>
+        <ClusterOverview interactive={false} className="mb-4" />
         <Panel padding="flush">
           <PanelHeader title="Membri del cluster" description={`${members.length} server, questo compreso`} className="px-4 pt-4" />
           <ul className="divide-border divide-y">
@@ -256,6 +259,7 @@ export default function ServersPage() {
             })}
           </ul>
         </Panel>
+        </>
       )}
 
       <FormDialog

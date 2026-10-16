@@ -1,6 +1,7 @@
 "use client";
 
 import { use, useCallback, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { Icon } from "@iconify/react";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
@@ -15,7 +16,7 @@ import { useEventStream } from "@/lib/hooks/useEventStream";
 import { useResource } from "@/lib/hooks/useResource";
 import { usePollInterval } from "@/lib/hooks/usePollingInterval";
 import { formatDuration, formatWhen } from "@/lib/format";
-import { useNodeApi } from "@/lib/hooks/useNode";
+import { useNodeApi, useServerHref } from "@/lib/hooks/useNode";
 
 interface RestoreDetail {
   id: string;
@@ -38,6 +39,7 @@ type OpsEvent =
 export default function RestorePage({ params }: { params: Promise<{ restoreId: string }> }) {
   const poll3000 = usePollInterval(3000);
   const api = useNodeApi();
+  const href = useServerHref();
   const { restoreId } = use(params);
 
   const { data, loading, error, refresh } = useResource<RestoreDetail>(
@@ -73,7 +75,7 @@ export default function RestorePage({ params }: { params: Promise<{ restoreId: s
   if (loading && !data) {
     return (
       <>
-        <PageHeader title="Ripristino" back={{ href: "/backups", label: "Torna ai backup" }} />
+        <PageHeader title="Ripristino" back={{ href: href("/backups"), label: "Torna ai backup" }} />
         <div className="space-y-4">
           <SkeletonBlock className="h-24" />
           <SkeletonBlock className="h-64" />
@@ -85,7 +87,7 @@ export default function RestorePage({ params }: { params: Promise<{ restoreId: s
   if (error && error !== "HTTP 404") {
     return (
       <>
-        <PageHeader title="Ripristino" back={{ href: "/backups", label: "Torna ai backup" }} />
+        <PageHeader title="Ripristino" back={{ href: href("/backups"), label: "Torna ai backup" }} />
         <LoadError what="il ripristino" error={error} onRetry={() => void refresh()} />
       </>
     );
@@ -94,12 +96,12 @@ export default function RestorePage({ params }: { params: Promise<{ restoreId: s
   if (error || !data) {
     return (
       <>
-        <PageHeader title="Ripristino" back={{ href: "/backups", label: "Torna ai backup" }} />
+        <PageHeader title="Ripristino" back={{ href: href("/backups"), label: "Torna ai backup" }} />
         <Panel>
           <EmptyState
             icon="solar:danger-triangle-linear"
             title="Ripristino non trovato"
-            action={<LinkButton href="/backups">Torna ai backup</LinkButton>}
+            action={<LinkButton href={href("/backups")}>Torna ai backup</LinkButton>}
           />
         </Panel>
       </>
@@ -109,7 +111,7 @@ export default function RestorePage({ params }: { params: Promise<{ restoreId: s
   return (
     <>
       <PageHeader
-        back={{ href: "/backups", label: "Torna ai backup" }}
+        back={{ href: href("/backups"), label: "Torna ai backup" }}
         title="Ripristino"
         description={`${formatWhen(data.startedAt)} · ${
           data.source === "upload" ? "da archivio caricato" : "da un backup in catalogo"
@@ -117,11 +119,11 @@ export default function RestorePage({ params }: { params: Promise<{ restoreId: s
         actions={
           <div className="flex items-center gap-2">
             {data.runId && (
-              <LinkButton href={`/backups/runs/${data.runId}`} variant="ghost">
+              <LinkButton href={href(`/backups/runs/${data.runId}`)} variant="ghost">
                 Backup di origine
               </LinkButton>
             )}
-            <LinkButton href="/backups">Tutti i backup</LinkButton>
+            <LinkButton href={href("/backups")}>Tutti i backup</LinkButton>
           </div>
         }
       />
@@ -139,9 +141,9 @@ export default function RestorePage({ params }: { params: Promise<{ restoreId: s
           {data.safetyRunId && (
             <Hint tone="tip" className="mt-4" title="Rete di sicurezza">
               Prima di sovrascrivere è stato preso un backup di quello che c&apos;era.{" "}
-              <a href={`/backups/runs/${data.safetyRunId}`} className="text-accent underline">
+              <Link href={href(`/backups/runs/${data.safetyRunId}`)} className="text-accent underline">
                 È qui
-              </a>{" "}
+              </Link>{" "}
               e la retention non lo tocca.
             </Hint>
           )}

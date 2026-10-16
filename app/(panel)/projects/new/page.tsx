@@ -9,7 +9,8 @@ import { AppForm } from "@/components/AppForm";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { cn } from "@/lib/utils";
-import { useNodeApi } from "@/lib/hooks/useNode";
+import { ServerPicker } from "@/components/cluster/ServerBits";
+import { useNodeApi, useServerHref } from "@/lib/hooks/useNode";
 
 /**
  * Creating a project used to ask for a name and nothing else, dropping you on
@@ -20,6 +21,7 @@ import { useNodeApi } from "@/lib/hooks/useNode";
  */
 export default function NewProjectPage() {
   const api = useNodeApi();
+  const href = useServerHref();
   const router = useRouter();
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
@@ -111,6 +113,7 @@ export default function NewProjectPage() {
                 onKeyDown={(e) => e.key === "Enter" && createProject()}
               />
             </TextField>
+            <ServerPicker description="Il progetto vive su questo server: build, file e processi stanno lì." />
             <div className="flex justify-end">
               <Button variant="primary" isPending={creating} onPress={createProject}>
                 Continua
@@ -126,7 +129,7 @@ export default function NewProjectPage() {
             <Button
               variant="ghost"
               size="sm"
-              onPress={() => router.push(`/projects/${project!.id}`)}
+              onPress={() => router.push(href(`/projects/${project!.id}`))}
             >
               Configuro dopo
             </Button>

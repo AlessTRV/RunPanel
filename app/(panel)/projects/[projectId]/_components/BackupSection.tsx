@@ -22,7 +22,7 @@ import {
 } from "@/lib/backup-settings";
 import type { Project } from "./types";
 import { usePendingSave, type RegisterPendingSave } from "./pending-saves";
-import { useNodeApi } from "@/lib/hooks/useNode";
+import { useNodeApi, useServerHref } from "@/lib/hooks/useNode";
 
 /**
  * How this project's volumes go into a backup.
@@ -82,6 +82,7 @@ export function BackupSection({
   registerPending?: RegisterPendingSave;
 }) {
   const api = useNodeApi();
+  const href = useServerHref();
   const stored = useMemo(() => parseBackupSettings(project.backup_settings), [project.backup_settings]);
 
   const [expanded, setExpanded] = useState(false);
@@ -224,7 +225,7 @@ export function BackupSection({
         <Hint tone="warn" title="Nessuna pianificazione salva questi volumi">
           Le impostazioni qui sotto valgono quando una pianificazione include il progetto con{" "}
           <Code>volumi Docker</Code>. Aggiungilo da{" "}
-          <Link href="/backups" className="text-accent hover:underline">
+          <Link href={href("/backups")} className="text-accent hover:underline">
             Backup
           </Link>
           .

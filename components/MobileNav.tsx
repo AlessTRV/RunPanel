@@ -8,6 +8,7 @@ import { Icon } from "@iconify/react";
 import { cn } from "@/lib/utils";
 import { NAV_ITEMS, isActiveNav } from "@/lib/nav";
 import { useAllowedNav } from "@/lib/hooks/useMe";
+import { useServerHref } from "@/lib/hooks/useNode";
 import { ServerSelector } from "./ServerSelector";
 import logo from "./logo.svg";
 
@@ -31,6 +32,7 @@ const PRIMARY = ["/home", "/projects", "/services", "/monitor"];
 
 export function MobileNav() {
   const pathname = usePathname();
+  const serverHref = useServerHref();
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const drawerRef = useRef<HTMLElement>(null);
@@ -148,7 +150,7 @@ export function MobileNav() {
             return (
               <Link
                 key={item.href}
-                href={item.href}
+                href={serverHref(item.href)}
                 // Closed on the click rather than in an effect on `pathname`:
                 // the click is the event.
                 onClick={() => setOpen(false)}
@@ -194,7 +196,7 @@ export function MobileNav() {
           return (
             <Link
               key={item.href}
-              href={item.href}
+              href={serverHref(item.href)}
               aria-current={active ? "page" : undefined}
               className={cn(
                 "text-meta flex flex-1 flex-col items-center gap-0.5 py-2 transition-colors",

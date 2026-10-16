@@ -21,11 +21,14 @@ import { useResource } from "@/lib/hooks/useResource";
 import { usePollInterval } from "@/lib/hooks/usePollingInterval";
 import { formatBytes, formatDuration, formatRelative, formatWhen } from "@/lib/format";
 import { triggerLabel } from "./_components/format";
-import { useNodeApi } from "@/lib/hooks/useNode";
+import { useMemberApi, useNode, useServerHref } from "@/lib/hooks/useNode";
+import { onlyMember, type Located, type MemberStatus } from "@/lib/cluster-merge";
+import { ServerBadge, ServerFilter, UnreachableServers } from "@/components/cluster/ServerBits";
 import {
   describeTarget,
   type DestinationView,
   type PolicyView,
+  type RunView,
   type RunsResponse,
   type TargetCatalog,
 } from "./_components/types";
@@ -48,31 +51,82 @@ const NIGHTLY_PRESET = {
   retentionCount: 7,
 };
 
+type Overview = RunsResponse["overview"];
+
+interface ClusterBackups {
+  policies: Located<PolicyView>[];
+  runs: Located<RunView>[];
+  destinations: Located<DestinationView>[];
+  perServer: { memberId: string; activeRunId: string | null; overview: Overview | null; catalog: TargetCatalog | null }[];
+  members: MemberStatus[];
+}
+
+/** Several servers' summaries as one: sums, the latest last run, the earliest next run. */
+function combineOverviews(list: Overview[]): Overview | undefined {
+  if (list.length === 0) return undefined;
+  if (list.length === 1) return list[0];
+  const lastRuns = list.map((o) => o.lastRun).filter((r): r is RunView => r !== null);
+  const nextRuns = list.map((o) => o.nextRunAt).filter((n): n is string => n !== null);
+  return {
+    lastRun: lastRuns.sort((a, b) => b.startedAt.localeCompare(a.startedAt))[0] ?? null,
+    nextRunAt: nextRuns.sort()[0] ?? null,
+    totalBytes: list.reduce((n, o) => n + o.totalBytes, 0),
+    runCount: list.reduce((n, o) => n + o.runCount, 0),
+    recent: { ok: list.reduce((n, o) => n + o.recent.ok, 0), failed: list.reduce((n, o) => n + o.recent.failed, 0) },
+    policiesEnabled: list.reduce((n, o) => n + o.policiesEnabled, 0),
+  };
+}
+
 export default function BackupsPage() {
-  const api = useNodeApi();
+  const memberApi = useMemberApi();
+  const href = useServerHref();
+  const { isSolo, selfId, serverParam, nameOf } = useNode();
   const poll20000 = usePollInterval(20000);
   const poll5000 = usePollInterval(5000);
   const router = useRouter();
 
-  const runs = useResource<RunsResponse>(api("/api/backups/runs?limit=25"), { intervalMs: poll5000 });
-  const policies = useResource<{ policies: PolicyView[] }>(api("/api/backups/policies"), {
+  // Solo mode reads this server's routes as always; a cluster reads every
+  // server at once and narrows to `?server=` when the URL names one.
+  const runs = useResource<RunsResponse>(isSolo ? "/api/backups/runs?limit=25" : null, { intervalMs: poll5000 });
+  const policies = useResource<{ policies: PolicyView[] }>(isSolo ? "/api/backups/policies" : null, {
     intervalMs: poll20000,
   });
-  const destinations = useResource<{ destinations: DestinationView[] }>(
-    api("/api/backups/destinations")
-  );
-  const catalog = useResource<TargetCatalog>(api("/api/backups/targets"));
+  const destinations = useResource<{ destinations: DestinationView[] }>(isSolo ? "/api/backups/destinations" : null);
+  const catalog = useResource<TargetCatalog>(isSolo ? "/api/backups/targets" : null);
+  const cluster = useResource<ClusterBackups>(isSolo ? null : "/api/cluster/backups", { intervalMs: poll5000 });
 
   const [busy, setBusy] = useState<string | null>(null);
   const [addingDestination, setAddingDestination] = useState(false);
 
-  const overview = runs.data?.overview;
-  const activeRunId = runs.data?.activeRunId ?? null;
+  const self = selfId ?? "";
+  const tag = <T,>(list: T[] | undefined): Located<T>[] => (list ?? []).map((x) => ({ ...x, memberId: self, memberName: "" }));
+  const shownServers = (cluster.data?.perServer ?? []).filter((p) => !serverParam || p.memberId === serverParam);
+  const overview = isSolo
+    ? runs.data?.overview
+    : combineOverviews(shownServers.map((p) => p.overview).filter((o): o is Overview => o !== null));
+  const activeRuns: { memberId: string; runId: string }[] = isSolo
+    ? runs.data?.activeRunId
+      ? [{ memberId: self, runId: runs.data.activeRunId }]
+      : []
+    : shownServers.filter((p) => p.activeRunId).map((p) => ({ memberId: p.memberId, runId: p.activeRunId as string }));
+  const busyOn = (memberId: string) => activeRuns.some((a) => a.memberId === memberId);
+  const catalogFor = (memberId: string) =>
+    isSolo ? catalog.data : (cluster.data?.perServer.find((p) => p.memberId === memberId)?.catalog ?? undefined);
+  const failed = (cluster.data?.members ?? []).filter((m) => !m.ok && (!serverParam || m.id === serverParam));
+  const refreshAll = () => {
+    if (isSolo) {
+      void runs.refresh();
+      void policies.refresh();
+      void destinations.refresh();
+    } else void cluster.refresh();
+  };
+  // Where something new goes: the server named in the URL, else this one.
+  const target = serverParam ?? self;
 
-  async function post(url: string, label: string) {
+  async function post(url: string, label: string, memberId: string) {
     setBusy(url);
     try {
-      const res = await fetch(api(url), { method: "POST", headers: { "Content-Type": "application/json" } });
+      const res = await fetch(memberApi(memberId, url), { method: "POST", headers: { "Content-Type": "application/json" } });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
         toast.error(body.error ?? `${label} non riuscita`);
@@ -87,15 +141,15 @@ export default function BackupsPage() {
     }
   }
 
-  async function runNow(policy: PolicyView) {
-    const body = await post(`/api/backups/policies/${policy.id}/run`, "Esecuzione");
+  async function runNow(policy: Located<PolicyView>) {
+    const body = await post(`/api/backups/policies/${policy.id}/run`, "Esecuzione", policy.memberId);
     if (!body?.runId) return;
     toast.success(`Backup avviato per "${policy.name}"`);
-    router.push(`/backups/runs/${body.runId}`);
+    router.push(href(`/backups/runs/${body.runId}`, policy.memberId));
   }
 
   async function createPreset() {
-    const destinationId = destinations.data?.destinations[0]?.id;
+    const destinationId = destinationList.find((d) => d.memberId === target)?.id;
     if (!destinationId) {
       toast.error("Nessuna destinazione configurata");
       return;
@@ -103,7 +157,7 @@ export default function BackupsPage() {
 
     setBusy("preset");
     try {
-      const res = await fetch(api("/api/backups/policies"), {
+      const res = await fetch(memberApi(target, "/api/backups/policies"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...NIGHTLY_PRESET, destinationId }),
@@ -113,17 +167,17 @@ export default function BackupsPage() {
         toast.error(body.error ?? "Creazione non riuscita");
         return;
       }
-      toast.success("Pianificazione creata: ogni giorno alle 03:00");
-      policies.refresh();
+      toast.success(`Pianificazione creata${isSolo ? "" : ` su ${nameOf(target)}`}: ogni giorno alle 03:00`);
+      refreshAll();
     } finally {
       setBusy(null);
     }
   }
 
-  async function togglePolicy(policy: PolicyView) {
+  async function togglePolicy(policy: Located<PolicyView>) {
     setBusy(policy.id);
     try {
-      const res = await fetch(api(`/api/backups/policies/${policy.id}`), {
+      const res = await fetch(memberApi(policy.memberId, `/api/backups/policies/${policy.id}`), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ enabled: !policy.enabled }),
@@ -132,41 +186,41 @@ export default function BackupsPage() {
         toast.error("Modifica non riuscita");
         return;
       }
-      policies.refresh();
+      refreshAll();
     } finally {
       setBusy(null);
     }
   }
 
-  async function removePolicy(policyId: string) {
-    const res = await fetch(api(`/api/backups/policies/${policyId}`), { method: "DELETE" });
+  async function removePolicy(policyId: string, memberId: string) {
+    const res = await fetch(memberApi(memberId, `/api/backups/policies/${policyId}`), { method: "DELETE" });
     if (!res.ok) {
       toast.error("Eliminazione non riuscita");
       return;
     }
     toast.success("Pianificazione eliminata. I backup già fatti restano.");
-    policies.refresh();
+    refreshAll();
   }
 
-  async function removeRun(runId: string) {
-    const res = await fetch(api(`/api/backups/runs/${runId}`), { method: "DELETE" });
+  async function removeRun(runId: string, memberId: string) {
+    const res = await fetch(memberApi(memberId, `/api/backups/runs/${runId}`), { method: "DELETE" });
     const body = await res.json().catch(() => ({}));
     if (!res.ok) {
       toast.error(body.error ?? "Eliminazione non riuscita");
       return;
     }
     toast.success("Backup eliminato, archivio compreso");
-    runs.refresh();
+    refreshAll();
   }
 
-  async function testDestination(destination: DestinationView) {
-    const body = await post(`/api/backups/destinations/${destination.id}`, "Verifica");
+  async function testDestination(destination: Located<DestinationView>) {
+    const body = await post(`/api/backups/destinations/${destination.id}`, "Verifica", destination.memberId);
     if (!body) return;
     if (body.ok) toast.success(body.message);
     else toast.error(body.message);
   }
 
-  if (runs.loading && !runs.data) {
+  if ((isSolo ? runs.loading && !runs.data : cluster.loading && !cluster.data)) {
     return (
       <>
         <PageHeader title="Backup" description="Copie dei database, della configurazione e dei dati." />
@@ -183,8 +237,15 @@ export default function BackupsPage() {
     );
   }
 
-  const policyList = policies.data?.policies ?? [];
-  const runList = runs.data?.runs ?? [];
+  const policyList: Located<PolicyView>[] = isSolo ? tag(policies.data?.policies) : onlyMember(cluster.data?.policies ?? [], serverParam);
+  const runList: Located<RunView>[] = isSolo ? tag(runs.data?.runs) : onlyMember(cluster.data?.runs ?? [], serverParam);
+  const destinationList: Located<DestinationView>[] = isSolo
+    ? tag(destinations.data?.destinations)
+    : onlyMember(cluster.data?.destinations ?? [], serverParam);
+  const policiesError = isSolo ? policies.error : cluster.error;
+  const runsError = isSolo ? runs.error : cluster.error;
+  const destinationsError = isSolo ? destinations.error : cluster.error;
+  const destinationsLoaded = isSolo ? Boolean(destinations.data) : Boolean(cluster.data);
 
   return (
     <>
@@ -192,10 +253,13 @@ export default function BackupsPage() {
         title="Backup"
         description="Copie dei database gestiti, dello store del pannello e della configurazione dei progetti."
         actions={
-          <LinkButton href="/backups/new">
-            <Icon icon="solar:add-circle-linear" width={16} aria-hidden />
-            Nuova pianificazione
-          </LinkButton>
+          <>
+            <ServerFilter />
+            <LinkButton href={href("/backups/new")}>
+              <Icon icon="solar:add-circle-linear" width={16} aria-hidden />
+              Nuova pianificazione
+            </LinkButton>
+          </>
         }
       />
 
@@ -226,15 +290,17 @@ export default function BackupsPage() {
         />
       </div>
 
-      {activeRunId && (
-        <Hint tone="info" className="mb-4">
-          Un backup è in corso.{" "}
-          <Link href={`/backups/runs/${activeRunId}`} className="text-accent underline">
+      <UnreachableServers failed={failed} what="i backup" className="mb-4" />
+
+      {activeRuns.map((active) => (
+        <Hint key={active.memberId} tone="info" className="mb-4">
+          Un backup è in corso{isSolo ? "" : ` su ${nameOf(active.memberId)}`}.{" "}
+          <Link href={href(`/backups/runs/${active.runId}`, active.memberId)} className="text-accent underline">
             Segui l&apos;esecuzione
           </Link>
           .
         </Hint>
-      )}
+      ))}
 
       <div className="space-y-4">
         <Panel padding="flush">
@@ -245,8 +311,8 @@ export default function BackupsPage() {
             />
           </div>
 
-          {!policies.data && policies.error ? (
-            <LoadError what="le pianificazioni" error={policies.error} onRetry={() => void policies.refresh()} />
+          {policyList.length === 0 && policiesError ? (
+            <LoadError what="le pianificazioni" error={policiesError} onRetry={refreshAll} />
           ) : policyList.length === 0 ? (
             <EmptyState
               icon="solar:calendar-linear"
@@ -258,18 +324,18 @@ export default function BackupsPage() {
                     <Icon icon="solar:magic-stick-3-linear" width={16} aria-hidden />
                     Crea il backup notturno
                   </Button>
-                  <LinkButton href="/backups/new">Configura a mano</LinkButton>
+                  <LinkButton href={href("/backups/new")}>Configura a mano</LinkButton>
                 </div>
               }
             />
           ) : (
             <ul className="divide-border divide-y">
               {policyList.map((policy) => (
-                <li key={policy.id} className="flex flex-wrap items-center gap-3 px-4 py-3 sm:px-5">
+                <li key={`${policy.memberId}:${policy.id}`} className="flex flex-wrap items-center gap-3 px-4 py-3 sm:px-5">
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       <Link
-                        href={`/backups/policies/${policy.id}`}
+                        href={href(`/backups/policies/${policy.id}`, policy.memberId)}
                         className="text-foreground truncate text-sm font-medium hover:underline"
                       >
                         {policy.name}
@@ -280,11 +346,12 @@ export default function BackupsPage() {
                         </span>
                       )}
                       {policy.lastStatus && <StatusBadge status={policy.lastStatus} />}
+                      <ServerBadge memberId={policy.memberId} />
                     </div>
                     <p className="text-muted mt-0.5 truncate text-xs">
                       {policy.schedule}
                       {policy.timezone ? ` · ${policy.timezone}` : ""} ·{" "}
-                      {policy.targets.map((t) => describeTarget(t, catalog.data)).join(" · ")}
+                      {policy.targets.map((t) => describeTarget(t, catalogFor(policy.memberId))).join(" · ")}
                     </p>
                   </div>
 
@@ -299,7 +366,7 @@ export default function BackupsPage() {
                       variant="secondary"
                       onPress={() => runNow(policy)}
                       isPending={busy === `/api/backups/policies/${policy.id}/run`}
-                      isDisabled={Boolean(activeRunId)}
+                      isDisabled={busyOn(policy.memberId)}
                     >
                       <Icon icon="solar:play-linear" width={15} aria-hidden />
                       Esegui ora
@@ -324,7 +391,7 @@ export default function BackupsPage() {
                         description:
                           "Gli archivi già creati restano e si possono ancora ripristinare. Da adesso non ne verranno creati altri da questa pianificazione.",
                       }}
-                      onConfirm={() => removePolicy(policy.id)}
+                      onConfirm={() => removePolicy(policy.id, policy.memberId)}
                     />
                   </div>
                 </li>
@@ -339,7 +406,7 @@ export default function BackupsPage() {
           <div className="p-4 sm:p-5">
             <PanelHeader
               title="Destinazioni"
-              description="Dove finiscono gli archivi"
+              description={isSolo ? "Dove finiscono gli archivi" : `Dove finiscono gli archivi. Una nuova va su ${nameOf(target)}.`}
               actions={
                 <Button size="sm" variant="secondary" onPress={() => setAddingDestination(true)}>
                   <Icon icon="solar:add-circle-linear" width={16} aria-hidden />
@@ -348,18 +415,18 @@ export default function BackupsPage() {
               }
             />
           </div>
-          {destinations.error && !destinations.data ? (
+          {destinationsError && !destinationsLoaded ? (
             <LoadError
               what="le destinazioni"
-              error={destinations.error}
-              onRetry={() => void destinations.refresh()}
+              error={destinationsError}
+              onRetry={refreshAll}
               className="px-4 pb-4 sm:px-5"
             />
-          ) : !destinations.data ? (
+          ) : !destinationsLoaded ? (
             <div className="space-y-2 px-4 pb-4 sm:px-5">
               <SkeletonBlock className="h-12" />
             </div>
-          ) : destinations.data.destinations.length === 0 ? (
+          ) : destinationList.length === 0 ? (
             <EmptyState
               icon="solar:folder-linear"
               title="Nessuna destinazione"
@@ -368,14 +435,17 @@ export default function BackupsPage() {
             />
           ) : (
           <ul className="divide-border divide-y">
-            {destinations.data.destinations.map((destination) => (
+            {destinationList.map((destination) => (
               <li
-                key={destination.id}
+                key={`${destination.memberId}:${destination.id}`}
                 className="flex items-center gap-3 px-4 py-3 sm:px-5"
               >
                 <Icon icon="solar:folder-linear" width={16} className="text-muted" aria-hidden />
                 <div className="min-w-0 flex-1">
-                  <p className="text-foreground truncate text-sm">{destination.name}</p>
+                  <p className="text-foreground flex items-center gap-2 truncate text-sm">
+                    {destination.name}
+                    <ServerBadge memberId={destination.memberId} />
+                  </p>
                   <p className="text-muted text-xs">{destination.type}</p>
                 </div>
                 <Button
@@ -400,8 +470,8 @@ export default function BackupsPage() {
             />
           </div>
 
-          {!runs.data && runs.error ? (
-            <LoadError what="la cronologia" error={runs.error} onRetry={() => void runs.refresh()} />
+          {runList.length === 0 && runsError ? (
+            <LoadError what="la cronologia" error={runsError} onRetry={refreshAll} />
           ) : runList.length === 0 ? (
             <EmptyState
               icon="solar:archive-linear"
@@ -411,16 +481,17 @@ export default function BackupsPage() {
           ) : (
             <ul className="divide-border divide-y">
               {runList.map((run) => (
-                <li key={run.id} className="flex flex-wrap items-center gap-3 px-4 py-3 sm:px-5">
+                <li key={`${run.memberId}:${run.id}`} className="flex flex-wrap items-center gap-3 px-4 py-3 sm:px-5">
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       <StatusBadge status={run.status} />
                       <Link
-                        href={`/backups/runs/${run.id}`}
+                        href={href(`/backups/runs/${run.id}`, run.memberId)}
                         className="text-foreground truncate text-sm hover:underline"
                       >
                         {run.policyName ?? "Esecuzione manuale"}
                       </Link>
+                      <ServerBadge memberId={run.memberId} />
                       {run.pinned && (
                         <span
                           className="text-muted"
@@ -441,7 +512,7 @@ export default function BackupsPage() {
                   <div className="flex items-center gap-1">
                     {run.hasArchive && (
                       <LinkButton
-                        href={api(`/api/backups/runs/${run.id}/download`)}
+                        href={memberApi(run.memberId, `/api/backups/runs/${run.id}/download`)}
                         variant="ghost"
                         download
                         aria-label="Scarica l'archivio"
@@ -449,7 +520,7 @@ export default function BackupsPage() {
                         <Icon icon="solar:download-linear" width={16} aria-hidden />
                       </LinkButton>
                     )}
-                    <LinkButton href={`/backups/runs/${run.id}`}>Dettagli</LinkButton>
+                    <LinkButton href={href(`/backups/runs/${run.id}`, run.memberId)}>Dettagli</LinkButton>
                     <DeleteButton
                       label="Elimina questo backup"
                       isDisabled={run.status === "running"}
@@ -458,7 +529,7 @@ export default function BackupsPage() {
                         description:
                           "L'archivio viene cancellato dal disco. Se è l'ultimo riuscito, resti senza un punto di ripristino.",
                       }}
-                      onConfirm={() => removeRun(run.id)}
+                      onConfirm={() => removeRun(run.id, run.memberId)}
                     />
                   </div>
                 </li>
@@ -470,7 +541,7 @@ export default function BackupsPage() {
         <DestinationForm
           isOpen={addingDestination}
           onOpenChange={setAddingDestination}
-          onCreated={destinations.refresh}
+          onCreated={refreshAll}
         />
 
         <Hint tone="warn" title="Gli archivi contengono segreti">

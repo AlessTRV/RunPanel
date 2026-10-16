@@ -5,6 +5,7 @@ import { Button, Dropdown } from "@heroui/react";
 import { Icon } from "@iconify/react";
 import { StatusBadge } from "@/components/StatusBadge";
 import { phaseLabel } from "@/lib/deploy-phases";
+import { useServerHref } from "@/lib/hooks/useNode";
 import type { Project } from "./types";
 
 /**
@@ -35,6 +36,7 @@ export function ProjectHeader({
   onOpenVersions: () => void;
   onReleasePin: () => void;
 }) {
+  const href = useServerHref();
   const deploying = project.status === "deploying";
   // Read-only accounts see the state, not the controls: the server refuses
   // them anyway, and a row of buttons that only error is worse than none.
@@ -56,7 +58,7 @@ export function ProjectHeader({
     <header className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
       <div className="flex min-w-0 items-start gap-3">
         <Link
-          href="/projects"
+          href={href("/projects")}
           aria-label="Torna ai progetti"
           className="text-muted hover:text-foreground hover:bg-surface-hover mt-0.5 rounded-[var(--radius)] p-1.5 transition-colors"
         >

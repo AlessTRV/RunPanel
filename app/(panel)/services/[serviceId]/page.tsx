@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Button, Input, Label, TextField } from "@heroui/react";
@@ -30,7 +30,8 @@ import { ConsolePanel } from "./_components/ConsolePanel";
 import { DataSection } from "./_components/DataSection";
 import { AccessPanel } from "@/components/users/AccessPanel";
 import type { Credentials, From, Service, ServiceTabId } from "./_components/types";
-import { useNodeApi } from "@/lib/hooks/useNode";
+import { useNode, useNodeApi, useServerHref } from "@/lib/hooks/useNode";
+import { locateMember } from "@/lib/locate-member";
 
 /**
  * A provisioned service.
@@ -61,6 +62,8 @@ const toLine = (text: string): LogLine => ({ id: lineId++, text });
 
 export default function ServiceDetailPage() {
   const api = useNodeApi();
+  const href = useServerHref();
+  const { isSolo, selected } = useNode();
   const poll5000 = usePollInterval(5000);
   const params = useParams();
   const router = useRouter();
@@ -72,6 +75,23 @@ export default function ServiceDetailPage() {
     { intervalMs: poll5000 }
   );
   useCrumbLabel(serviceId, service?.display_name || service?.name);
+
+  // In a cluster a 404 may only mean the link was made on another server:
+  // follow the service there. Solo mode keeps the plain "non trovato" page.
+  const notFound = !service && Boolean(loadError?.includes("404"));
+  useEffect(() => {
+    if (isSolo || !notFound) return;
+    let cancelled = false;
+    void locateMember("service", serviceId).then((memberId) => {
+      if (cancelled || !memberId || memberId === selected) return;
+      const tabNow = new URLSearchParams(window.location.search).get("tab");
+      const tab = tabNow ? `?tab=${encodeURIComponent(tabNow)}` : "";
+      router.replace(href(`/services/${serviceId}${tab}`, memberId));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [isSolo, notFound, serviceId, selected, href, router]);
 
   const [creds, setCreds] = useState<Credentials | null>(null);
   // Null until chosen, so the sensible default can depend on data that has not
@@ -224,7 +244,7 @@ export default function ServiceDetailPage() {
   if (!service && loadError && !loadError.includes("404")) {
     return (
       <>
-        <PageHeader title="Servizio" back={{ href: "/services", label: "Torna ai servizi" }} />
+        <PageHeader title="Servizio" back={{ href: href("/services"), label: "Torna ai servizi" }} />
         <LoadError what="il servizio" error={loadError} onRetry={() => void refresh()} />
       </>
     );
@@ -233,14 +253,14 @@ export default function ServiceDetailPage() {
   if (!service) {
     return (
       <>
-        <PageHeader title="Servizio" back={{ href: "/services", label: "Torna ai servizi" }} />
+        <PageHeader title="Servizio" back={{ href: href("/services"), label: "Torna ai servizi" }} />
         <Panel>
           <EmptyState
             icon="solar:danger-triangle-linear"
             title="Servizio non trovato"
             description="È stato eliminato, oppure il link non è più valido."
             action={
-              <Link href="/services" className="text-accent text-sm hover:underline">
+              <Link href={href("/services")} className="text-accent text-sm hover:underline">
                 Torna ai servizi
               </Link>
             }
@@ -274,7 +294,7 @@ export default function ServiceDetailPage() {
   return (
     <>
       <PageHeader
-        back={{ href: "/services", label: "Torna ai servizi" }}
+        back={{ href: href("/services"), label: "Torna ai servizi" }}
         title={service.displayName}
         description={`${label} ${service.version} · porta ${service.port} sull'host`}
         actions={
@@ -384,7 +404,7 @@ export default function ServiceDetailPage() {
               apply={apply ?? service.mountApply}
               applyLines={applyLines.lines}
               applyProgress={applyProgress}
-              onDeleted={() => router.push("/services")}
+              onDeleted={() => router.push(href("/services"))}
               onChanged={refresh}
             />
             <div className="mt-4">

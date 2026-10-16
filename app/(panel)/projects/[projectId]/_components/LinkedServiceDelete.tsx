@@ -8,7 +8,7 @@ import { DeleteButton } from "@/components/ui/DangerAction";
 import { CheckboxField } from "@/components/ui/CheckboxField";
 import { serviceLabel } from "@/lib/service-env";
 import { serviceDisplayName } from "@/lib/service-name";
-import { useNodeApi } from "@/lib/hooks/useNode";
+import { useNodeApi, useServerHref } from "@/lib/hooks/useNode";
 
 export interface LinkedServiceRow {
   id: string;
@@ -34,6 +34,7 @@ export function LinkedServiceDelete({
   onDeleted: () => void;
 }) {
   const api = useNodeApi();
+  const href = useServerHref();
   const [deleteData, setDeleteData] = useState(false);
 
   return (
@@ -45,7 +46,7 @@ export function LinkedServiceDelete({
         aria-hidden
       />
       <Link
-        href={`/services/${service.id}`}
+        href={href(`/services/${service.id}`)}
         className="text-foreground hover:text-accent min-w-0 truncate text-sm transition-colors"
       >
         {serviceDisplayName(service)}

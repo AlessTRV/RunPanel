@@ -4,7 +4,6 @@ import { memo, useMemo, useState } from "react";
 import Link from "next/link";
 import { Input } from "@heroui/react";
 import { Icon } from "@iconify/react";
-import { useResource } from "@/lib/hooks/useResource";
 import { usePollInterval } from "@/lib/hooks/usePollingInterval";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { LoadError } from "@/components/ui/LoadError";
@@ -13,7 +12,10 @@ import { Panel } from "@/components/ui/Panel";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { PageSkeleton } from "@/components/ui/Skeletons";
 import { StatusBadge } from "@/components/StatusBadge";
-import { useNodeApi } from "@/lib/hooks/useNode";
+import { useNode, useServerHref } from "@/lib/hooks/useNode";
+import { useClusterList } from "@/lib/hooks/useClusterList";
+import type { Located } from "@/lib/cluster-merge";
+import { ServerBadge, ServerFilter, UnreachableServers } from "@/components/cluster/ServerBits";
 
 interface Project {
   id: string;
@@ -34,14 +36,15 @@ interface Project {
  * This route used to be a bare `redirect("/home")`, which meant the sidebar
  * could not offer "Projects" as a destination at all.
  */
-const ProjectRow = memo(function ProjectRow({ project }: { project: Project }) {
+const ProjectRow = memo(function ProjectRow({ project, href }: { project: Located<Project>; href: string }) {
   return (
-    <Link href={`/projects/${project.id}`} className="block">
+    <Link href={href} className="block">
       <Panel interactive padding="compact" className="flex items-center gap-3">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <span className="text-foreground truncate text-sm font-medium">{project.name}</span>
             <StatusBadge status={project.status} />
+            <ServerBadge memberId={project.memberId} />
           </div>
           <p className="text-muted mt-0.5 flex items-center gap-x-2 truncate font-mono text-xs">
             <span className="truncate">
@@ -71,10 +74,11 @@ const ProjectRow = memo(function ProjectRow({ project }: { project: Project }) {
 });
 
 export default function ProjectsPage() {
-  const api = useNodeApi();
+  const href = useServerHref();
+  const { isSolo } = useNode();
   const poll5000 = usePollInterval(5000);
   const [search, setSearch] = useState("");
-  const { data, loading, error: loadError, refresh } = useResource<Project[]>(api("/api/projects"), { intervalMs: poll5000 });
+  const { items: data, failed, loading, error: loadError, refresh } = useClusterList<Project>("/api/cluster/projects", "/api/projects", { intervalMs: poll5000 });
 
   const projects = useMemo(() => (Array.isArray(data) ? data : []), [data]);
 
@@ -92,12 +96,15 @@ export default function ProjectsPage() {
     <>
       <PageHeader
         title="Progetti"
-        description="Tutti i progetti gestiti da questo pannello"
+        description={isSolo ? "Tutti i progetti gestiti da questo pannello" : "I progetti di ogni server"}
         actions={
-          <LinkButton href="/projects/new" variant="secondary">
-            <Icon icon="solar:add-circle-linear" width={16} aria-hidden />
-            Nuovo progetto
-          </LinkButton>
+          <>
+            <ServerFilter />
+            <LinkButton href={href("/projects/new")} variant="secondary">
+              <Icon icon="solar:add-circle-linear" width={16} aria-hidden />
+              Nuovo progetto
+            </LinkButton>
+          </>
         }
       />
 
@@ -111,6 +118,8 @@ export default function ProjectsPage() {
           />
         </div>
       )}
+
+      <UnreachableServers failed={failed} what="i progetti" className="mb-4" />
 
       {!data && loadError ? (
         <LoadError what="i progetti" error={loadError} onRetry={() => void refresh()} />
@@ -129,7 +138,7 @@ export default function ProjectsPage() {
       ) : (
         <div className="space-y-2">
           {filtered.map((project) => (
-            <ProjectRow key={project.id} project={project} />
+            <ProjectRow key={`${project.memberId}:${project.id}`} project={project} href={href(`/projects/${project.id}`, project.memberId)} />
           ))}
         </div>
       )}

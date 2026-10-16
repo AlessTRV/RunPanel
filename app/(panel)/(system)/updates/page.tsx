@@ -25,7 +25,8 @@ import { hasUpdate, isUpdateActive, type UpdateStatus } from "@/lib/panel-update
 import { Changelog } from "./_components/Changelog";
 import { UpdateLog } from "./_components/UpdateLog";
 import { SignatureSettings } from "./_components/SignatureSettings";
-import { useNodeApi } from "@/lib/hooks/useNode";
+import { useNode, useNodeApi } from "@/lib/hooks/useNode";
+import { UpdatesOverview } from "./_components/UpdatesOverview";
 
 /**
  * Updating the panel, from the panel.
@@ -54,7 +55,14 @@ const INTERVAL_OPTIONS = PANEL_UPDATE_INTERVALS.map((value) => ({
   label: INTERVAL_LABELS[value],
 }));
 
+/** Every server's updates at once in a cluster; one server's page when the URL names it. */
 export default function UpdatesPage() {
+  const { isSolo, serverParam } = useNode();
+  if (!isSolo && !serverParam) return <UpdatesOverview />;
+  return <ServerUpdatesPage />;
+}
+
+function ServerUpdatesPage() {
   const api = useNodeApi();
   const [checking, setChecking] = useState(false);
   const [starting, setStarting] = useState(false);

@@ -8,7 +8,7 @@ import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { ChoiceCard, ChoiceGroup } from "@/components/ui/ChoiceCard";
 import { Field } from "@/components/ui/Field";
 import type { DockerTemplate } from "../_data/catalog";
-import { useNodeApi } from "@/lib/hooks/useNode";
+import { useNodeApi, useServerHref } from "@/lib/hooks/useNode";
 
 /**
  * A prebuilt image with a few fields, configured as the project's app.
@@ -24,6 +24,7 @@ export function TemplateForm({
   template: DockerTemplate;
 }) {
   const api = useNodeApi();
+  const href = useServerHref();
   const router = useRouter();
   const [saving, setSaving] = useState(false);
   const [version, setVersion] = useState(template.versions[0]);
@@ -58,7 +59,7 @@ export function TemplateForm({
       }
 
       toast.success(`${template.label} configurato`);
-      router.push(`/projects/${projectId}`);
+      router.push(href(`/projects/${projectId}`));
     } catch {
       toast.error("Configurazione non riuscita");
     } finally {

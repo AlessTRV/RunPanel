@@ -7,6 +7,7 @@ import { Icon } from "@iconify/react";
 import { CRUMBS_WITHOUT_PAGE, SEGMENT_LABELS } from "@/lib/nav";
 import { useCrumbLabels } from "@/lib/hooks/useCrumbLabel";
 import { ServerSelector } from "@/components/ServerSelector";
+import { useNode, useServerHref } from "@/lib/hooks/useNode";
 
 interface Crumb {
   label: string;
@@ -41,6 +42,10 @@ export function TopBar() {
   const pathname = usePathname();
   const router = useRouter();
   const crumbs = buildCrumbs(pathname, useCrumbLabels());
+  const href = useServerHref();
+  // A page about another server says so first, so a deep link is never ambiguous.
+  const { isSolo, serverParam, selfId, nameOf } = useNode();
+  const serverCrumb = !isSolo && serverParam && serverParam !== selfId ? nameOf(serverParam) : null;
 
   async function handleLogout() {
     await fetch("/api/auth/logout", { method: "POST" });
@@ -56,6 +61,14 @@ export function TopBar() {
           leaked raw project ids into the trail. */}
       <nav aria-label="Percorso" className="min-w-0">
         <ol className="flex items-center gap-1.5 text-sm">
+          {serverCrumb && (
+            <li className="flex min-w-0 items-center gap-1.5">
+              <span className="bg-default text-muted inline-flex max-w-[14ch] items-center gap-1 truncate rounded-md px-1.5 py-0.5 text-xs">
+                <Icon icon="solar:server-2-linear" width={12} aria-hidden />
+                {serverCrumb}
+              </span>
+            </li>
+          )}
           {crumbs.map((crumb, i) => {
             const last = i === crumbs.length - 1;
             return (
@@ -76,7 +89,7 @@ export function TopBar() {
                   </span>
                 ) : (
                   <Link
-                    href={crumb.href}
+                    href={href(crumb.href)}
                     className="text-muted hover:text-foreground max-w-[12ch] truncate transition-colors"
                   >
                     {crumb.label}

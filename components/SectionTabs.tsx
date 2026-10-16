@@ -6,6 +6,7 @@ import { Icon } from "@iconify/react";
 import { cn } from "@/lib/utils";
 import { NAV_SECTIONS, isActiveNav, type NavSectionId } from "@/lib/nav";
 import { useAllowedNav } from "@/lib/hooks/useMe";
+import { useServerHref } from "@/lib/hooks/useNode";
 
 /**
  * The tabs of a sidebar entry that stands for several pages.
@@ -19,6 +20,7 @@ import { useAllowedNav } from "@/lib/hooks/useMe";
  */
 export function SectionTabs({ section }: { section: NavSectionId }) {
   const pathname = usePathname();
+  const href = useServerHref();
   const allowed = useAllowedNav();
   const { label, tabs } = NAV_SECTIONS[section];
   const visible = tabs.filter(allowed);
@@ -38,7 +40,7 @@ export function SectionTabs({ section }: { section: NavSectionId }) {
         return (
           <Link
             key={tab.href}
-            href={tab.href}
+            href={href(tab.href)}
             aria-current={active ? "page" : undefined}
             className={cn(
               "flex items-center gap-1.5 border-b-2 px-3 py-2.5 text-sm whitespace-nowrap transition-colors",

@@ -1,5 +1,8 @@
+"use client";
+
 import Link from "next/link";
 import { Code, FieldHint, Hint } from "@/components/ui/Hint";
+import { useServerHref } from "@/lib/hooks/useNode";
 
 /**
  * The explanations that have to say the same thing in more than one place.
@@ -123,11 +126,12 @@ export function ManagedEnvHint({ runtimeType }: { runtimeType: string }) {
  * and its URL turns up in the app's environment without anyone copying it.
  */
 export function ServiceLinkHint({ projectId }: { projectId?: string }) {
+  const href = useServerHref();
   return (
     <Hint tone="tip" icon="solar:link-circle-linear" title="Un database si collega da solo">
       Crea un database da{" "}
       {projectId ? (
-        <Link href={`/services/new?projectId=${projectId}`} className="text-accent hover:underline">
+        <Link href={href(`/services/new?projectId=${projectId}`)} className="text-accent hover:underline">
           Aggiungi al progetto → Database
         </Link>
       ) : (

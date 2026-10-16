@@ -16,7 +16,8 @@ import { useMe } from "@/lib/hooks/useMe";
 import { useResource } from "@/lib/hooks/useResource";
 import { formatWhen } from "@/lib/format";
 import { AUDIT_CATEGORIES, type AuditCategory } from "@/lib/audit-filter";
-import { useNodeApi } from "@/lib/hooks/useNode";
+import { useNode, useNodeApi } from "@/lib/hooks/useNode";
+import { ServerSelector } from "@/components/ServerSelector";
 
 interface Entry {
   id: string;
@@ -79,13 +80,19 @@ const ACTION_LABEL: Record<string, string> = {
 /** Who did what, filtered to what the reader may see. */
 export default function AuditPage() {
   const me = useMe();
+  // Each server keeps its own log: say whose this is, and let it be switched here.
+  const { isSolo, current } = useNode();
   const [category, setCategory] = useState<string>("");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
 
   return (
     <>
-      <PageHeader title="Registro attività" description="Chi ha fatto cosa, e quando" />
+      <PageHeader
+        title="Registro attività"
+        description={isSolo ? "Chi ha fatto cosa, e quando" : `Chi ha fatto cosa, e quando, su ${current?.name ?? "questo server"}`}
+        actions={<ServerSelector className="sm:hidden" />}
+      />
 
       <div className="space-y-4">
         <Panel className="grid gap-3 sm:grid-cols-3">
