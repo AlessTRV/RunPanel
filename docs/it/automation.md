@@ -4,136 +4,64 @@
 
 # Automazione dei deploy
 
-## Deploy automatico
+Si configura nella scheda **Impostazioni** del progetto, sezione **Deploy automatico**. Il campo *Come parte il deploy* sceglie tra due modi:
 
-Ogni progetto ha un URL webhook con un segreto proprio. Attivando **Deploy
-automatico**, un push sul branch configurato avvia un deploy. Le firme sono
-verificate con HMAC-SHA256 e confronto a tempo costante; le consegne, accettate o
-rifiutate, restano nello storico con il motivo.
+- **Webhook**: GitHub avvisa a ogni push e il deploy parte subito. Serve un server raggiungibile da internet.
+- **Controllo periodico**: RunPanel interroga GitHub a intervalli e distribuisce quando il commit cambia. Solo richieste in uscita: funziona anche dietro NAT, VPN o Tailscale.
 
-Con un account GitHub collegato il webhook **si registra da solo**: attivare
-l'interruttore lo crea sul repository con l'URL, il segreto, il content type
-`application/json` e il solo evento `push` già impostati. Spegnere l'auto-deploy
-lo disattiva senza cancellarlo, così lo storico delle consegne su GitHub resta.
+Sceglierne uno disattiva l'altro, perché due trasporti attivi distribuirebbero lo stesso commit due volte. Entrambi seguono il branch del progetto; un progetto fermo su un commit li ignora (vedi [Tornare a un commit](#tornare-a-un-commit)).
 
-La sezione mostra anche cosa non va: token assente, repository non riconosciuto,
-indirizzo del pannello che GitHub non può raggiungere, webhook disallineato,
-ultima consegna rifiutata. Il pulsante **Invia ping** chiede a GitHub una
-consegna vera, che passa da DNS, firewall, TLS e firma.
+## Webhook
 
-Perché il pannello sappia quale indirizzo scrivere su GitHub, imposta
-**Indirizzo pubblico** in Impostazioni → Pannello. Lasciato vuoto viene dedotto
-dalla richiesta, il che vale finché apri il pannello dallo stesso indirizzo da
-cui lo raggiunge GitHub.
+Ogni progetto ha un URL webhook e un segreto propri. Le firme sono verificate con HMAC-SHA256; ogni consegna, accettata o rifiutata, finisce nello storico con il motivo.
 
-> **Pannello raggiungibile solo via VPN o Tailscale?** Allora i webhook non
-> arrivano: GitHub consegna da internet e non fa parte della tua rete privata.
-> Un indirizzo `100.64–100.127.x.x` viene rifiutato subito; un nome MagicDNS
-> `*.ts.net` viene segnalato, perché funziona **solo** se lo pubblichi con
-> `tailscale funnel`. Non serve esporre niente: usa il **controllo periodico**
-> qui sotto.
+Con il **token GitHub** collegato, accendere il deploy automatico **registra il webhook da solo** sul repository (evento `push`, `application/json`). Spegnerlo lo disattiva senza cancellarlo. Un webhook creato a mano con lo stesso URL viene riconosciuto e corretto, non duplicato. Per gestire i webhook il token deve avere lo scope `repo` o `write:repo_hook` (token classico) o il permesso *Webhooks: Read and write* (token fine-grained); un repository di un'organizzazione può richiedere di autorizzarlo. Senza token, URL e segreto sono lì da copiare per configurarlo a mano.
 
-## Controllo periodico, quando il pannello non è raggiungibile
+La sezione dice cosa non va: token assente, repository non riconosciuto, indirizzo che GitHub non raggiunge, webhook disallineato, ultima consegna rifiutata. Mostra le ultime 10 consegne ricevute e le ultime 10 viste da GitHub; lo storico dura 30 giorni. **Invia ping** chiede a GitHub una consegna vera, che passa da DNS, firewall, TLS e firma. Se il progetto è rimasto bloccato in "deploy in corso", ogni push risponde "in coda" e non succede niente: il pulsante **Sblocca** lo libera.
 
-Un webhook ha bisogno che GitHub apra una connessione **verso** questa macchina,
-e dietro NAT, su Tailscale o WireGuard, su un portatile, non può: la consegna
-fallisce prima di arrivare e nei log non resta nulla, perché il problema è la
-direzione della connessione.
+L'indirizzo che il pannello scrive su GitHub è **Indirizzo pubblico** in **Impostazioni › Pannello** (solo il proprietario). Lasciato vuoto viene dedotto dalla richiesta, che va bene solo se apri il pannello dallo stesso indirizzo con cui GitHub lo raggiunge. Con [più server](multi-server.md) il webhook arriva al server che ospita il progetto: imposta l'indirizzo pubblico su ogni server, con quel server selezionato, e ricorda che anche un server con ruolo nodo deve essere raggiungibile da internet per ricevere webhook.
 
-Quindi il pannello può anche **chiedere** invece di farsi avvisare. Nelle
-impostazioni del progetto, *Deploy automatico → Come parte il deploy*:
+> **Raggiungibile solo via VPN o Tailscale?** I webhook non arrivano: GitHub consegna da internet. Un indirizzo `100.64–100.127.x.x` viene rifiutato subito; un nome MagicDNS `*.ts.net` viene segnalato, perché funziona solo pubblicato con `tailscale funnel`. Usa il controllo periodico.
 
-- **Webhook** — GitHub avvisa a ogni push, il deploy parte subito. Richiede un
-  pannello raggiungibile da internet.
-- **Controllo periodico** — RunPanel guarda il branch a intervalli e distribuisce
-  quando il commit cambia. Una richiesta in uscita, nessuna in entrata: funziona
-  ovunque ci sia una connessione a internet.
+## Controllo periodico
 
-L'intervallo è in Impostazioni → Pannello, da 30 secondi a 30 minuti (predefinito 5
-minuti). Un branch fermo risponde `304 Not Modified` grazie all'ETag, e GitHub
-non conta le 304 nel limite orario di richieste: anche 30 secondi costano
-praticamente nulla. Il ritardo massimo di un deploy è un intervallo.
+Richiede il token GitHub collegato e un repository su `github.com`: senza token il controllo non parte e la sezione lo segnala in rosso.
 
-Il primo giro dopo l'attivazione **registra** il commit corrente senza
-distribuirlo — «distribuisci quello che arriva», non «distribuisci quello che
-c'è adesso» — e i deploy così avviati compaiono nello storico con trigger
-`poll`. Scegliendo il controllo periodico il webhook eventuale viene
-disattivato, perché due trasporti attivi distribuirebbero lo stesso commit due
-volte.
+L'intervallo si imposta in **Impostazioni › Pannello** (solo il proprietario), da 30 secondi a 30 minuti, predefinito 5 minuti. Un branch fermo costa una risposta `304 Not Modified`, che GitHub non conta nel limite orario. Il ritardo massimo di un deploy è un intervallo più una quindicina di secondi. Con più server ogni server controlla i propri progetti con il proprio intervallo, e tutti usano lo stesso token condiviso.
 
-Il webhook resta configurabile a mano — URL e Secret sono lì da copiare — per i
-repository che il token non amministra o per un pannello senza account collegato.
+Il primo giro dopo l'attivazione **registra** il commit attuale senza distribuirlo: si distribuisce quello che arriva dopo. Ogni commit nuovo ha un solo tentativo: se il deploy fallisce, non viene ritentato finché non arriva un altro commit. I deploy così avviati compaiono nello storico con trigger `poll`. Se l'ultimo controllo è più vecchio di tre intervalli, la sezione diventa gialla.
 
-## Tornare a un commit preciso
+## Tornare a un commit
 
-Il pulsante accanto a **Deploy** apre la cronologia del repository: si sceglie il
-branch, si sceglie il commit, e il progetto viene ricostruito da lì. Serve quando
-il commit appena distribuito è quello che ha rotto l'app.
+Il pulsante accanto a **Deploy** apre la cronologia del repository: scegli branch e commit, poi **Distribuisci**. Serve quando l'ultimo commit ha rotto l'app.
 
-La scelta **resta**. Il progetto si ferma su quel commit: ogni deploy ricostruisce
-quello, l'header lo dice con un'etichetta, e l'**auto-deploy viene sospeso** invece
-di riportare il progetto in avanti al primo push. Le consegne che arrivano nel
-frattempo restano nello storico come ignorate, con il motivo. **Torna all'ultimo
-commit** scioglie il blocco e distribuisce di nuovo la testa del branch.
+La scelta **resta**: ogni deploy ricostruisce quel commit, l'intestazione lo segnala e il deploy automatico è sospeso. Le consegne che arrivano nel frattempo restano nello storico come ignorate. **Torna all'ultimo commit**, nel menu **Altro**, scioglie il blocco e distribuisce la testa del branch. Anche cambiare il branch nelle impostazioni scioglie il blocco.
 
-Scegliere un branch diverso qui cambia il branch del progetto: da lì in avanti è
-quello che webhook e controllo periodico seguono. L'elenco dei commit arriva
-dall'API di GitHub, quindi vuole un account collegato; senza, o per un commit più
-vecchio degli ultimi cento, c'è un campo dove incollare lo SHA.
+Scegliere un altro branch nella cronologia cambia il branch del progetto, che da lì in avanti segue quello. L'elenco dei commit viene dall'API di GitHub e richiede il token; senza, o per un commit più vecchio degli ultimi cento, si incolla lo SHA completo di 40 caratteri.
 
-Il pannello lo ripete prima di procedere: **le migrazioni del database non
-tornano indietro**. Se la versione ripristinata si aspetta uno schema più vecchio
-di quello che c'è, può non partire.
+**Le migrazioni del database non tornano indietro.** Una versione che si aspetta uno schema più vecchio può non partire; il pannello lo ricorda prima di procedere.
 
 ## Comandi una tantum
 
-I comandi del contratto girano a *ogni* deploy. Quelli una tantum girano una volta
-sola, al punto della scala che scegli tu, e poi spariscono dalla coda: la
-migrazione da fare adesso, un `git submodule update` dopo aver cambiato repository,
-un fix di permessi, uno svuotamento di cache. Si scrivono in **Impostazioni →
-Comandi una tantum**, e finché la coda non è vuota il pannello lo dice accanto al
-pulsante Deploy.
+I comandi del contratto girano a ogni deploy. Quelli una tantum girano una volta, al passo che scegli, poi escono dalla coda: una migrazione da fare adesso, un `git submodule update`, un fix di permessi. Si scrivono in **Impostazioni › Comandi una tantum** e richiedono il permesso **Accesso all'host**. Finché la coda non è vuota, accanto al nome del progetto compare il numero di comandi in attesa.
 
-| Passo | Quando | Docker | Nativo e Compose |
-|---|---|---|---|
-| Prima del deploy | Prima che venga toccato qualsiasi cosa; l'app vecchia gira ancora | host | host |
-| Dopo il git | Nuovo commit sul disco, variabili caricate, niente ancora installato | host | host |
-| Prima dell'install | Subito prima delle dipendenze | — | host |
-| Dopo l'install | Dipendenze installate, build non ancora fatto | — | host |
-| Dopo il build | Build riuscito, prima del release command | container | host |
-| Prima dell'avvio | Processo vecchio fermo, nuovo non ancora partito | container | host |
-| Dopo l'avvio | Processo avviato, health check non ancora passato | container | host |
-| A deploy riuscito | Health check passato | container | host |
+| Passo | Quando | Docker | Compose | Nativo |
+|---|---|---|---|---|
+| Prima del deploy | Prima di toccare qualsiasi cosa; l'app vecchia gira | host | host | host |
+| Dopo il git | Commit nuovo sul disco, variabili caricate | host | host | host |
+| Prima dell'install | Subito prima delle dipendenze | — | — | host |
+| Dopo l'install | Dipendenze installate, build non ancora fatto | — | — | host |
+| Dopo il build | Build riuscito, prima del release command | container | host | host |
+| Prima dell'avvio | Processo vecchio fermo, nuovo non ancora partito | container | host | host |
+| Dopo l'avvio | Processo avviato, health check non ancora passato | container | host | host |
+| A deploy riuscito | Health check passato | container | host | host |
 
-I due passi attorno all'install non esistono con Docker e Compose: lì install e
-build sono un unico `docker build`. Se cambi il runtime di un progetto che ne
-aveva uno in coda, il comando non sparisce: resta lì segnalato, e il log del
-deploy dice perché non è partito.
+Con Docker e Compose install e build sono un unico passo, quindi i due passi attorno all'install non esistono; su un progetto statico girano uno dopo l'altro subito prima del build. Sotto Docker i passi dopo il build usano un container usa-e-getta dall'immagine appena costruita, con la stessa rete, gli stessi mount e lo stesso ambiente del release command. Con Compose girano sempre sull'host: per entrare in un servizio scrivi `docker compose run --rm api sh -c '…'`. Se cambi runtime e un comando in coda non ha più un passo valido, resta in coda segnalato e il log del deploy dice perché non è partito.
 
-Dove girano è deciso dal passo, non da un'opzione: sotto Docker i passi dopo il
-build usano un container usa-e-getta creato dall'immagine appena costruita —
-stessa rete, stessi mount, stesso ambiente, come il release command — mentre i due
-prima del build girano sull'host. Con Compose girano sempre sull'host, e per
-entrare in un servizio serve scriverlo a mano
-(`docker compose run --rm api sh -c '…'`).
+**Se un comando fallisce, il deploy fallisce** e il comando resta in coda per il deploy successivo, con tentativi ed errore visibili. Con *Continua anche se fallisce* il deploy prosegue e il comando viene consumato, registrato come fallito. Un comando riuscito va nella cronologia (passo, durata, commit), che si svuota a mano o da sola dopo 90 giorni. Un fallimento in *A deploy riuscito* segna il deploy come fallito anche se l'app è viva e sana.
 
-**Se uno fallisce, il deploy fallisce** e il comando **resta in coda**: sistemi la
-causa e il deploy successivo lo riprova, con il numero di tentativi e l'errore
-dell'ultimo sotto gli occhi. Se spunti *Continua anche se fallisce* il deploy tira
-dritto e il comando viene consumato lo stesso, registrato come fallito. Quello che
-riesce esce dalla coda e finisce nella cronologia, con passo, durata e commit; si
-svuota a mano, e da sola dopo 90 giorni.
+Limiti: 10 minuti per comando, 50 comandi in coda, 4000 caratteri per comando. La coda viene presa all'inizio del deploy: un comando aggiunto durante un deploy vale per il successivo, e mentre il deploy la tiene non si può modificarla.
 
-Un avvertimento su *A deploy riuscito*: se un comando lì fallisce, il deploy viene
-registrato come fallito **anche se l'app è viva e sana**: è l'unico passo in cui
-"fallito" non vuol dire "non sta servendo".
+Stanno fuori dal [contratto di deploy](deploy.md#il-contratto-di-deploy) perché il contratto si fonde con il `runpanel.json` del repository: lì sarebbero comandi sull'host scelti da chiunque possa fare push. Non metterci password: il comando finisce nel log.
 
-**Non stanno nel contratto di deploy, e non è una svista.** Il contratto si fonde
-con il `runpanel.json` del repository, quindi un campo lì dentro sarebbe shell
-arbitraria sull'host che chiunque possa pushare riesce a far girare. Stanno in una
-tabella loro, dove niente si fonde e l'unico che scrive è una rotta autenticata:
-un repository non li può toccare. Non metterci password: il comando finisce nel log del deploy.
-
-L'esecuzione è **almeno una volta**, non esattamente una volta: se il pannello si
-riavvia mentre un comando sta girando, il comando torna in coda e ripartirà, e la
-riga interrotta viene segnalata.
+L'esecuzione è **almeno una volta**: se il pannello si riavvia mentre un comando gira, il comando torna in coda e ripartirà, e la riga interrotta viene segnalata.

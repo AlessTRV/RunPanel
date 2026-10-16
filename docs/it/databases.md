@@ -4,146 +4,72 @@
 
 # Database e servizi
 
-Un *servizio* è un database gestito dal pannello: un container etichettato, con
-il proprio volume nominato e le credenziali cifrate.
+Un *servizio* è un database gestito dal pannello: un container etichettato, con il proprio volume e le credenziali cifrate. Vive sul server su cui è stato creato (con [più server](multi-server.md), quello selezionato nella barra).
 
-| Motore | Versioni offerte |
-|---|---|
-| PostgreSQL | 18, 17, 16, 15, 14 |
-| MySQL | 9, 8 |
-| Redis | 8, 7, 6 |
-| MongoDB | 8.0, 7.0 |
+| Motore | Versioni offerte | Porta di default | Variabile di default |
+|---|---|---|---|
+| PostgreSQL | 18, 17, 16, 15, 14 | 5432 | `DATABASE_URL` |
+| MySQL | 9, 8 | 3306 | `DATABASE_URL` |
+| Redis | 8, 7, 6 | 6379 | `REDIS_URL` |
+| MongoDB | 8.0, 7.0 | 27017 | `MONGODB_URL` |
 
-Sono le major che l'immagine ufficiale supporta oggi, meno i canali di anteprima
-e quelli a cadenza breve. Un servizio già esistente non viene toccato quando
-l'elenco cambia: la versione è salvata per riga e le ricreazioni usano quella.
+Le versioni sono le major supportate dall'immagine ufficiale. La versione è salvata per servizio: quando l'elenco cambia, un servizio esistente non viene toccato.
+
+Alla creazione utente e database sono `runpanel` e `runpanel_db`, con una password casuale; si possono cambiare. Redis ha solo una password. Vedere le credenziali richiede il livello Gestione sul servizio.
+
+La porta viene pubblicata su tutte le interfacce. Per limitarla a certi indirizzi, già alla creazione o dopo, vedi [Accesso di rete](network.md).
 
 ## La console
 
-Il pannello sa già nome del container, utente e password — le tre cose che
-andresti a cercare prima di scrivere `docker exec` sull'host. La console le usa
-al posto tuo, in tre modalità: il **client del motore** già autenticato
-(`psql`, `mysql`, `redis-cli`, `mongosh`), una **shell** dentro il container, e
-il **log** del container in diretta. Il log è in sola lettura e non viene
-salvato da nessuna parte: esiste finché lo guardi.
+Tre modalità: **Motore** (il client già autenticato: `psql`, `mysql`, `redis-cli`, `mongosh`), **Shell** dentro il container e **Log** del container in diretta.
 
-Non è un emulatore di terminale: `docker exec` con lo standard input in pipe non
-può allocare un TTY, quindi si manda una riga alla volta. Per questo i flag
-contano — senza `--table` MySQL risponde in colonne separate da tabulazioni, e
-senza `--force` il primo errore di sintassi chiuderebbe la sessione.
-
-Prima della prima sessione c'è un avviso, e va accettato: da lì si cancellano
-dati in modo irreversibile, e il pannello non tiene una copia.
-
-## Cartelle condivise con l'host
-
-Una cartella qualsiasi del container può comparire dove vuoi tu sull'host: la
-configurazione, i log, gli upload, la directory dati. Più di una, ognuna
-accendibile, spegnibile e in sola lettura. Vale per i servizi e per i progetti
-con runtime Docker, con la stessa interfaccia.
-
-**La prima volta il pannello semina**, ed è la parte che conta. Un bind non è una
-sincronizzazione ma una **sostituzione**: la cartella dell'host copre quel
-percorso dentro il container, quindi senza semina vedresti una cartella vuota — e
-il servizio pure. Il pannello copia fuori il contenuto attuale prima di montare;
-da lì in poi è la stessa cartella, sottocartelle comprese, senza riavviare.
-
-La semina va a due velocità. Una cartella qualunque è una copia. La **directory
-dati del motore** è l'unico caso in cui sbagliare non si vede: `cp` senza `-a`
-perde proprietario e permessi, e un Postgres che si trova davanti una cartella
-vuota si inizializza da capo, funziona benissimo e ha perso tutto. Quel caso
-ferma il servizio, copia conservando i permessi, ricrea, **chiede al motore se i
-database ci sono ancora** e se non ci sono rimette tutto com'era da solo.
-
-Se la cartella dell'host non è vuota si ferma e lo dice, con una casella per
-adottare quello che c'è già senza copiarci sopra. E togliere un bind dalla
-directory dati viene rifiutato finché non lo confermi: il motore tornerebbe sul
-volume di prima, fermo a com'era quando l'avevi aggiunto, e ripartirebbe su dati
-più vecchi senza dire niente.
-
-## Dove stanno i file di un progetto nativo
-
-Un progetto sotto PM2 non ha un container, quindi non ha bind: ha una cartella.
-Dalle impostazioni la si sposta su un altro disco, con tutto dentro —
-`node_modules` e build compresi, così riparte senza ricostruire.
-
-Al vecchio posto resta un **collegamento**: molti punti del pannello costruiscono
-`data/repos/<slug>` dal solo slug, e i percorsi assoluti già salvati puntano lì
-dentro. Il collegamento li fa risolvere tutti senza toccarne nessuno. La copia di
-partenza non viene cancellata: resta finché non lo dici tu.
-
-## Il collegamento a un progetto
-
-Un servizio può essere collegato a un progetto, e allora gli fornisce la propria
-connection URL in una variabile d'ambiente. Il collegamento ha un **interruttore
-esplicito**:
-
-- **Acceso**, il valore iniettato vince su una variabile che avessi definito a
-  mano, e il pannello lo scrive nel log del deploy.
-- **Spento**, il progetto usa le proprie variabili e il pannello non tocca niente.
-
-La variabile ha un nome modificabile (`DATABASE_URL` per default, derivato dal
-tipo). Due collegamenti attivi nello stesso progetto non possono rispondere alla
-stessa chiave: il secondo viene rifiutato nominando il primo e proponendo un nome
-alternativo, invece di sovrascriverlo in silenzio.
-
-**L'host dipende dal runtime del progetto**, e il pannello lo decide da solo:
-
-- un progetto **Docker** o **Compose** riceve il nome del container e la porta
-  *interna* (`runpanel-svc-<slug>-<nome>:5432`), perché RunPanel aggancia l'app
-  alla rete `runpanel-net-<slug>` a ogni deploy. Un container Docker ci viene
-  messo all'avvio; uno stack Compose riceve un file di override generato accanto
-  ai dati del pannello — il compose del repository non viene toccato — che
-  aggiunge la rete a ogni servizio dello stack. Un servizio con `network_mode`
-  non può essere agganciato e il log del deploy lo dice;
-- un progetto **nativo** (Node.js, Python, Custom sotto PM2) riceve `localhost`
-  e la porta pubblicata, perché gira sull'host. Lo stesso vale per un container
-  su `network: host`.
-
-Dentro un container `localhost` è il container stesso, e `host.docker.internal`
-passa dal firewall dell'host, che può bloccarlo: è per questo che i progetti a
-container usano la rete e non la porta pubblicata. La pagina del servizio mostra
-la riga per ogni punto di vista e dice quale delle due viene iniettata; la scheda
-Variabili del progetto scrive, sotto la variabile, l'host che arriverà all'app;
-e il log del deploy stampa la URL iniettata con la password mascherata.
-
-Un servizio può anche essere **autonomo**, senza progetto: allora non inietta
-niente e resta un database che gestisci dal pannello.
-
-**Eliminare il progetto non elimina i suoi servizi.** Restano come servizi
-autonomi, container e dati compresi, nella cartella in cui stava il progetto. Il
-pannello di eliminazione li elenca: ognuno si elimina da solo, scegliendo se
-tenere il volume, e una spunta — spenta di default — li porta via tutti insieme
-al progetto, volumi inclusi. L'app da sola si rimuove con «Rimuovi app», che
-lascia progetto e servizi al loro posto.
-
-## Rinominare un servizio
-
-Il pulsante **Rinomina** sulla pagina del servizio cambia il nome che il pannello
-mostra, subito e ovunque: liste, notifiche, backup. Come per lo slug di un
-progetto, il **nome tecnico** scelto alla creazione invece non cambia mai: è nel
-nome del volume dei dati (`runpanel-postgres-<slug>-<nome>`), e Docker non sa
-rinominare un volume. Un nome tecnico diverso farebbe ripartire il database su un
-volume nuovo e vuoto.
-
-Il **container** segue il nome nuovo al **prossimo deploy del progetto** a cui il
-servizio è collegato, deploy o rebuild. È il momento in cui l'app riparte
-comunque, ed è quello in cui riceve il nuovo host nella connection URL. Il
-database si riavvia per qualche secondo, sui volumi che aveva; il vecchio nome
-del container resta un alias sulla rete del progetto, così l'app ancora accesa
-dal deploy precedente, o rimasta accesa da un deploy fallito più avanti, continua
-a raggiungerlo. Il log del deploy dice cosa è stato rinominato e dove stanno i
-dati. Se il nome nuovo è già di un altro container, il rinomina viene saltato e
-il log lo spiega. La pagina del servizio mostra il nome che il container prenderà
-finché il deploy non arriva.
-
-Un servizio autonomo cambia solo il nome mostrato: non c'è un deploy che lo
-riavvii. Lo stesso principio vale per ogni ricreazione (cambio dell'accesso,
-delle cartelle condivise): il container riparte sul volume che ha davvero, letto
-da Docker, anche dopo uno spostamento in un altro progetto.
+- Motore e Shell richiedono il servizio acceso e il permesso del terminale sul servizio; a ogni apertura della pagina c'è un avviso da accettare, perché da lì si cancellano dati senza copia.
+- Il Log mostra le ultime 200 righe, funziona anche a servizio fermo e non viene salvato.
+- Una sessione per persona e per servizio, chiusa dopo 10 minuti di inattività.
+- Non è un terminale completo: si manda una riga alla volta.
 
 ## I database dentro un servizio
 
-Un server di database ne ospita più d'uno. La pagina del servizio li elenca
-leggendoli dal motore, non da una lista del pannello, e permette di crearli ed
-eliminarli con la connection URL pronta per ognuno.
+Nella scheda **Database** un server ne ospita più d'uno: si creano e si eliminano, ognuno con la sua connection URL. L'elenco unisce quello che riporta il motore con quello che conosce il pannello, e segnala i database creati fuori dal pannello e quelli che il motore non ha più.
+
+- Nomi in minuscolo, cifre e trattino basso, al massimo 63 caratteri.
+- I database di sistema non si eliminano; quello principale se ne va solo eliminando il servizio. Un database Postgres con connessioni aperte viene rifiutato invece di essere chiuso a forza.
+- Redis non ha database con nome: la pagina spiega come usare `/0`, `/1` e così via.
+
+## Il collegamento a un progetto
+
+Un servizio collegato a un progetto gli fornisce la propria connection URL in una variabile d'ambiente. Il collegamento si fa alla creazione o dopo, e si può staccare o spostare su un altro progetto. La variabile arriva all'app al deploy successivo e a ogni riavvio.
+
+Un **interruttore** decide se iniettarla:
+
+- **acceso**: il valore iniettato vince su una variabile con lo stesso nome definita a mano, e il log del deploy lo dice;
+- **spento**: il progetto usa le proprie variabili.
+
+Il nome della variabile si può cambiare. Se due servizi dello stesso progetto userebbero lo stesso nome, alla creazione il secondo prende `<NOME>_DATABASE_URL`; modificando un collegamento esistente, il pannello rifiuta e propone un nome libero.
+
+**L'host dipende dal runtime del progetto:**
+
+- un progetto **Docker** o **Compose** riceve il nome del container e la porta *interna* (`runpanel-svc-<slug>-<nome>:5432`), perché RunPanel aggancia l'app alla rete `runpanel-net-<slug>` a ogni deploy. Per Compose genera un file di override accanto ai dati del pannello, senza toccare il compose del repository; un servizio con `network_mode` non può essere agganciato e il log lo dice;
+- un progetto **nativo** (sotto PM2) o un container su `network: host` riceve `localhost` e la porta pubblicata.
+
+La pagina del servizio mostra la URL per ogni punto di vista e quale viene iniettata, la scheda **Variabili** del progetto mostra l'host che arriverà all'app, e il log del deploy stampa la URL con la password mascherata.
+
+Un servizio può anche essere **autonomo**, senza progetto: non inietta niente.
+
+**Eliminare il progetto non elimina i suoi servizi.** Restano autonomi, con container e dati, nella cartella del progetto. La finestra di eliminazione li elenca: ognuno si elimina a parte scegliendo se tenere il volume, oppure una spunta (spenta di default) li elimina tutti con il progetto, volumi compresi. **Rimuovi app** toglie solo l'app e lascia progetto e servizi.
+
+## Cartelle condivise con l'host
+
+Una cartella del container può comparire dove vuoi sull'host: configurazione, log, upload, la directory dati. Se ne possono aggiungere più d'una, ognuna attivabile e, se serve, in sola lettura. Vale per i servizi e per i progetti Docker, con la stessa interfaccia, e richiede il permesso **Accesso all'host**.
+
+Un bind **sostituisce** la cartella del container. Per questo, la prima volta, il pannello **semina**: ferma il servizio, copia il contenuto attuale sull'host conservando proprietari e permessi, e ricrea il container. Per la **directory dati del motore** controlla anche, prima e dopo, che i database ci siano ancora. Se qualcosa va storto, torna da solo alla configurazione precedente; se il pannello si spegne a metà, al riavvio ricostruisce l'ultima configurazione funzionante.
+
+- Se la cartella dell'host non è vuota il pannello si ferma e lo dice, con una casella per adottarne il contenuto senza copiarci sopra.
+- Sono rifiutati: la directory dati in sola lettura, due bind sullo stesso percorso del container, la cartella dei dati del pannello o una che la contiene, e una copia senza almeno il 5% di spazio libero in più.
+- Togliere il bind della directory dati va confermato: il motore tornerebbe al volume di prima, fermo a quando avevi aggiunto il bind.
+
+## Rinominare un servizio
+
+**Rinomina** cambia subito il nome mostrato ovunque: liste, notifiche, backup. Il **nome tecnico** scelto alla creazione non cambia mai, perché è nel nome del volume (per esempio `runpanel-pg-<slug>-<nome>`; `mysql`, `redis` e `mongo` per gli altri motori; senza `<slug>` per un servizio autonomo) e Docker non rinomina i volumi.
+
+Il **container** prende il nome nuovo al prossimo deploy del progetto collegato. Il database si riavvia per qualche secondo sugli stessi volumi, e il vecchio nome resta un alias sulla rete del progetto, così l'app ancora accesa continua a raggiungerlo. Se il nome nuovo è già di un altro container il rinomina viene saltato e il log lo spiega. Un servizio autonomo cambia solo il nome mostrato.

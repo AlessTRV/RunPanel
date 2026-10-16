@@ -4,42 +4,29 @@
 
 # Accesso di rete
 
-Di default RunPanel pubblica una porta come fa Docker — `-p 5433:5432`, senza
-indirizzo di bind, su tutte le interfacce. È comodo, e vuol dire che un database
-creato dal pannello risponde a tutto ciò che sta sulla LAN, e a internet se la
-macchina ha un indirizzo pubblico.
+Di default RunPanel pubblica una porta come fa Docker, `-p 5433:5432`, su tutte le interfacce: un database creato dal pannello risponde a tutta la LAN, e a internet se la macchina ha un indirizzo pubblico.
 
-Accendendo **Chi può collegarsi**, su un servizio o su un progetto, cambia così:
+Nella sezione **Chi può collegarsi** di un servizio o di un progetto, l'interruttore **Limita** cambia le cose così (per un database si può scegliere già alla creazione):
 
-- il container viene ricreato (o l'app riavviata) pubblicando su `127.0.0.1` e su
-  una porta che il pannello alloca;
-- il pannello occupa la porta che i tuoi client già conoscono, e inoltra solo le
-  connessioni dagli indirizzi che hai elencato;
-- `127.0.0.1` e `::1` sono sempre consentiti e non si possono togliere: da lì
-  arrivano la sonda di health check, i dumper dei backup e qualsiasi `psql` sulla
-  macchina.
+- il container viene ricreato, o l'app riavviata, pubblicando solo su `127.0.0.1` e su una porta che il pannello sceglie;
+- il pannello occupa la porta che i tuoi client già conoscono e inoltra solo le connessioni dagli indirizzi elencati;
+- la macchina stessa (`127.0.0.0/8` e `::1`) è sempre consentita e non si può togliere: da lì arrivano health check, backup e qualsiasi `psql` locale.
 
-Le regole sono singoli indirizzi o intervalli CIDR, IPv4 o IPv6. Il pannello
-legge le interfacce della macchina e le propone come caselle da spuntare,
-etichettate: la LAN, gli intervalli VPN (la `100.64.0.0/10` di Tailscale è
-riconosciuta), e gli switch virtuali. Chi viene respinto compare nella pagina con
-un pulsante **Consenti**.
+Accendendo **Limita**, le reti della macchina sono già spuntate. Una lista vuota vuol dire "solo questa macchina".
 
-Due cose da sapere prima di accenderlo:
+## Le regole
 
-- **Fallisce in chiusura.** La porta è tenuta aperta dal processo del pannello:
-  se il pannello non gira, la porta è chiusa. Prima il database di un'app restava
-  raggiungibile anche a pannello spento.
-- **Un'app sulla rete del progetto non è toccata.** Ogni progetto Docker o
-  Compose raggiunge il proprio database per nome del container su
-  `runpanel-net-<slug>`, che non passa mai dal gate. Ci passa invece il traffico
-  che arriva da `host.docker.internal`.
+Sono indirizzi singoli o intervalli CIDR, IPv4 o IPv6. Il pannello propone come caselle le reti delle interfacce della macchina, etichettate: LAN, VPN (Tailscale è riconosciuta, sia `100.64.0.0/10` sia `fd7a:115c:a1e0::/48`) e switch virtuali. Con un [reverse proxy configurato](configuration.md#metterlo-su-internet) propone anche **Il tuo indirizzo ora**.
 
-Non viene offerto per un progetto **Compose**, che pubblica le porte da un file
-che RunPanel non riscrive, né per un container su `network: host`, che non ha una
-porta pubblicata da spostare. In entrambi i casi lo dice.
+Un intervallo `/0` è rifiutato, i bit dell'host vengono azzerati (`192.168.1.14/24` diventa `192.168.1.0/24`) e un IPv4 con zeri iniziali non è accettato. Modificare le regole vale per le connessioni nuove; quelle aperte restano.
 
-Per un processo nativo il pannello passa anche `HOST`/`HOSTNAME` e, per le CLI di
-cui conosce la sintassi, il flag di bind. Un'app che ignora tutto questo resta su
-tutte le interfacce alla porta spostata, quindi il pannello lo verifica e lo
-scrive nella pagina.
+Le connessioni respinte compaiono sotto **Rifiutati di recente** (le ultime cinque) con un pulsante **Consenti**. Il pannello le ricorda in memoria, al massimo venti per porta, e le dimentica a ogni riavvio.
+
+## Prima di accenderlo
+
+- **Fallisce in chiusura.** La porta è tenuta aperta dal processo del pannello: se il pannello non gira, o gira con `RUNPANEL_DISABLE_SCHEDULERS`, la porta è chiusa. Una regola che deve valere anche a pannello spento ha bisogno anche di un firewall sulla macchina.
+- **La rete del progetto non è toccata.** Un progetto Docker o Compose raggiunge il proprio database per nome sulla rete `runpanel-net-<slug>` (vedi [Database](databases.md)), che non passa dal gate. Ci passa invece il traffico da `host.docker.internal`.
+
+Non è disponibile per un progetto **Compose** (pubblica le porte da un file che RunPanel non riscrive), per un container su `network: host` e per un progetto senza porta. La pagina lo dice.
+
+Per un processo nativo il pannello imposta `HOST`/`HOSTNAME` e, per le CLI di cui conosce la sintassi, il flag di bind, a meno che il comando di avvio contenga già `-p` o `--port`. Un'app che ignora tutto questo resta raggiungibile alla porta spostata su tutte le interfacce: il pannello lo verifica e lo segnala nella pagina.

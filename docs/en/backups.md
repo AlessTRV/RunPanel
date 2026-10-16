@@ -4,89 +4,51 @@
 
 # Backups and restore
 
-A *policy* says what to save, how often, and how much of it to keep.
+A *policy* says what to save, where, how often and how many archives to keep. Policies, destinations, archives and restores belong to the server they are on: with [several servers](multi-server.md) each has its own, and an archive can only be decrypted with the key of the server that took it.
+
+Accounts other than the owner back up and restore only the projects and services they manage, one at a time (see [Users and permissions](users.md)).
 
 ## What can be saved
 
 | Target | What it covers |
 |---|---|
-| One service | the database dump, whole or a single database |
-| All services | a selector: it covers the one you create tomorrow |
-| One project | configuration, volumes, repository — your choice |
-| All projects | same rule |
-| The panel | RunPanel's own store, with or without the encryption key |
+| One service | the whole dump (`pg_dumpall`, roles included, for Postgres) or the databases you pick |
+| All services | including the ones you create later |
+| One project | your choice of: configuration, Docker volumes, repository |
+| All projects | same rule, future ones included |
+| The panel | RunPanel's store, with or without the encryption key |
 
-Targets are selectors rather than fixed lists, so "every database" keeps meaning
-the ones that exist when the backup runs.
+Every dump runs **inside the container it belongs to**, so client and server are the same version. The panel's SQLite store is captured with `VACUUM INTO` and checked with `PRAGMA integrity_check`; the Postgres store with a custom-format `pg_dump`, in a container of the same major.
 
-## How they are taken
-
-Every dump runs **inside the container it belongs to**, so the client and the
-server are always the same version. RunPanel's own SQLite store is captured with
-`VACUUM INTO` and then verified with `PRAGMA integrity_check`, never copied.
+A project uploaded as a ZIP always includes its repository. The repository copy skips `node_modules`, `.next`, `dist`, `build`, `vendor`, `.venv` and the like, and the `.env` the panel writes.
 
 ## Project volumes
 
-With **Docker volumes** among the things to save, a project brings every one of
-its volumes into the archive, one `projects/<slug>/volumes/<volume>.tar.gz` each.
-That holds for a single project and for "all projects". There are two kinds:
+With **Docker volumes** among the things to save, a project brings every volume of its own into the archive (`projects/<slug>/volumes/<volume>.tar.gz`):
 
-- the ones RunPanel creates and labels itself (`runpanel.project=<slug>`), such
-  as the volume of a database linked to the project;
-- the ones created by the project's **Compose stack**. Compose accepts no labels
-  on `up`, so the handle is the Compose project name, `runpanel-<slug>`: a volume
-  is included when `com.docker.compose.project` is exactly that. `runpanel-shop`
-  never picks up the volumes of `runpanel-shop2`, and an unlabelled volume is
-  never included.
+- those RunPanel creates with the `runpanel.project=<slug>` label, for instance the volume of a linked database;
+- those of the project's **Compose stack**, recognised by the exact Compose project name `runpanel-<slug>` (`runpanel-shop` never takes `runpanel-shop2`'s volumes).
 
-A volume declared `external: true` in the compose file is not created by the
-stack and carries no project label: it is not included, and has to be backed up
-on its own.
-
-The backup log lists the volumes found for each project. If Docker does not
-answer, the project shows up as a skipped entry with the reason: an empty list no
-longer passes silently for "no data".
+An `external: true` volume does not belong to the stack and is not backed up: save it separately. The log lists the volumes found for each project; if Docker does not answer, the project shows as skipped with the reason.
 
 ### Consistency of the copy
 
-Copying a volume while the app writes to it can produce a database whose files
-were taken at different moments — one that restores without an error and is
-broken. So each project's **Settings → Volume backup** chooses what happens
-during the copy:
+Copying a volume while the app writes to it can produce a database that restores without errors and is broken. In the project's **Impostazioni** tab, **Backup dei volumi** section (volume backup), you choose what happens during the copy:
 
 | Mode | What it does |
 |---|---|
-| **Pause the writers** (default) | `docker pause` on the project's containers that mount that volume read-write, only for as long as it is read. The copy is *crash-consistent*: the state a power cut would leave, which SQLite (WAL included) and Postgres recover from on their own. |
-| **Live copy** | No pause. The copy may be inconsistent, and the log and the manifest say so every time. |
+| **Metti in pausa chi scrive** (pause the writers, default) | `docker pause` on just the project's containers that mount the volume read-write, for just the time of the read. The copy is what a power cut would leave, which SQLite (WAL included) and Postgres recover from by themselves. |
+| **Copia a caldo** (live copy) | No pause. The copy may be inconsistent, and log and manifest say so. |
 
-The downtime is kept as short as possible: while paused, the volume is written to
-disk **uncompressed**, at disk speed; compression happens afterwards, with the
-containers running again. When the free space (beyond the 2 GB reserve) cannot
-hold that copy plus its compressed version, it is compressed during the pause at
-gzip's fastest level, and the log says so; a volume that at that speed would not
-fit in the limit is refused **before** anything is frozen, with the reason. A
-pause longer than 10 minutes is cut short, the containers resumed, and the volume
-marked as not saved; the same happens if the uncompressed copy grows past the
-space available. Containers that mount the volume read-only are left running;
-another project's container writing into the same volume is never touched, and
-the copy is marked as not guaranteed.
+To keep the pause short, the volume is written to disk uncompressed and compressed afterwards, with the containers resumed. If free space (beyond a 2 GB reserve) is not enough, it is compressed during the pause at the fastest level; if even that will not fit, the volume is refused before anything is paused. A pause over 10 minutes is broken off, the containers resumed and the volume marked as not saved. Read-only containers are not paused; a container of another project writing to the same volume is never touched, and the copy is marked as not guaranteed.
 
-The ids of paused containers are written to disk
-(`data/backups/paused-containers.json`) for as long as the pause lasts: if the
-panel dies mid-copy, the next boot — or the next backup — resumes them. A paused
-container does not count as crashed for the status check, so a backup raises no
-crash notifications.
+If the panel stops during a pause, the containers are resumed at the next start or the next backup. A paused container triggers no crash notifications.
 
-**Pre-backup command.** Compose projects can add a command to run, once per
-backup, in one service of the stack before its volumes are copied (`sh -c`, with
-a timeout): an SQLite `.backup` or a `pg_dump` into the volume, for instance. The
-time limit also applies inside the container (through `timeout`, when the image
-has it), so a command past its limit is not left writing halfway while the
-containers are paused. If it fails and the copy is paused, the backup goes ahead;
-if the copy is live and something is writing, the volume is not saved, since with
-neither the command nor a pause nothing would make it consistent.
+**Comando prima del backup** (pre-backup command). For Compose projects, a command run once per backup in a service of the stack before the volumes are copied (`sh -c`, timeout 5 to 3600 seconds): for instance a SQLite `.backup` or a `pg_dump` into the volume. If it fails with the pause on, the backup goes on; if it fails with a live copy and something is writing, the volume is not saved.
 
-The log says what happened, volume by volume:
+### Exclusions
+
+Still in **Backup dei volumi**, each volume can exclude paths relative to its root, one per line: `trades` excludes that folder and its content, not `reports/trades`. No `..`, no leading `/`, no wildcards. The log (in Italian) reports each exclusion with its size, or "non presente nel volume" (not in the volume):
 
 ```
 → memebot: volume runpanel-memebot_memebot-data
@@ -95,52 +57,31 @@ The log says what happened, volume by volume:
   ripresi dopo 8,4 s di pausa
 ```
 
-and the manifest records it in the entry's `meta`: `consistency` (`result`
-`paused`, `idle` or `live`, who was paused, for how many milliseconds, who was
-not and why, `method` `snapshot` or `stream`), `preBackup`, `excludes` and
-`excluded`.
-
-### Exclusions
-
-Also from **Volume backup**, each volume can leave paths out, one per line,
-relative to the volume's root: `trades` excludes the folder and everything in it
-(and only that one: `reports/trades` stays). No `..`, no leading `/`, no
-wildcards — so the path as typed and the path `tar` excludes are the same thing.
-The log reports each exclusion with its size, or "non presente nel volume" when
-it matches nothing, and the manifest lists them.
-
-### Restoring a volume
-
-The restore stops the project, then checks that no container still has the
-volume mounted: whatever of the project is still up (a Compose stop that failed,
-a linked service) is stopped and started again at the end; a container that is
-not the project's blocks the restore, and the volume is left untouched. The paths
-the backup excluded stay **as they are**: the archive does not hold them, so it
-neither overwrites nor deletes them. A Compose volume that no longer exists is
-recreated by deploying the project; then run the restore again.
-
 ## Where they go
 
-- **Local disk** — `data/backups/archives/<year>/<month>`, mode 0600.
-- **S3-compatible** — AWS S3, Cloudflare R2, MinIO, Backblaze B2. SigV4 is signed
-  in-house, no SDK. The endpoint accepts `https://` anywhere and `http://` only
-  towards a private address: an archive holds every environment variable in the
-  panel.
+- **Disco locale** (local disk): always `data/backups/archives/<year>/<month>`, files 0600. Created at first start and the default destination; the path cannot be changed.
+- **S3-compatible**: AWS S3, Cloudflare R2, MinIO, Backblaze B2. Endpoint, region, bucket, keys, optional prefix and path-style addressing; configuration encrypted. `https://` anywhere, `http://` only to a private address. **Verifica** (check) writes and deletes a test object. The object is named `<prefix>/<file>` and uploaded in one request: on AWS the 5 GB per-object limit applies.
 
-The archive is a plain zip with a `manifest.json` and a `checksums.txt` in
-`sha256sum -c` format, so it can be verified and unpacked without RunPanel. Env
-vars and service credentials inside it are re-encrypted with this panel's key;
-including the key itself is a separate, explicit choice.
+Every archive is first built in `data/backups/staging`, S3 included: local free space is needed, and the backup stops if it falls under 2 GB.
 
-## Schedules, retention, restore
+The archive is a zip with `manifest.json`, `LEGGIMI.txt` and a `checksums.txt` in `sha256sum -c` format (for dumps and volumes; repository files are not listed). Project variables and service credentials are encrypted with this server's key; including the key itself is a separate, explicit choice.
 
-| | |
-|---|---|
-| Schedules | five-field cron plus the `@daily` family, in the timezone you pick |
-| Retention | count, age and total size, together — the newest good archive is never collected |
-| Restore | guided, with an automatic pre-restore backup that aborts the restore if it fails |
+## Schedule and retention
 
-The restore shows what the archive holds and lets you choose entry by entry. The
-panel's own store is the one thing not restored live: the restored database is
-staged and put into service at the next boot, with the previous one kept beside
-it.
+- **Schedule**: five-field cron or `@daily` and friends, in the timezone you pick (the panel's by default). Empty means **Solo su richiesta** (on demand only). Seconds, `L`, `W`, `#` and `@reboot` are not supported.
+- **One backup at a time**, and none during a restore. A scheduled run that finds the system busy is skipped, not queued. A run missed while the panel was down is caught up only within twice the interval, or 24 hours if longer.
+- **Retention**: count (1–1000), age (1–3650 days) and total size (at least 1 MB), together. It is applied after a successful run, and the newest valid archive is never removed.
+
+## Restore
+
+An archive on S3 is first downloaded into the restore's working folder (free space is needed, plus the 2 GB reserve) and deleted at the end. Restore shows the archive's content: pick the items (only those saved successfully) and, for each, where to restore it: the same service or project, or another of the same kind. To confirm, type the name of the first target.
+
+Before overwriting, the panel takes a **safety backup** of the targets on the local disk (labelled "Sicurezza pre-ripristino", never removed by retention, deleted by hand). If it fails the restore stops, unless you ticked **Procedi anche senza backup di sicurezza** (go on without a safety backup).
+
+- **Volume**: the project stops; its containers still running are stopped and restarted at the end, while a container of another project using the volume blocks the restore. Excluded paths are left as they are. A Compose volume that no longer exists is recreated by a deploy, then the restore is repeated.
+- **Repository**: files are overwritten, extra files are not deleted.
+- **A project's configuration**: the project must still exist.
+- **Panel store (SQLite)**: not restored live. The database is set aside and takes over at the next restart, with the previous one kept next to it. The encryption key is not put back: if needed, copy it by hand.
+- **Panel store (Postgres)**: refused by the panel; the `pg_restore` command to run with the panel stopped is in `manifest.json`.
+
+Restore does not compare engine versions: a dump from one major restored onto another is accepted and fails halfway, with the safety backup already taken.

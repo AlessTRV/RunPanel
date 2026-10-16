@@ -94,6 +94,14 @@ Una pagina che dice cosa non va in questa installazione e cosa premere per siste
 
 </td>
 </tr>
+<tr>
+<td valign="top" colspan="2">
+
+### 🌐 Più server
+Collega altre installazioni di RunPanel a questa: stessi account ovunque, un selettore del server nella barra, deploy con log in diretta, database, backup e aggiornamenti di ogni server da un solo pannello — sulla tua rete privata, con richieste firmate e niente esposto su internet.
+
+</td>
+</tr>
 </table>
 
 ## 📺 Deploy in diretta
@@ -140,7 +148,7 @@ Premi **Deploy** e il log del build scorre nel browser mentre succede: installaz
 </table>
 
 <details>
-<summary><b>Le sette voci del menu</b></summary>
+<summary><b>Le voci del menu</b></summary>
 <br>
 
 Sistema, Accessi e Impostazioni raggruppano più pagine in schede, ognuna con il suo indirizzo.
@@ -152,9 +160,9 @@ Sistema, Accessi e Impostazioni raggruppano più pagine in schede, ognuna con il
 | **Servizi** | database gestiti, i loro database interni, collegamenti ai progetti |
 | **Backup** | policy, destinazioni, esecuzioni, archivi, ripristini |
 | **Monitor** | processi e container con CPU, memoria e uptime, più il riepilogo dell'host |
-| **Sistema** | *Diagnostica* (cosa manca e cosa premere), *Avvio automatico* (cosa torna su dopo un riavvio), *Aggiornamenti* (versione, commit nuovi, il pulsante che li applica), *Pulizia Docker* (cosa occupa il disco e cosa si recupera) |
+| **Sistema** | *Diagnostica* (cosa manca e cosa premere), *Avvio automatico* (cosa torna su dopo un riavvio), *Aggiornamenti* (versione, commit nuovi, il pulsante che li applica), *Pulizia Docker* (cosa occupa il disco e cosa si recupera), *Server* (le installazioni collegate: stato, versione, diagnosi, ruolo, revoca) |
 | **Accessi** | *Utenti* (inviti con link a scadenza, permessi per account) e *Registro attività* (chi ha fatto cosa) |
-| **Impostazioni** | *Account* (email, password, sessioni, tema chiaro o scuro), *Pannello* (fuso, indirizzo pubblico, polling, colore d'accento, notifiche Telegram, registry), *GitHub* (token, repository, branch) |
+| **Impostazioni** | *Account* (email, password, sessioni, tema chiaro o scuro), *Pannello* (frequenza di refresh, fuso, indirizzo pubblico, intervallo del controllo periodico, colore d'accento, notifiche Telegram, registry privati), *GitHub* (token, repository, branch) |
 
 </details>
 
@@ -166,7 +174,7 @@ Sistema, Accessi e Impostazioni raggruppano più pagine in schede, ognuna con il
 - **File**: un browser confinato alla cartella del progetto, che risolve i symlink prima di aprire qualsiasi cosa.
 - **Log**: in diretta via SSE mentre il deploy gira, e su file dopo.
 - **Sessioni**: una per dispositivo, revocabili singolarmente dall'account.
-- **Preferenze**: intervallo di aggiornamento (2, 5, 10 secondi), fuso orario, cinque colori d'accento (blu predefinito).
+- **Preferenze**: frequenza di refresh (2, 5, 10 secondi), fuso orario, cinque colori d'accento (blu predefinito), scelti dal proprietario per tutto il pannello.
 - **Tema**: chiaro, scuro o quello del sistema, scelto per browser.
 - **Palette comandi** e navigazione da tastiera; su mobile una barra in basso e il menu che entra da destra.
 
@@ -188,7 +196,7 @@ npm run build
 npm start
 ```
 
-Apri `http://localhost:3000`. Alla prima visita crei l'account **proprietario** con email e password, insieme al **token di setup** che il pannello scrive nel proprio log all'avvio:
+Apri `http://localhost:3000`. Alla prima visita crei l'account **proprietario** con email e password, oppure [colleghi questa installazione a un RunPanel che hai già](docs/it/multi-server.md). In entrambi i casi serve il **token di setup** che il pannello scrive nel proprio log all'avvio:
 
 ```
 [RunPanel] Not set up yet. Enter this token on the setup screen:
@@ -199,25 +207,11 @@ Apri `http://localhost:3000`. Alla prima visita crei l'account **proprietario** 
 > [!IMPORTANT]
 > Finché non esiste una password quell'endpoint deve restare aperto: il token impedisce a chi trova la porta per primo di prendersi il pannello, e qui un amministratore ha una shell sull'host. A ogni riavvio ne viene emesso uno nuovo, a meno che non lo fissi con `RUNPANEL_SETUP_TOKEN`.
 
-PM2 **non** è incluso: senza, resti sui runtime Docker, e la pagina Diagnostica ti dice cosa manca. Il pannello gira su Linux, macOS e Windows; l'installazione automatica all'avvio è solo per Linux.
+PM2 **non** è incluso: senza, resti sui runtime Docker, e la pagina Diagnostica ti dice cosa manca. Il pannello gira su Linux, macOS e Windows.
 
 ## ⚙️ Configurazione
 
-Tutto sta in `.env` (vedi `.env.example` per la versione commentata). L'ambiente viene validato all'avvio: un errore fallisce subito con un messaggio, invece che alla prima richiesta che ne ha bisogno.
-
-| Variabile | Default | Cosa fa |
-|---|---|---|
-| `RUNPANEL_SECRET` | generata in `data/.secret` | Chiave di cifratura, esadecimale, ≥64 caratteri |
-| `RUNPANEL_DATA_DIR` | `./data` | Store, repository, log, archivi |
-| `PORT` | `3000` | Porta del pannello |
-| `RUNPANEL_DB_DRIVER` | `sqlite` | `sqlite` o `postgres` |
-| `RUNPANEL_DATABASE_URL` | — | Solo con `postgres` |
-| `RUNPANEL_TRUSTED_PROXY_HOPS` | `0` | Quanti reverse proxy stanno davanti |
-
-> [!NOTE]
-> Nessuna delle variabili `RUNPANEL_*` raggiunge i progetti che distribuisci: vengono rimosse dall'ambiente dei processi figli, perché `RUNPANEL_SECRET` è la chiave con cui sono cifrati i segreti dei progetti stessi.
-
-Le altre variabili, la scelta fra SQLite e Postgres e cosa serve dietro un reverse proxy stanno in [Configurazione](docs/it/configuration.md).
+Tutto sta in `.env` (vedi `.env.example` per la versione commentata) ed è controllato all'avvio. Senza, il pannello usa SQLite in `./data` sulla porta 3000 e genera la chiave di cifratura in `data/.secret`: salva quel file insieme ai backup, perché ogni segreto salvato dipende da lui. Variabili, SQLite o Postgres, registry privati e reverse proxy stanno in [Configurazione](docs/it/configuration.md).
 
 ## 📚 Documentazione
 
@@ -272,13 +266,21 @@ Le altre variabili, la scelta fra SQLite e Postgres e cosa serve dietro un rever
 <td valign="top">
 
 **[🔧 Operatività](docs/it/operations.md)**<br>
-<sub>Avvio automatico, aggiornamento del pannello, notifiche su Telegram</sub>
+<sub>Avvio automatico, riavvii programmati, liberare spazio, aggiornamento del pannello, notifiche su Telegram</sub>
 
 </td>
 <td valign="top">
 
 **[🧭 Architettura e sviluppo](docs/it/architecture.md)**<br>
 <sub>Mappa del codice, suite di test, come lavorarci</sub>
+
+</td>
+</tr>
+<tr>
+<td valign="top">
+
+**[🌐 Più server](docs/it/multi-server.md)**<br>
+<sub>Collegare i server, ruoli, selettore, account condivisi, diagnostica, revoca</sub>
 
 </td>
 </tr>
@@ -294,9 +296,10 @@ Le altre variabili, la scelta fra SQLite e Postgres e cosa serve dietro un rever
 - Il setup iniziale richiede il token stampato all'avvio, così un pannello non ancora reclamato non può esserlo da chi arriva per primo
 - Il limite sui tentativi di accesso sopravvive a un riavvio, conta in modo atomico, ed è legato a un indirizzo solo dove un proxy configurato lo garantisce
 - Più account con permessi per progetto, servizio, cartella e risorsa, controllati dal server su ogni route e su ogni stream; un test fallisce se una route nuova non dichiara cosa protegge ([Utenti e permessi](docs/it/users.md))
-- Ogni route `/api` viene rifiutata senza sessione da `proxy.ts` prima ancora di essere raggiunta, in aggiunta al controllo di ciascun handler
-- Variabili d'ambiente dei progetti, credenziali dei servizi e dei registri cifrate a riposo (AES-256-GCM)
-- La configurazione di RunPanel non raggiunge mai i progetti distribuiti
+- `proxy.ts` rifiuta le richieste `/api` senza sessione prima che arrivino a un handler, in aggiunta al controllo di ciascun handler; le eccezioni sono elencate in [Architettura](docs/it/architecture.md)
+- Le chiamate tra server collegati portano un HMAC-SHA256 su metodo, percorso, corpo, utente e orario, con un segreto di cluster cifrato a riposo; ogni firma vale una volta sola, entro cinque minuti ([Più server](docs/it/multi-server.md))
+- Variabili dei progetti, credenziali dei servizi, dei registry e dei backup, token GitHub e bot Telegram cifrati a riposo (AES-256-GCM)
+- Nessuna variabile `RUNPANEL_*` raggiunge i progetti distribuiti: chiave di cifratura, credenziali dello store e token di setup restano del pannello
 - Firme dei webhook verificate con HMAC-SHA256 e confronto a tempo costante
 - Le operazioni sui file risolvono i symlink e restano confinate al progetto; gli upload ZIP sono spacchettati in-process, rifiutando voci con traversal e link, con un limite sia sull'archivio sia sul decompresso
 - Gli URL dei repository devono essere `https://` pubblici, e il token GitHub è allegato soltanto alle richieste verso GitHub
@@ -314,12 +317,13 @@ Per il TLS e i reverse proxy davanti al pannello, vedi [Metterlo su internet](do
 <br>
 
 - I comandi una tantum girano **almeno una volta**, non esattamente una volta: un riavvio del pannello a metà esecuzione rimette il comando in coda.
-- Le restrizioni sulle porte sono applicate dal processo del pannello, quindi non sopravvivono al suo arresto: la porta semplicemente si chiude. Un insieme di regole che deve valere anche a pannello spento richiede in più un firewall sull'host.
-- Il ripristino dello store **Postgres** di RunPanel è rifiutato dal pannello: l'archivio contiene il dump e il comando `pg_restore` esatto, da eseguire con il pannello fermo.
-- Il ripristino non confronta le versioni: un dump preso da una major e ripristinato su un'altra viene accettato e fallisce durante l'esecuzione, con la copia di sicurezza già presa.
+- Un health check fallito lascia il progetto in errore: **non c'è un ritorno automatico** alla versione precedente.
+- Le restrizioni sulle porte le applica il processo del pannello: a pannello fermo la porta semplicemente si chiude. Una regola che deve valere anche a pannello spento richiede in più un firewall sull'host.
+- Il **ripristino** non confronta le versioni dei motori, e rifiuta lo store Postgres di RunPanel (il comando `pg_restore` è nel manifest dell'archivio). Vedi [Backup](docs/it/backups.md#ripristino).
 - L'installazione automatica all'avvio è **solo per Linux**; altrove il pannello mostra cosa fare a mano.
-- Le **notifiche** hanno un solo canale, Telegram, e vanno in una sola chat. Il bot non accetta comandi: il pannello parla, non ascolta.
-- L'**aggiornamento del pannello dal pannello** richiede un supervisore che lo rimetta su dopo l'uscita: systemd o lo script `@reboot`. Senza, la nuova versione viene costruita ma lo scambio e il riavvio restano due comandi da dare a mano. In un container e su Windows non è disponibile affatto.
+- Le **notifiche** hanno un solo canale, Telegram, e vanno in una sola chat. Il bot non accetta comandi.
+- I **più server** hanno bisogno di una rete privata e cifrata tra loro (Tailscale, per esempio) o di HTTPS, e un server si collega solo al primo avvio. Vedi [Più server](docs/it/multi-server.md#limiti).
+- L'**aggiornamento del pannello dal pannello** richiede un supervisore che lo rimetta su dopo l'uscita (systemd o lo script `@reboot`); senza, scambio e riavvio restano due comandi da dare a mano. Non è disponibile in un container né su Windows.
 
 </details>
 

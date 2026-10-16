@@ -4,134 +4,64 @@
 
 # Deploy automation
 
-## Automatic deploys
+It is set in the project's **Impostazioni** (settings) tab, **Deploy automatico** section. The *Come parte il deploy* (how the deploy starts) field picks one of two ways:
 
-Every project has a webhook URL with a secret of its own. With **Auto-deploy**
-on, a push to the configured branch starts a deploy. Signatures are verified with
-HMAC-SHA256 and a constant-time compare; deliveries, accepted or rejected, stay
-in the history with the reason.
+- **Webhook**: GitHub notifies on every push and the deploy starts at once. The server must be reachable from the internet.
+- **Controllo periodico** (polling): RunPanel asks GitHub at intervals and deploys when the commit changes. Outbound requests only: it works behind NAT, a VPN or Tailscale.
 
-With a GitHub account connected the webhook **registers itself**: flipping the
-switch creates it on the repository with the URL, the secret, the
-`application/json` content type and the `push` event alone already set. Turning
-auto-deploy off deactivates the hook rather than deleting it, so its delivery
-history on GitHub survives.
+Picking one turns the other off, because two active transports would deploy the same commit twice. Both follow the project's branch; a project pinned to a commit ignores them (see [Going back to a commit](#going-back-to-a-commit)).
 
-The section also says what is wrong: no token, an unrecognised repository, a
-panel address GitHub cannot reach, a misconfigured hook, a refused last
-delivery. **Send ping** asks GitHub for a real delivery, across DNS, the
-firewall, TLS and the signature.
+## Webhook
 
-So the panel knows which address to write into GitHub, set **Public address**
-under Settings → Panel. Left empty it is derived from the request, which
-holds as long as you open the panel on the same address GitHub reaches it by.
+Every project has its own webhook URL and secret. Signatures are verified with HMAC-SHA256; every delivery, accepted or refused, goes into the history with the reason.
 
-> **Panel only reachable over a VPN or Tailscale?** Then webhooks never arrive:
-> GitHub delivers from the internet and is not on your private network. A
-> `100.64–100.127.x.x` address is refused outright; a `*.ts.net` MagicDNS name
-> is flagged, because it works **only** if you publish it with
-> `tailscale funnel`. You do not have to expose anything: use **polling** below.
+With the **GitHub token** connected, turning auto-deploy on **registers the webhook by itself** on the repository (`push` event, `application/json`). Turning it off disables it without deleting it. A webhook created by hand with the same URL is recognised and corrected, not duplicated. To manage webhooks the token needs the `repo` or `write:repo_hook` scope (classic token) or the *Webhooks: Read and write* permission (fine-grained token); an organisation's repository may need it authorised. Without a token, URL and secret are there to copy for a manual setup.
 
-## Polling, for a panel nothing can reach
+The section says what is wrong: missing token, unrecognised repository, an address GitHub cannot reach, a mismatched webhook, a refused last delivery. It shows the last 10 deliveries received and the last 10 seen by GitHub; history is kept for 30 days. **Invia ping** asks GitHub for a real delivery, which goes through DNS, firewall, TLS and signature. If the project is stuck in "deploying", every push answers "queued" and nothing happens: the **Sblocca** (unlock) button frees it.
 
-A webhook needs GitHub to open a connection *to* this machine, and behind NAT, on
-a Tailscale or WireGuard network, on a laptop, it cannot: the delivery fails
-before it arrives and nothing shows up in the logs, because the problem is the
-direction of the connection.
+The address the panel writes to GitHub is **Indirizzo pubblico** (public address) under **Impostazioni › Pannello** (owner only). Left empty it is taken from the request, which only works if you open the panel at the same address GitHub reaches it at. With [several servers](multi-server.md) the webhook goes to the server hosting the project: set the public address on each server, with that server selected, and note that a server with the node role must also be reachable from the internet to receive webhooks.
 
-So the panel can **ask** instead of being told. In the project's settings, under
-*Deploy automatico → Come parte il deploy*:
+> **Reachable only over a VPN or Tailscale?** Webhooks will not arrive: GitHub delivers from the internet. A `100.64–100.127.x.x` address is refused outright; a MagicDNS `*.ts.net` name is flagged, because it only works when published with `tailscale funnel`. Use polling.
 
-- **Webhook** — GitHub calls on every push and the deploy starts at once.
-  Requires a panel reachable from the internet.
-- **Polling** — RunPanel reads the branch on a timer and deploys when the commit
-  changes. One outbound request, none inbound: it works anywhere with an
-  internet connection.
+## Polling
 
-The interval lives under Settings → Panel, from 30 seconds to 30 minutes
-(5 minutes by default). An unchanged branch answers `304 Not Modified` thanks to
-the ETag, and GitHub does not count 304s against the hourly rate limit — even 30
-seconds costs practically nothing. A deploy is delayed by at most one interval.
+It needs the GitHub token connected and a repository on `github.com`: without a token it does not run and the section shows it in red.
 
-The first pass after switching **records** the current commit without deploying
-it — "deploy what comes next", not "deploy whatever is there now" — and deploys
-started this way appear in the history with the `poll` trigger. Choosing polling
-deactivates any webhook, since two live transports would deploy the same commit
-twice.
+The interval is set under **Impostazioni › Pannello** (owner only), from 30 seconds to 30 minutes, 5 minutes by default. A branch that has not moved costs a `304 Not Modified` response, which GitHub does not count against the hourly limit. A deploy starts at most one interval plus about fifteen seconds after the push. With several servers each server polls its own projects at its own interval, all with the same shared token.
 
-The hook stays configurable by hand — the URL and secret are right there — for
-repositories the token cannot administer, or a panel with no account connected.
+The first round after turning it on **records** the current commit without deploying it: what arrives next is deployed. Each new commit gets one attempt: if its deploy fails, it is not retried until another commit arrives. Deploys started this way show in the history with the `poll` trigger. If the last check is older than three intervals, the section turns amber.
 
-## Going back to a specific commit
+## Going back to a commit
 
-The button next to **Deploy** opens the repository's history: pick the branch,
-pick the commit, and the project is rebuilt from there. It is for when the commit
-that just went out is the one that broke the app.
+The button next to **Deploy** opens the repository history: pick branch and commit, then **Distribuisci** (deploy). Use it when the latest commit broke the app.
 
-The choice **holds**. The project stops at that commit: every deploy rebuilds it,
-the header says so with a badge, and **auto-deploy is suspended** rather than
-carrying the project forward on the next push. Deliveries that arrive meanwhile
-stay in the history as ignored, with the reason. **Back to the latest commit**
-releases the hold and deploys the branch head again.
+The choice **sticks**: every deploy rebuilds that commit, the header says so and auto-deploy is suspended. Deliveries arriving meanwhile stay in the history as ignored. **Torna all'ultimo commit** (back to the latest commit), in the **Altro** menu, releases the pin and deploys the head of the branch. Changing the branch in the settings releases it too.
 
-Choosing a different branch here changes the project's branch: from then on it is
-the one the webhook and the poller follow. The commit list comes from the GitHub
-API, so it wants a connected account; without one, or for a commit older than the
-last hundred, there is a field to paste a SHA into.
+Picking another branch in the history changes the project's branch, which it follows from then on. The commit list comes from the GitHub API and needs the token; without it, or for a commit older than the last hundred, paste the full 40-character SHA.
 
-The panel repeats this before going ahead: **database migrations do not roll
-back**. If the restored version expects an older schema than the one that is
-there, it may not start.
+**Database migrations do not roll back.** A version that expects an older schema may not start; the panel reminds you before going ahead.
 
 ## One-time commands
 
-The contract's commands run on *every* deploy. One-time commands run once, at the
-point of the sequence you pick, and then leave the queue: the migration you need
-now, a `git submodule update` after changing repository, a permissions fix, a
-cache purge. You write them in **Settings → Comandi una tantum**, and while the
-queue is not empty the panel says so next to the Deploy button.
+Contract commands run on every deploy. One-time commands run once, at the step you pick, then leave the queue: a migration to run now, a `git submodule update`, a permissions fix. They are written under **Impostazioni › Comandi una tantum** and need the **Accesso all'host** permission. While the queue is not empty, the number of waiting commands shows next to the project's name.
 
-| Step | When | Docker | Native and Compose |
-|---|---|---|---|
-| Before the deploy | Before anything is touched; the old app is still up | host | host |
-| After git | New commit on disk, env loaded, nothing installed yet | host | host |
-| Before install | Immediately before the dependencies | — | host |
-| After install | Dependencies installed, build not run yet | — | host |
-| After build | Build succeeded, before the release command | container | host |
-| Before start | Old process stopped, new one not started | container | host |
-| After start | Process started, health check not passed yet | container | host |
-| On success | Health check passed | container | host |
+| Step | When | Docker | Compose | Native |
+|---|---|---|---|---|
+| Prima del deploy (before the deploy) | Before anything is touched; the old app is running | host | host | host |
+| Dopo il git (after git) | New commit on disk, variables loaded | host | host | host |
+| Prima dell'install (before install) | Right before dependencies | — | — | host |
+| Dopo l'install (after install) | Dependencies installed, no build yet | — | — | host |
+| Dopo il build (after build) | Build succeeded, before the release command | container | host | host |
+| Prima dell'avvio (before start) | Old process stopped, new one not started | container | host | host |
+| Dopo l'avvio (after start) | Process started, health check not passed yet | container | host | host |
+| A deploy riuscito (on success) | Health check passed | container | host | host |
 
-The two steps around the install do not exist under Docker and Compose: there,
-install and build are a single `docker build`. Changing a project's runtime does
-not delete a command queued on one of them — it stays, flagged, and the deploy
-log says why it did not run.
+With Docker and Compose, install and build are one step, so the two steps around install do not exist; on a static project they run one after the other right before the build. Under Docker the steps after the build use a throwaway container from the image just built, with the same network, mounts and environment as the release command. With Compose they always run on the host: to enter a service, write `docker compose run --rm api sh -c '…'`. If you change runtime and a queued command no longer has a valid step, it stays queued and flagged, and the deploy log says why it did not run.
 
-Where a command runs is decided by the step, not by an option: under Docker the
-steps after the build use a throwaway container from the freshly built image —
-same network, same mounts, same environment, like the release command — while the
-two before the build run on the host. Under Compose everything runs on the host,
-and reaching one service means writing it out
-(`docker compose run --rm api sh -c '…'`).
+**If a command fails, the deploy fails** and the command stays queued for the next deploy, with attempts and error visible. With *Continua anche se fallisce* (continue on failure) the deploy goes on and the command is consumed, recorded as failed. A successful command goes into the history (step, duration, commit), which is cleared by hand or by itself after 90 days. A failure in *A deploy riuscito* marks the deploy failed even if the app is alive and healthy.
 
-**If one fails, the deploy fails** and the command **stays queued**: fix the cause
-and the next deploy retries it, with the attempt count and the last error in view.
-Tick *Continua anche se fallisce* and the deploy carries on, consuming the command
-anyway and recording it as failed. Whatever succeeds leaves the queue for the
-history, with its step, duration and commit; you can empty that by hand, and it
-collects itself after 90 days.
+Limits: 10 minutes per command, 50 commands queued, 4000 characters per command. The queue is taken at the start of a deploy: a command added during a deploy is for the next one, and the queue cannot be edited while a deploy holds it.
 
-One warning about *On success*: a command failing there marks the deploy failed
-**even though the app is alive and healthy**: it is the one step where "failed"
-does not mean "not serving".
+They are kept out of the [deploy contract](deploy.md#the-deploy-contract) because the contract is merged with the repository's `runpanel.json`: there they would be host commands chosen by anyone who can push. Do not put passwords in them: the command ends up in the log.
 
-**They are not part of the deploy contract, and that is not an oversight.** The
-contract is merged with the repository's `runpanel.json`, so a field there would be
-arbitrary shell on the host that anyone able to push could run. They live in a
-table of their own, where nothing is merged and the only writer is an
-authenticated route: a repository cannot reach them. Do not put passwords in them: the command ends up in the
-deploy log.
-
-Execution is **at least once**, not exactly once: if the panel restarts while a
-command is running, that command goes back in the queue and will run again, and
-the interrupted row is flagged.
+Execution is **at least once**: if the panel restarts while a command runs, the command goes back to the queue and runs again, and the interrupted run is flagged.

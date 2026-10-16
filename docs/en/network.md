@@ -4,39 +4,29 @@
 
 # Network access
 
-By default RunPanel publishes a port the way Docker does — `-p 5433:5432`, with
-no bind address, on every interface. That is convenient and it means a database
-created from the panel answers to everything on the LAN, and to the internet if
-the host has a public address.
+By default RunPanel publishes a port the way Docker does, `-p 5433:5432`, on every interface: a database created by the panel answers the whole LAN, and the internet if the machine has a public address.
 
-Switching **Chi può collegarsi** on, for a service or a project, changes that:
+In the **Chi può collegarsi** (who can connect) section of a service or project, the **Limita** switch changes that (for a database it can be chosen at creation already):
 
-- the container is recreated (or the app restarted) publishing on `127.0.0.1`
-  and on a port the panel allocates;
-- the panel binds the port your clients already know, and forwards only
-  connections from the addresses you listed;
-- `127.0.0.1` and `::1` are always allowed and cannot be removed — the health
-  probe, the backup dumpers and any `psql` on the box come from there.
+- the container is recreated, or the app restarted, publishing only on `127.0.0.1` and on a port the panel picks;
+- the panel holds the port your clients already know and forwards only connections from the listed addresses;
+- the machine itself (`127.0.0.0/8` and `::1`) is always allowed and cannot be removed: health checks, backups and any local `psql` come from there.
 
-Rules are single addresses or CIDR ranges, IPv4 or IPv6. The panel reads the
-host's own interfaces and offers them as tick boxes, labelled: the LAN, VPN
-ranges (Tailscale's `100.64.0.0/10` is recognised), and virtual switches. Whoever
-gets turned away is listed on the page with an **Consenti** button.
+When **Limita** is turned on, the machine's networks come pre-ticked. An empty list means "this machine only".
 
-Two things worth knowing before turning it on:
+## The rules
 
-- **It fails closed.** The port is held open by the panel process: if the panel
-  is not running, the port is shut. An app's database used to stay reachable
-  while the panel was down.
-- **An app on the project network is unaffected.** Every Docker or Compose
-  project reaches its database by container name on `runpanel-net-<slug>`, which
-  never goes through the gate. Traffic arriving via `host.docker.internal` does.
+Rules are single addresses or CIDR ranges, IPv4 or IPv6. The panel offers the networks of the machine's interfaces as labelled tick boxes: LAN, VPN (Tailscale is recognised, both `100.64.0.0/10` and `fd7a:115c:a1e0::/48`) and virtual switches. With a [reverse proxy configured](configuration.md#putting-it-on-the-internet) it also offers **Il tuo indirizzo ora** (your address now).
 
-Not offered for a **Compose** project, which publishes ports from a file RunPanel
-will not rewrite, nor for a container on `network: host`, which has no published
-port to move. Both say so.
+A `/0` range is refused, host bits are masked (`192.168.1.14/24` becomes `192.168.1.0/24`) and an IPv4 address with leading zeros is rejected. Editing the rules applies to new connections; open ones stay.
 
-For a native process the panel also passes `HOST`/`HOSTNAME` and, for the CLIs
-where the spelling is known, the bind flag. An app that ignores all of it stays
-on every interface at the moved port, so the panel checks and says so on the
-page.
+Refused connections appear under **Rifiutati di recente** (the last five) with a **Consenti** button. The panel keeps them in memory, at most twenty per port, and forgets them on every restart.
+
+## Before turning it on
+
+- **It fails closed.** The port is held open by the panel's process: if the panel is not running, or runs with `RUNPANEL_DISABLE_SCHEDULERS`, the port is closed. A rule that must hold with the panel down needs a host firewall as well.
+- **The project network is untouched.** A Docker or Compose project reaches its own database by name on the `runpanel-net-<slug>` network (see [Databases](databases.md)), which does not go through the gate. Traffic from `host.docker.internal` does.
+
+It is not available for a **Compose** project (its ports come from a file RunPanel does not rewrite), for a container on `network: host`, or for a project without a port. The page says so.
+
+For a native process the panel sets `HOST`/`HOSTNAME` and, for the CLIs whose syntax it knows, the bind flag, unless the start command already contains `-p` or `--port`. An app that ignores all of this stays reachable on the moved port on every interface: the panel checks and says so on the page.

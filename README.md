@@ -94,6 +94,14 @@ One page that says what is wrong with this installation and what to press to fix
 
 </td>
 </tr>
+<tr>
+<td valign="top" colspan="2">
+
+### 🌐 More than one server
+Link other RunPanel installs to this one: the same accounts everywhere, a server selector in the bar, deploys with their live log, databases, backups and updates of every server from one panel — over your private network, with signed requests and nothing exposed to the internet.
+
+</td>
+</tr>
 </table>
 
 ## 📺 Live deploys
@@ -143,7 +151,7 @@ Press **Deploy** and the build log scrolls in the browser as it happens: install
 </table>
 
 <details>
-<summary><b>The seven menu entries</b></summary>
+<summary><b>The menu entries</b></summary>
 <br>
 
 System, Access and Settings group several pages as tabs, each with its own address.
@@ -155,9 +163,9 @@ System, Access and Settings group several pages as tabs, each with its own addre
 | **Services** | managed databases, the databases inside them, project links |
 | **Backups** | policies, destinations, runs, archives, restores |
 | **Monitor** | processes and containers with CPU, memory and uptime, plus a summary of the host |
-| **System** | *Diagnostics* (what is missing and what to press), *Autostart* (what comes back after a reboot), *Updates* (version, waiting commits, the button that applies them), *Docker cleanup* (what is using the disk and what can be reclaimed) |
+| **System** | *Diagnostics* (what is missing and what to press), *Autostart* (what comes back after a reboot), *Updates* (version, waiting commits, the button that applies them), *Docker cleanup* (what is using the disk and what can be reclaimed), *Servers* (the linked installs: status, version, diagnosis, role, revocation) |
 | **Access** | *Users* (invitations with expiring links, per-account permissions) and *Activity log* (who did what) |
-| **Settings** | *Account* (email, password, sessions, light or dark theme), *Panel* (timezone, public address, polling, accent colour, Telegram notifications, registries), *GitHub* (token, repositories, branches) |
+| **Settings** | *Account* (email, password, sessions, light or dark theme), *Panel* (refresh rate, timezone, public address, polling interval, accent colour, Telegram notifications, private registries), *GitHub* (token, repositories, branches) |
 
 </details>
 
@@ -169,7 +177,7 @@ System, Access and Settings group several pages as tabs, each with its own addre
 - **Files**: a browser confined to the project directory, resolving symlinks before opening anything.
 - **Logs**: live over SSE while the deploy runs, and on file afterwards.
 - **Sessions**: one per device, revocable individually from the account page.
-- **Preferences**: refresh interval (2, 5, 10 seconds), timezone, five accent colours (blue by default).
+- **Preferences**: refresh rate (2, 5, 10 seconds), timezone, five accent colours (blue by default), set by the owner for the whole panel.
 - **Theme**: light, dark or the system's, chosen per browser.
 - **Command palette** and keyboard navigation; on mobile a bottom bar and a drawer that comes in from the right.
 
@@ -191,7 +199,7 @@ npm run build
 npm start
 ```
 
-Open `http://localhost:3000`. The first visit creates the **owner** account with an email and a password, along with the **setup token** the panel prints to its own log at startup:
+Open `http://localhost:3000`. The first visit either creates the **owner** account with an email and a password, or [links this install to a RunPanel you already have](docs/en/multi-server.md). Both need the **setup token** the panel prints to its own log at startup:
 
 ```
 [RunPanel] Not set up yet. Enter this token on the setup screen:
@@ -202,25 +210,11 @@ Open `http://localhost:3000`. The first visit creates the **owner** account with
 > [!IMPORTANT]
 > Until a password exists, that endpoint has to be open: the token is what stops whoever finds the port first from claiming the panel, and an admin here has a shell on the host. A restart issues a new one, unless you pin it with `RUNPANEL_SETUP_TOKEN`.
 
-PM2 is **not** vendored: without it you keep to the Docker runtimes, and the Diagnostics page tells you what is missing. The panel runs on Linux, macOS and Windows; installing at boot is Linux-only.
+PM2 is **not** vendored: without it you keep to the Docker runtimes, and the Diagnostics page tells you what is missing. The panel runs on Linux, macOS and Windows.
 
 ## ⚙️ Configuration
 
-Everything lives in `.env` (see `.env.example` for the annotated version). The environment is validated at boot, so a mistake fails immediately with a message rather than on the first request that needs it.
-
-| Variable | Default | What it does |
-|---|---|---|
-| `RUNPANEL_SECRET` | generated at `data/.secret` | Encryption key, hex, ≥64 chars |
-| `RUNPANEL_DATA_DIR` | `./data` | Store, repositories, logs, archives |
-| `PORT` | `3000` | Panel port |
-| `RUNPANEL_DB_DRIVER` | `sqlite` | `sqlite` or `postgres` |
-| `RUNPANEL_DATABASE_URL` | — | With `postgres` only |
-| `RUNPANEL_TRUSTED_PROXY_HOPS` | `0` | How many reverse proxies sit in front |
-
-> [!NOTE]
-> None of the `RUNPANEL_*` variables reach the projects you deploy: they are stripped from the child environment, because `RUNPANEL_SECRET` is the key your projects' own secrets are encrypted with.
-
-The remaining variables, the choice between SQLite and Postgres, and what a reverse proxy needs are in [Configuration](docs/en/configuration.md).
+Everything lives in `.env` (see `.env.example` for the annotated version) and is checked at boot. Without one the panel runs with SQLite in `./data` on port 3000, and generates its encryption key in `data/.secret`: keep that file with your backups, because every stored secret depends on it. Variables, SQLite or Postgres, private registries and reverse proxies are in [Configuration](docs/en/configuration.md).
 
 ## 📚 Documentation
 
@@ -275,13 +269,21 @@ The remaining variables, the choice between SQLite and Postgres, and what a reve
 <td valign="top">
 
 **[🔧 Operations](docs/en/operations.md)**<br>
-<sub>Starting at boot, updating the panel, Telegram notifications</sub>
+<sub>Starting at boot, scheduled restarts, freeing space, updating the panel, Telegram notifications</sub>
 
 </td>
 <td valign="top">
 
 **[🧭 Architecture and development](docs/en/architecture.md)**<br>
 <sub>Map of the code, the test suite, working on it</sub>
+
+</td>
+</tr>
+<tr>
+<td valign="top">
+
+**[🌐 More than one server](docs/en/multi-server.md)**<br>
+<sub>Linking servers, roles, the selector, shared accounts, diagnosis, revocation</sub>
 
 </td>
 </tr>
@@ -297,9 +299,10 @@ The remaining variables, the choice between SQLite and Postgres, and what a reve
 - First-run setup requires the token printed at boot, so an unclaimed panel cannot be claimed by whoever arrives first
 - Login rate limiting survives a restart, counts atomically, and is keyed on an address only where a configured proxy vouches for it
 - Several accounts with permissions per project, service, folder and resource, checked by the server on every route and every stream; a test fails when a new route does not declare what it protects ([Users and permissions](docs/en/users.md))
-- Every `/api` route is refused without a session by `proxy.ts` before it is reached, in addition to each handler's own check
-- Project env vars, service credentials and registry credentials encrypted at rest (AES-256-GCM)
-- RunPanel's own configuration never reaches deployed projects
+- `proxy.ts` refuses `/api` requests without a session before they reach a handler, in addition to each handler's own check; the exceptions are listed in [Architecture](docs/en/architecture.md)
+- Calls between linked servers carry an HMAC-SHA256 over method, path, body, user and time, keyed with a cluster secret encrypted at rest; each signature is accepted once, within five minutes ([More than one server](docs/en/multi-server.md))
+- Project variables, service credentials, registry and backup credentials, the GitHub token and the Telegram bot encrypted at rest (AES-256-GCM)
+- No `RUNPANEL_*` variable reaches deployed projects: the encryption key, the store's credentials and the setup token stay with the panel
 - Webhook signatures verified with HMAC-SHA256 and a constant-time compare
 - File operations resolve symlinks and are confined to the project; ZIP uploads are unpacked in-process, refusing traversal entries and links, capped by both archive and decompressed size
 - Repository URLs must be public `https://`, and the GitHub token is only ever attached to requests to GitHub
@@ -317,12 +320,13 @@ For TLS and reverse proxies in front of the panel, see [Putting it on the intern
 <br>
 
 - One-time commands run **at least once**, not exactly once: a panel restart mid-execution puts the command back in the queue.
-- Port restrictions are enforced by the panel process, so they do not survive it being stopped: the port simply closes. A rule set that has to hold with the panel down needs a host firewall as well.
-- Restoring RunPanel's own **Postgres** store is refused from the panel: the archive carries the dump and the exact `pg_restore` command, to be run with the panel stopped.
-- Restore does not compare versions: a dump taken on one major and restored onto another is accepted and fails partway, with the safety copy already taken.
+- A failed health check leaves the project in error: there is **no automatic rollback** to the previous version.
+- Port restrictions are enforced by the panel process: with the panel stopped the port simply closes. A rule that has to hold with the panel down needs a host firewall as well.
+- **Restore** does not compare engine versions, and refuses RunPanel's own Postgres store (the `pg_restore` command is in the archive's manifest). See [Backups](docs/en/backups.md#restore).
 - Installing at boot is **Linux-only**; elsewhere the panel shows what to do by hand.
-- **Notifications** have one channel, Telegram, and go to one chat. The bot takes no commands: the panel talks, it does not listen.
-- **Updating the panel from the panel** needs something that will start it again after it exits: systemd, or the `@reboot` script. Without one the new version is still built, but the swap and the restart stay two commands to run by hand. Inside a container and on Windows it is not available at all.
+- **Notifications** have one channel, Telegram, and go to one chat. The bot takes no commands.
+- **Several servers** need a private, encrypted network between them (Tailscale, for instance) or HTTPS, and a server can only join on its first run. See [More than one server](docs/en/multi-server.md#limits).
+- **Updating the panel from the panel** needs a supervisor that starts it again after it exits (systemd or the `@reboot` script); without one the swap and the restart are two commands to run by hand. It is not available in a container or on Windows.
 
 </details>
 
