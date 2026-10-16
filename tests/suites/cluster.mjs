@@ -128,6 +128,13 @@ export async function run({ base, repoRoot }) {
     });
     const spy = await spyJoin.json();
     r.check("a third member joins directly", spyJoin.status === 200 && /^[0-9a-f]{64}$/.test(spy.secret), String(spyJoin.status));
+
+    // That member's address answers nothing: an aggregated list must still come
+    // back, with the member reported as unreachable.
+    res = await a.call("/api/cluster/projects");
+    const spyStatus = res.body.members?.find((m) => m.id === spy.memberId);
+    r.check("an unreachable member gives a partial result, not an error", res.status === 200 && spyStatus && spyStatus.ok === false && spyStatus.reachable === false, JSON.stringify(res.body.members));
+    r.check("the other servers still answer", res.body.members?.filter((m) => m.id !== spy.memberId).every((m) => m.ok), JSON.stringify(res.body.members));
     const signedPing = signedHeaders(spy.secret, { method: "GET", path: "/api/cluster/ping", query: "", memberId: spy.memberId, userId: null, bodySha256: EMPTY_BODY_SHA256 });
     const first = await fetch(`${base}/api/cluster/ping`, { headers: signedPing });
     const again = await fetch(`${base}/api/cluster/ping`, { headers: signedPing });
@@ -184,13 +191,67 @@ export async function run({ base, repoRoot }) {
     }
     r.check("the SSE stream is relayed", stream.status === 200 && firstFrame.includes('"type":"ready"'), `${stream.status} ${firstFrame.slice(0, 120)}`);
 
-    res = await a.call("/api/cluster/overview");
-    r.check("the overview counts both servers", res.body.members?.length === 2 && res.body.members.every((m) => m.reachable), JSON.stringify(res.body));
+    // --- aggregated views ------------------------------------------------------------
+    res = await a.call("/api/cluster/servers");
+    const cardB = res.body.servers?.find((s) => s.memberId === memberB.id);
+    r.check("the servers overview lists both servers", res.body.servers?.length === 2 && res.body.servers.every((s) => s.reachable), JSON.stringify(res.body).slice(0, 300));
+    r.check("each card carries a summary with metrics for the owner", Boolean(cardB?.summary?.metrics) && cardB.summary.projects.total === 1, JSON.stringify(cardB?.summary));
+
+    res = await a.call("/api/server-summary");
+    r.check("server-summary answers locally", res.status === 200 && typeof res.body.version === "string", JSON.stringify(res.body).slice(0, 200));
+
+    res = await a.call("/api/cluster/projects");
+    const aggregated = res.body.items ?? [];
+    r.check("aggregated projects include B's project, tagged with B", aggregated.some((p) => p.id === projectId && p.memberId === memberB.id && p.memberName === "nodo-b"), JSON.stringify(aggregated).slice(0, 300));
+    r.check("and report how each server answered", res.body.members?.length === 2 && res.body.members.every((m) => m.ok), JSON.stringify(res.body.members));
+
+    res = await a.call("/api/cluster/services");
+    r.check("aggregated services answer", res.status === 200 && Array.isArray(res.body.items), String(res.status));
+    res = await a.call("/api/cluster/folders");
+    r.check("aggregated folders answer", res.status === 200 && Array.isArray(res.body.items), String(res.status));
+
+    res = await a.call("/api/cluster/backups");
+    r.check("aggregated backups carry each server's destinations", res.status === 200 && res.body.destinations?.some((d) => d.memberId === memberB.id) && res.body.perServer?.length === 2, JSON.stringify(res.body).slice(0, 300));
+
+    res = await a.call("/api/cluster/monitor");
+    const monB = res.body.servers?.find((s) => s.memberId === memberB.id);
+    r.check("the monitor has one entry per server", res.body.servers?.length === 2 && monB?.data?.projects?.some((p) => p.id === projectId), JSON.stringify(res.body).slice(0, 300));
+
+    res = await a.call("/api/cluster/diagnostics");
+    r.check("diagnostics of every server", res.body.servers?.length === 2 && res.body.servers.every((s) => Array.isArray(s.data?.checks)), JSON.stringify(res.body).slice(0, 200));
+
+    res = await a.call("/api/cluster/updates");
+    r.check("updates of every server", res.body.servers?.length === 2 && res.body.servers.every((s) => s.data?.release?.label), JSON.stringify(res.body).slice(0, 200));
+
+    res = await a.call(`/api/cluster/locate?kind=project&id=${projectId}`);
+    r.check("locate finds the project on B", res.body.memberId === memberB.id, JSON.stringify(res.body));
+    res = await a.call("/api/cluster/locate?kind=project&id=nope");
+    r.check("locate finds nothing for an unknown id", res.status === 200 && res.body.memberId === null, JSON.stringify(res.body));
+    res = await a.call("/api/cluster/locate?kind=folder&id=x");
+    r.check("locate refuses an unknown kind", res.status === 400, String(res.status));
+
+    // Two identical aggregated calls at once must not trip the replay guard.
+    const [twin1, twin2] = await Promise.all([a.call("/api/cluster/projects"), a.call("/api/cluster/projects")]);
+    r.check("parallel aggregated calls both succeed on every server", [twin1, twin2].every((x) => x.body.members?.every((m) => m.ok)), JSON.stringify([twin1.body.members, twin2.body.members]));
 
     // --- the directory ---------------------------------------------------------------
     res = await a.call("/api/users", { method: "POST", body: JSON.stringify({ email: "dev@cluster.test", hours: 48 }) });
     r.check("A invites a user", res.status === 201 || res.status === 200, `${res.status} ${JSON.stringify(res.body)}`);
     const devId = res.body.user?.id ?? res.body.id;
+
+    // The invited user, signed in, sees only what their permissions allow on
+    // every server: no host metrics without `monitor`, no projects without grants.
+    const inviteToken = String(res.body.invitePath ?? "").split("/").pop();
+    const dev = client(base);
+    res = await dev.call("/api/auth/invite", { method: "POST", body: JSON.stringify({ token: inviteToken, password: "dev-password-123" }) });
+    r.check("the invited user sets a password", res.status === 200, `${res.status} ${JSON.stringify(res.body)}`);
+    await a.call("/api/cluster/sync", { method: "POST" });
+    res = await dev.call("/api/cluster/servers");
+    const devCard = res.body.servers?.find((s) => s.memberId === memberB.id);
+    r.check("without monitor, no metrics from any server", res.status === 200 && res.body.servers.every((s) => s.summary === null || s.summary.metrics === null), JSON.stringify(res.body).slice(0, 300));
+    r.check("and no projects counted where they have no grant", devCard?.summary?.projects.total === 0, JSON.stringify(devCard?.summary));
+    res = await dev.call("/api/cluster/projects");
+    r.check("the aggregated list is empty for them", res.status === 200 && (res.body.items ?? []).length === 0, JSON.stringify(res.body).slice(0, 200));
 
     res = await a.call("/api/cluster/sync", { method: "POST" });
     r.check("A syncs with B", res.status === 200 && res.body.members.every((m) => m.ok), JSON.stringify(res.body));
