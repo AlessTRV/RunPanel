@@ -124,7 +124,7 @@ export function AppSidebar({ version }: { version: string }) {
             said v0.1.0 while package.json — which the backup manifest reads —
             was free to say something else. */}
         <p className="text-muted/60 text-meta flex items-center gap-1.5 px-3 pt-2 pb-1 font-mono">
-          v{version}
+          {version}
           {updateReady && (
             <>
               {/* The banner can be dismissed; this cannot, so after closing it
