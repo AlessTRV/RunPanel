@@ -6,6 +6,7 @@ import { Button } from "@heroui/react";
 import { Icon } from "@iconify/react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { useNodeApi, useServerHref } from "@/lib/hooks/useNode";
 
 /**
  * A list of health checks, each with the action that fixes it next to it.
@@ -38,18 +39,28 @@ export function CheckList({
   checks,
   onChanged,
   className,
+  apiFor,
+  hrefFor,
 }: {
   checks: Check[];
   onChanged?: () => void;
   className?: string;
+  /** Where a fix is sent. Defaults to the server the page is about. */
+  apiFor?: (path: string) => string;
+  /** Where a "Vai" link points. Defaults to the server the page is about. */
+  hrefFor?: (href: string) => string;
 }) {
   const [busy, setBusy] = useState<string | null>(null);
+  const pageApi = useNodeApi();
+  const pageHref = useServerHref();
+  const routeApi = apiFor ?? pageApi;
+  const routeHref = hrefFor ?? ((href: string) => pageHref(href));
 
   async function applyFix(check: Check) {
     if (!check.fix) return;
     setBusy(check.id);
     try {
-      const res = await fetch(check.fix.endpoint, {
+      const res = await fetch(routeApi(check.fix.endpoint), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(check.fix.body ?? {}),
@@ -92,7 +103,7 @@ export function CheckList({
               )}
               {check.href && check.tone !== "ok" && (
                 <Link
-                  href={check.href}
+                  href={routeHref(check.href)}
                   className="text-muted hover:text-foreground text-xs underline"
                 >
                   Vai
