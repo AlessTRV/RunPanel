@@ -10,6 +10,7 @@ import { Segmented } from "@/components/ui/Segmented";
 import { SettingToggle } from "@/components/ui/SettingToggle";
 import { InfoTip } from "@/components/ui/Tooltip";
 import { formatWhen } from "@/lib/format";
+import { useNodeApi } from "@/lib/hooks/useNode";
 
 /**
  * A restart on a schedule, for a project or a service.
@@ -76,6 +77,7 @@ export function ScheduledRestart({
   /** Called with the row the API returned, so the parent can refresh its copy. */
   onSaved: (row: Record<string, unknown>) => void;
 }) {
+  const api = useNodeApi();
   const [enabled, setEnabled] = useState(cron !== "");
   const [draft, setDraft] = useState(cron || PRESETS[0].cron);
   const [preview, setPreview] = useState<Preview | null>(null);
@@ -85,7 +87,7 @@ export function ScheduledRestart({
   useEffect(() => {
     if (!enabled || !draft) return;
     const timer = setTimeout(() => {
-      fetch("/api/backups/cron-preview", {
+      fetch(api("/api/backups/cron-preview"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ cron: draft, count: 3 }),
@@ -103,12 +105,12 @@ export function ScheduledRestart({
         .catch(() => setCronError("Impossibile verificare la pianificazione"));
     }, 350);
     return () => clearTimeout(timer);
-  }, [draft, enabled]);
+  }, [draft, enabled, api]);
 
   async function save(expression: string) {
     setPending(true);
     try {
-      const res = await fetch(`/api/${kind === "project" ? "projects" : "services"}/${id}`, {
+      const res = await fetch(api(`/api/${kind === "project" ? "projects" : "services"}/${id}`), {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ restartCron: expression }),

@@ -13,6 +13,7 @@ import {
   containerPathSchema,
   hostPathSchema,
 } from "@/lib/validation";
+import { useNodeApi } from "@/lib/hooks/useNode";
 
 /**
  * The folders of a project's container, published on the host.
@@ -47,6 +48,7 @@ export function MountsSection({
   mounts: ProjectMountRow[];
   onApplied: () => void;
 }) {
+  const api = useNodeApi();
   const [rows, setRows] = useState<ProjectMountRow[]>(mounts);
   const [error, setError] = useState<string | null>(null);
   const [notEmpty, setNotEmpty] = useState<{ target: string; entries: string[] } | null>(null);
@@ -87,7 +89,7 @@ export function MountsSection({
 
     setBusy(true);
     try {
-      const res = await fetch(`/api/projects/${projectId}/mounts`, {
+      const res = await fetch(api(`/api/projects/${projectId}/mounts`), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ mounts: filled, adopt }),

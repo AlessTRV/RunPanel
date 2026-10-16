@@ -12,6 +12,7 @@ import { Code, FieldHint } from "@/components/ui/Hint";
 import { formatRelative } from "@/lib/format";
 import { MSG } from "@/lib/copy";
 import type { Project } from "./types";
+import { useNodeApi } from "@/lib/hooks/useNode";
 
 /**
  * Auto-deploy, and whether it is actually going to happen.
@@ -101,6 +102,7 @@ export function WebhookSection({
   project: Project;
   onProjectChange: (project: Project) => void;
 }) {
+  const api = useNodeApi();
   const [status, setStatus] = useState<WebhookStatus | null>(null);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
@@ -115,14 +117,14 @@ export function WebhookSection({
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/projects/${project.id}/webhook`);
+      const res = await fetch(api(`/api/projects/${project.id}/webhook`));
       if (res.ok) setStatus(await res.json());
     } catch {
       /* The checks are a diagnostic; failing to fetch them is not worth a toast. */
     } finally {
       setLoading(false);
     }
-  }, [project.id]);
+  }, [project.id, api]);
 
   /** Opening the section is the event that pays for the status, so it asks. */
   function handleExpanded(expanded: boolean) {
@@ -133,7 +135,7 @@ export function WebhookSection({
   async function act(action: "connect" | "ping" | "disconnect", label: string) {
     setBusy(action);
     try {
-      const res = await fetch(`/api/projects/${project.id}/webhook`, {
+      const res = await fetch(api(`/api/projects/${project.id}/webhook`), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action }),
@@ -154,7 +156,7 @@ export function WebhookSection({
   /** Both switches in this section write the same row, so they save the same way. */
   async function patch(body: Record<string, unknown>, done: string) {
     try {
-      const res = await fetch(`/api/projects/${project.id}`, {
+      const res = await fetch(api(`/api/projects/${project.id}`), {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),

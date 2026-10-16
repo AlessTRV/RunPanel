@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 import { NAV_PAGES } from "@/lib/nav";
 import { useAllowedNav } from "@/lib/hooks/useMe";
 import { serviceDisplayName } from "@/lib/service-name";
+import { useNodeApi } from "@/lib/hooks/useNode";
 
 /**
  * Ctrl/Cmd+K: go anywhere, do the frequent things.
@@ -35,6 +36,7 @@ interface Indexed {
 }
 
 export function CommandPalette() {
+  const api = useNodeApi();
   const router = useRouter();
   // The same destinations the sidebar shows, from the same list and filter.
   const allowed = useAllowedNav();
@@ -49,8 +51,8 @@ export function CommandPalette() {
   const load = useCallback(async () => {
     try {
       const [projects, services] = await Promise.all([
-        fetch("/api/projects").then((res) => (res.ok ? res.json() : [])),
-        fetch("/api/services").then((res) => (res.ok ? res.json() : [])),
+        fetch(api("/api/projects")).then((res) => (res.ok ? res.json() : [])),
+        fetch(api("/api/services")).then((res) => (res.ok ? res.json() : [])),
       ]);
       setIndex({
         projects: Array.isArray(projects) ? projects : [],
@@ -59,7 +61,7 @@ export function CommandPalette() {
     } catch {
       /* the static pages are still worth offering */
     }
-  }, []);
+  }, [api]);
 
   // Opening, and the `g x` chords. The guard matters: without it, typing "g"
   // into any field on any page would start a navigation chord.
@@ -168,7 +170,7 @@ export function CommandPalette() {
       hint: "azione",
       icon: "solar:power-linear",
       run: async () => {
-        const res = await fetch("/api/autostart/reconcile", {
+        const res = await fetch(api("/api/autostart/reconcile"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ dryRun: true }),
@@ -185,7 +187,7 @@ export function CommandPalette() {
     });
 
     return list;
-  }, [index, router, PAGES]);
+  }, [index, router, PAGES, api]);
 
   // Keeps the highlighted row in view while the arrows walk past the fold.
   useEffect(() => {

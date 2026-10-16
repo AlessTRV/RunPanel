@@ -23,25 +23,20 @@ interface Named {
   name: string;
 }
 
-/** What a grant can point at, by kind, with the names the panel shows. */
+/**
+ * What a grant can point at, by kind, with the names the panel shows — from
+ * every server of the cluster, each name suffixed with the server's.
+ */
 function useTargets() {
-  const projects = useResource<Array<{ id: string; name: string }>>("/api/projects");
-  const services = useResource<Array<{ id: string; name: string; display_name: string | null; project_id: string | null }>>(
-    "/api/services"
-  );
-  const folders = useResource<Array<{ id: string; name: string }>>("/api/folders");
+  const targets = useResource<{ folder: Named[]; project: Named[]; service: Named[]; linkedService: Named[] }>("/api/cluster/targets");
   return useMemo(
     () => ({
-      folder: (folders.data ?? []).map((f) => ({ id: f.id, name: f.name })) as Named[],
-      project: (projects.data ?? []).map((p) => ({ id: p.id, name: p.name })) as Named[],
-      service: (services.data ?? [])
-        .filter((s) => !s.project_id)
-        .map((s) => ({ id: s.id, name: s.display_name || s.name })) as Named[],
-      linkedService: (services.data ?? [])
-        .filter((s) => s.project_id)
-        .map((s) => ({ id: s.id, name: s.display_name || s.name })) as Named[],
+      folder: targets.data?.folder ?? [],
+      project: targets.data?.project ?? [],
+      service: targets.data?.service ?? [],
+      linkedService: targets.data?.linkedService ?? [],
     }),
-    [folders.data, projects.data, services.data]
+    [targets.data]
   );
 }
 

@@ -17,6 +17,7 @@ import { Section } from "@/components/ui/Section";
 import { PageSkeleton } from "@/components/ui/Skeletons";
 import { StatusBadge } from "@/components/StatusBadge";
 import { serviceDisplayName } from "@/lib/service-name";
+import { useNodeApi } from "@/lib/hooks/useNode";
 
 interface Service {
   id: string;
@@ -107,14 +108,15 @@ const ServiceRow = memo(function ServiceRow({
 });
 
 export default function ServicesPage() {
+  const api = useNodeApi();
   const poll5000 = usePollInterval(5000);
   const [search, setSearch] = useState("");
-  const { data, loading, error: loadError, refresh } = useResource<Service[]>("/api/services", { intervalMs: poll5000 });
+  const { data, loading, error: loadError, refresh } = useResource<Service[]>(api("/api/services"), { intervalMs: poll5000 });
 
   // Names only, and without polling: a service's project does not change while
   // the page is open, but "which project is this database attached to" is the
   // one thing this list was not answering.
-  const { data: projectsData } = useResource<{ id: string; name: string }[]>("/api/projects");
+  const { data: projectsData } = useResource<{ id: string; name: string }[]>(api("/api/projects"));
   const projectNames = useMemo(() => {
     const map = new Map<string, string>();
     for (const project of Array.isArray(projectsData) ? projectsData : []) {
@@ -138,7 +140,7 @@ export default function ServicesPage() {
 
   async function handleControl(serviceId: string, action: "start" | "stop" | "restart") {
     try {
-      const res = await fetch(`/api/services/${serviceId}/control`, {
+      const res = await fetch(api(`/api/services/${serviceId}/control`), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action }),

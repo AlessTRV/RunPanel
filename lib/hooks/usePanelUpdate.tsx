@@ -3,6 +3,7 @@
 import { createContext, useContext } from "react";
 import { useResource } from "@/lib/hooks/useResource";
 import { useCan } from "@/lib/hooks/useMe";
+import { useNodeApi } from "@/lib/hooks/useNode";
 import type { UpdateStatus } from "@/lib/panel-update";
 
 /**
@@ -30,7 +31,9 @@ const PanelUpdateContext = createContext<Value>({ status: null, refresh: () => {
 export function PanelUpdateProvider({ children }: { children: React.ReactNode }) {
   // Only for accounts that may update the panel: the API refuses everyone else.
   const canUpdate = useCan("updates");
-  const { data, refresh } = useResource<UpdateStatus>(canUpdate ? "/api/updates" : null, { intervalMs: POLL_MS });
+  // Of the selected server: the banner and the Updates page follow the selector.
+  const api = useNodeApi();
+  const { data, refresh } = useResource<UpdateStatus>(canUpdate ? api("/api/updates") : null, { intervalMs: POLL_MS });
   return (
     <PanelUpdateContext.Provider value={{ status: data, refresh }}>
       {children}

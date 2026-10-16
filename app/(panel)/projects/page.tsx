@@ -13,6 +13,7 @@ import { Panel } from "@/components/ui/Panel";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { PageSkeleton } from "@/components/ui/Skeletons";
 import { StatusBadge } from "@/components/StatusBadge";
+import { useNodeApi } from "@/lib/hooks/useNode";
 
 interface Project {
   id: string;
@@ -70,9 +71,10 @@ const ProjectRow = memo(function ProjectRow({ project }: { project: Project }) {
 });
 
 export default function ProjectsPage() {
+  const api = useNodeApi();
   const poll5000 = usePollInterval(5000);
   const [search, setSearch] = useState("");
-  const { data, loading, error: loadError, refresh } = useResource<Project[]>("/api/projects", { intervalMs: poll5000 });
+  const { data, loading, error: loadError, refresh } = useResource<Project[]>(api("/api/projects"), { intervalMs: poll5000 });
 
   const projects = useMemo(() => (Array.isArray(data) ? data : []), [data]);
 

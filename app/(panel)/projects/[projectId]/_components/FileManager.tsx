@@ -8,6 +8,7 @@ import { MSG } from "@/lib/copy";
 import { formatBytes } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { SkeletonText } from "@/components/ui/Skeletons";
+import { useNodeApi } from "@/lib/hooks/useNode";
 
 interface FileEntry {
   name: string;
@@ -24,6 +25,7 @@ interface FileEntry {
  * looking at it.
  */
 export function FileManager({ projectId, runtimeType }: { projectId: string; runtimeType: string }) {
+  const api = useNodeApi();
   const [currentPath, setCurrentPath] = useState("/");
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [dirError, setDirError] = useState<string | null>(null);
@@ -37,7 +39,7 @@ export function FileManager({ projectId, runtimeType }: { projectId: string; run
 
   const loadDir = useCallback(
     (dirPath: string, signal?: AbortSignal) =>
-      fetch(`/api/projects/${projectId}/files?path=${encodeURIComponent(dirPath)}`, { signal })
+      fetch(api(`/api/projects/${projectId}/files?path=${encodeURIComponent(dirPath)}`), { signal })
         .then(async (res) => {
           const data = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
           if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
@@ -55,7 +57,7 @@ export function FileManager({ projectId, runtimeType }: { projectId: string; run
           setEntries([]);
           setLoadingDir(false);
         }),
-    [projectId]
+    [projectId, api]
   );
 
   useEffect(() => {
@@ -75,7 +77,7 @@ export function FileManager({ projectId, runtimeType }: { projectId: string; run
     }
 
     setLoadingFile(true);
-    void fetch(`/api/projects/${projectId}/files/content?path=${encodeURIComponent(full)}`)
+    void fetch(api(`/api/projects/${projectId}/files/content?path=${encodeURIComponent(full)}`))
       .then(async (res) => {
         const data = await res.json();
         if (!res.ok) throw new Error(data.error ?? "Impossibile aprire il file");
@@ -94,7 +96,7 @@ export function FileManager({ projectId, runtimeType }: { projectId: string; run
     if (!selectedFile) return;
     setSaving(true);
     try {
-      const res = await fetch(`/api/projects/${projectId}/files/content`, {
+      const res = await fetch(api(`/api/projects/${projectId}/files/content`), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ path: selectedFile, content }),

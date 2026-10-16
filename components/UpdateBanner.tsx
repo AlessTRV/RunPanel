@@ -10,6 +10,7 @@ import { LinkButton } from "@/components/ui/LinkButton";
 import { usePanelUpdate } from "@/lib/hooks/usePanelUpdate";
 import { MSG } from "@/lib/copy";
 import { hasUpdate, isUpdateActive } from "@/lib/panel-update";
+import { useNodeApi } from "@/lib/hooks/useNode";
 
 /**
  * "There is a new version", on every screen.
@@ -44,6 +45,7 @@ function readDismissed(): string | null {
 }
 
 export function UpdateBanner() {
+  const api = useNodeApi();
   const pathname = usePathname();
   const router = useRouter();
   const { status: data, refresh } = usePanelUpdate();
@@ -79,7 +81,7 @@ export function UpdateBanner() {
 
   async function apply() {
     try {
-      const res = await fetch("/api/updates/apply", {
+      const res = await fetch(api("/api/updates/apply"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ expectedSha: target }),

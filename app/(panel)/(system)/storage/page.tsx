@@ -13,6 +13,7 @@ import { SettingToggle } from "@/components/ui/SettingToggle";
 import { Segmented } from "@/components/ui/Segmented";
 import { SkeletonBlock } from "@/components/ui/Skeletons";
 import { formatBytes } from "@/lib/format";
+import { useNodeApi } from "@/lib/hooks/useNode";
 
 interface UsageEntry {
   type: string;
@@ -53,6 +54,7 @@ interface StorageData {
 }
 
 export default function StoragePage() {
+  const api = useNodeApi();
   const [data, setData] = useState<StorageData | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -71,7 +73,7 @@ export default function StoragePage() {
   const load = useCallback((signal?: AbortSignal) => {
     // State is set from the promise callbacks, never synchronously in the
     // effect body — that is what turns a fetch-on-mount into cascading renders.
-    return fetch("/api/storage", { signal })
+    return fetch(api("/api/storage"), { signal })
       .then((res) => {
         if (!res.ok) throw new Error(`Il server ha risposto ${res.status}`);
         return res.json();
@@ -86,7 +88,7 @@ export default function StoragePage() {
         setLoadError(err instanceof Error ? err.message : "Errore di rete");
         setLoading(false);
       });
-  }, []);
+  }, [api]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -97,7 +99,7 @@ export default function StoragePage() {
   async function runSweep(mode: "clean" | "orphans") {
     setCleaning(true);
     try {
-      const res = await fetch("/api/storage", {
+      const res = await fetch(api("/api/storage"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

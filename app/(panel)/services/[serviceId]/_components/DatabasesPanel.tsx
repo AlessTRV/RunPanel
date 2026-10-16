@@ -5,6 +5,7 @@ import { Button, Input, TextField } from "@heroui/react";
 import { Icon } from "@iconify/react";
 import { toast } from "sonner";
 import { useResource } from "@/lib/hooks/useResource";
+import { useNodeApi } from "@/lib/hooks/useNode";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { CopyField } from "@/components/ui/CopyField";
 import { DeleteButton } from "@/components/ui/DangerAction";
@@ -52,11 +53,12 @@ export function DatabasesPanel({
   /** Null until the operator reveals them; the URLs stay hidden until then. */
   credentials: { user?: string; password?: string } | null;
 }) {
+  const api = useNodeApi();
   const { data, loading, error, refresh } = useResource<{
     supported: boolean;
     running: boolean;
     databases: ServiceDatabase[];
-  }>(`/api/services/${serviceId}/databases`);
+  }>(api(`/api/services/${serviceId}/databases`));
 
   const [name, setName] = useState("");
   const [creating, setCreating] = useState(false);
@@ -81,7 +83,7 @@ export function DatabasesPanel({
 
   async function dropDatabase(target: string) {
     const res = await fetch(
-      `/api/services/${serviceId}/databases/${encodeURIComponent(target)}`,
+      api(`/api/services/${serviceId}/databases/${encodeURIComponent(target)}`),
       { method: "DELETE" }
     );
     if (res.ok) {
@@ -103,7 +105,7 @@ export function DatabasesPanel({
 
     setCreating(true);
     try {
-      const res = await fetch(`/api/services/${serviceId}/databases`, {
+      const res = await fetch(api(`/api/services/${serviceId}/databases`), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: trimmed }),

@@ -8,6 +8,7 @@ import { Icon } from "@iconify/react";
 import { cn } from "@/lib/utils";
 import { NAV_ITEMS, isActiveNav } from "@/lib/nav";
 import { useAllowedNav } from "@/lib/hooks/useMe";
+import { ServerSelector } from "./ServerSelector";
 import logo from "./logo.svg";
 
 /**
@@ -133,6 +134,11 @@ export function MobileNav() {
             <Icon icon="solar:close-circle-linear" width={20} aria-hidden />
           </button>
         </div>
+
+        {/* The server selector lives in the top bar on wide screens and here
+            on a phone, where the bar has no room for it. Renders nothing in
+            solo mode. */}
+        <ServerSelector className="mx-2 mt-2 w-auto" />
 
         {/* Same recipe as the desktop rail, so the two do not drift into
             separate visual languages. */}

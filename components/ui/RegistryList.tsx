@@ -8,6 +8,7 @@ import { DeleteButton } from "./DangerAction";
 import { toast } from "sonner";
 import { useResource } from "@/lib/hooks/useResource";
 import { SkeletonBlock } from "./Skeletons";
+import { useNodeApi } from "@/lib/hooks/useNode";
 
 interface Registry {
   registry: string;
@@ -22,8 +23,9 @@ interface Registry {
  * the host user's `~/.docker` and affect everything else they run.
  */
 export function RegistryList() {
+  const api = useNodeApi();
   const { data, loading, error: loadError, refresh } = useResource<{ registries: Registry[]; dockerHub: string }>(
-    "/api/registries"
+    api("/api/registries")
   );
 
   const [adding, setAdding] = useState(false);
@@ -41,7 +43,7 @@ export function RegistryList() {
     }
     setSaving(true);
     try {
-      const res = await fetch("/api/registries", {
+      const res = await fetch(api("/api/registries"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ registry: registry.trim(), username: username.trim(), password }),
@@ -62,7 +64,7 @@ export function RegistryList() {
 
   async function remove(host: string) {
     try {
-      const res = await fetch(`/api/registries?registry=${encodeURIComponent(host)}`, {
+      const res = await fetch(api(`/api/registries?registry=${encodeURIComponent(host)}`), {
         method: "DELETE",
       });
       if (!res.ok) throw new Error();

@@ -16,6 +16,7 @@ import { useMe } from "@/lib/hooks/useMe";
 import { useResource } from "@/lib/hooks/useResource";
 import { formatWhen } from "@/lib/format";
 import { AUDIT_CATEGORIES, type AuditCategory } from "@/lib/audit-filter";
+import { useNodeApi } from "@/lib/hooks/useNode";
 
 interface Entry {
   id: string;
@@ -117,6 +118,7 @@ export default function AuditPage() {
 }
 
 function AuditList({ category, from, to }: { category: string; from: string; to: string }) {
+  const api = useNodeApi();
   const [entries, setEntries] = useState<Entry[] | null>(null);
   const [next, setNext] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -129,13 +131,13 @@ function AuditList({ category, from, to }: { category: string; from: string; to:
       if (from) sp.set("from", new Date(`${from}T00:00:00`).toISOString());
       if (to) sp.set("to", new Date(`${to}T23:59:59`).toISOString());
       if (before) sp.set("before", before);
-      return fetch(`/api/audit?${sp}`).then(async (res) => {
+      return fetch(api(`/api/audit?${sp}`)).then(async (res) => {
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || `Il server ha risposto ${res.status}`);
         return data as { entries: Entry[]; nextBefore: string | null };
       });
     },
-    [category, from, to]
+    [category, from, to, api]
   );
 
   useEffect(() => {
@@ -212,7 +214,8 @@ function AuditList({ category, from, to }: { category: string; from: string; to:
 
 /** The owner's choice of what is recorded and for how long. */
 function AuditSettings() {
-  const settings = useResource<{ categories: AuditCategory[]; retentionDays: number }>("/api/audit/settings");
+  const api = useNodeApi();
+  const settings = useResource<{ categories: AuditCategory[]; retentionDays: number }>(api("/api/audit/settings"));
   return (
     <Section title="Cosa registrare" summary="Categorie e conservazione — solo il proprietario">
       {settings.error && !settings.data ? (
@@ -233,6 +236,7 @@ function AuditSettingsForm({
   initial: { categories: AuditCategory[]; retentionDays: number };
   onSaved: () => Promise<void>;
 }) {
+  const api = useNodeApi();
   const [categories, setCategories] = useState<AuditCategory[]>(initial.categories);
   const [days, setDays] = useState(String(initial.retentionDays));
   const [saving, setSaving] = useState(false);
@@ -245,7 +249,7 @@ function AuditSettingsForm({
     }
     setSaving(true);
     try {
-      const res = await fetch("/api/audit/settings", {
+      const res = await fetch(api("/api/audit/settings"), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ categories, retentionDays }),

@@ -25,6 +25,7 @@ import {
 } from "@/lib/deploy-phases";
 import type { OneTimeCommand } from "./types";
 import { usePendingSave, type RegisterPendingSave } from "./pending-saves";
+import { useNodeApi } from "@/lib/hooks/useNode";
 
 /**
  * Comandi che girano una volta sola, al punto scelto del prossimo deploy.
@@ -100,6 +101,7 @@ export function OneTimeCommandsSection({
   /** Passa le modifiche non salvate alla barra di salvataggio della scheda. */
   registerPending?: RegisterPendingSave;
 }) {
+  const api = useNodeApi();
   const [rows, setRows] = useState<Row[]>(() => queued.map(toRow));
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -128,7 +130,7 @@ export function OneTimeCommandsSection({
   // La cronologia costa, e nessuno la guarda finchè non la apre.
   const { data: historyData, refresh: refreshHistory } = useResource<{
     history: OneTimeCommand[];
-  }>(showHistory ? `/api/projects/${projectId}/one-time-commands?include=history` : null);
+  }>(showHistory ? api(`/api/projects/${projectId}/one-time-commands?include=history`) : null);
   const history = historyData?.history ?? [];
 
   const filled = rows.filter((row) => row.command.trim());
@@ -157,7 +159,7 @@ export function OneTimeCommandsSection({
     }
     setBusy(true);
     try {
-      const res = await fetch(`/api/projects/${projectId}/one-time-commands`, {
+      const res = await fetch(api(`/api/projects/${projectId}/one-time-commands`), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -203,7 +205,7 @@ export function OneTimeCommandsSection({
   });
 
   async function clearHistory() {
-    const res = await fetch(`/api/projects/${projectId}/one-time-commands`, { method: "DELETE" });
+    const res = await fetch(api(`/api/projects/${projectId}/one-time-commands`), { method: "DELETE" });
     if (res.ok) {
       toast.success("Cronologia svuotata");
       void refreshHistory();

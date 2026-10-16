@@ -9,6 +9,7 @@ import { ShellInput } from "@/components/ui/ShellInput";
 import { Hint } from "@/components/ui/Hint";
 import { Segmented } from "@/components/ui/Segmented";
 import type { ConsoleMode } from "@/lib/hooks/useServiceStream";
+import { useNodeApi } from "@/lib/hooks/useNode";
 
 /**
  * Talking to the service, from the page that knows its credentials.
@@ -58,6 +59,7 @@ export function ConsolePanel({
   lines: LogLine[];
   onLocalEcho: (text: string) => void;
 }) {
+  const api = useNodeApi();
   // Per mount, and only for the two modes that can change something. Asking
   // again on every mode switch would turn an acknowledgement into a click.
   const [acknowledged, setAcknowledged] = useState(false);
@@ -68,7 +70,7 @@ export function ConsolePanel({
   const needsAck = !readOnly && !acknowledged;
 
   async function post(body: Record<string, unknown>) {
-    const res = await fetch(`/api/services/${serviceId}/console`, {
+    const res = await fetch(api(`/api/services/${serviceId}/console`), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),

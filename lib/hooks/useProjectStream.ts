@@ -1,6 +1,7 @@
 "use client";
 
 import { useEventStream } from "./useEventStream";
+import { useNodeApi } from "./useNode";
 
 export type StreamEvent =
   | { type: "ready"; projectId: string; status: string }
@@ -27,8 +28,9 @@ export function useProjectStream(
   projectId: string | null,
   onEvent: (event: StreamEvent) => void
 ): { connected: boolean } {
+  const api = useNodeApi();
   return useEventStream<StreamEvent>(
-    projectId ? `/api/projects/${projectId}/stream` : null,
+    projectId ? api(`/api/projects/${projectId}/stream`) : null,
     onEvent
   );
 }

@@ -22,6 +22,7 @@ import type {
   TargetCatalog,
 } from "./types";
 import { serviceDisplayName } from "@/lib/service-name";
+import { useNodeApi } from "@/lib/hooks/useNode";
 
 /**
  * Creating and editing a schedule.
@@ -125,9 +126,10 @@ const SCOPE_OPTIONS = [
 ];
 
 export function PolicyForm({ policy }: Props) {
+  const api = useNodeApi();
   const router = useRouter();
-  const catalog = useResource<TargetCatalog>("/api/backups/targets");
-  const destinations = useResource<{ destinations: DestinationView[] }>("/api/backups/destinations");
+  const catalog = useResource<TargetCatalog>(api("/api/backups/targets"));
+  const destinations = useResource<{ destinations: DestinationView[] }>(api("/api/backups/destinations"));
 
   const [initial] = useState(() => initialSelection(policy));
 
@@ -194,7 +196,7 @@ export function PolicyForm({ policy }: Props) {
     if (!cron) return;
 
     const timer = setTimeout(() => {
-      fetch("/api/backups/cron-preview", {
+      fetch(api("/api/backups/cron-preview"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ cron, ...(timezone ? { timezone } : {}), count: 3 }),
@@ -213,7 +215,7 @@ export function PolicyForm({ policy }: Props) {
     }, 350);
 
     return () => clearTimeout(timer);
-  }, [cron, timezone]);
+  }, [api, cron, timezone]);
 
   const targets = useMemo<BackupTarget[]>(() => {
     const list: BackupTarget[] = [];
@@ -305,7 +307,7 @@ export function PolicyForm({ policy }: Props) {
     setSaving(true);
     try {
       const res = await fetch(
-        policy ? `/api/backups/policies/${policy.id}` : "/api/backups/policies",
+        api(policy ? `/api/backups/policies/${policy.id}` : "/api/backups/policies"),
         {
           method: policy ? "PUT" : "POST",
           headers: { "Content-Type": "application/json" },

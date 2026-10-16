@@ -14,6 +14,7 @@ import { statusMeta, TONE_DOT } from "@/lib/status";
 import { formatBytes, formatUptime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { serviceDisplayName } from "@/lib/service-name";
+import { useNodeApi } from "@/lib/hooks/useNode";
 
 interface ProcessInfo {
   running: boolean;
@@ -144,13 +145,14 @@ const Row = memo(function Row({
 });
 
 export default function MonitorPage() {
+  const api = useNodeApi();
   const poll3000 = usePollInterval(3000);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 
   // Polls, but stops while the tab is hidden — this endpoint inspects
   // containers, so an idle background tab was doing real work on the host
   // every three seconds forever.
-  const { data, loading, error: loadError, refresh } = useResource<MonitorData>("/api/monitor", { intervalMs: poll3000 });
+  const { data, loading, error: loadError, refresh } = useResource<MonitorData>(api("/api/monitor"), { intervalMs: poll3000 });
 
   const toggle = useCallback((id: string) => {
     setCollapsed((prev) => {

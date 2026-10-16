@@ -19,6 +19,7 @@ import { formatBytes, formatDuration, formatWhen } from "@/lib/format";
 import { RestoreDialog } from "../../_components/RestoreDialog";
 import { triggerLabel } from "../../_components/format";
 import type { ArtifactView, RunDetail } from "../../_components/types";
+import { useNodeApi } from "@/lib/hooks/useNode";
 
 type OpsEvent =
   | { type: "ready"; runId: string; status: string }
@@ -36,10 +37,11 @@ const KIND_LABELS: Record<string, string> = {
 
 export default function BackupRunPage({ params }: { params: Promise<{ runId: string }> }) {
   const poll4000 = usePollInterval(4000);
+  const api = useNodeApi();
   const { runId } = use(params);
 
   const { data, loading, error, refresh } = useResource<RunDetail>(
-    `/api/backups/runs/${runId}`,
+    api(`/api/backups/runs/${runId}`),
     { intervalMs: poll4000 }
   );
 
@@ -69,7 +71,7 @@ export default function BackupRunPage({ params }: { params: Promise<{ runId: str
   // Opened only while the run is live. A finished run's stream closes itself,
   // and EventSource would reconnect to it forever, replaying the whole log on
   // every retry.
-  useEventStream<OpsEvent>(running ? `/api/backups/runs/${runId}/stream` : null, onEvent);
+  useEventStream<OpsEvent>(running ? api(`/api/backups/runs/${runId}/stream`) : null, onEvent);
 
   // `data.log` is the authority once the run is over; while it runs the stream
   // is, because the file is still being written. The finished log arrives whole
@@ -142,7 +144,7 @@ export default function BackupRunPage({ params }: { params: Promise<{ runId: str
               </Button>
             )}
             {data.hasArchive && (
-              <LinkButton href={`/api/backups/runs/${data.id}/download`} download>
+              <LinkButton href={api(`/api/backups/runs/${data.id}/download`)} download>
                 <Icon icon="solar:download-linear" width={16} aria-hidden />
                 Scarica
               </LinkButton>

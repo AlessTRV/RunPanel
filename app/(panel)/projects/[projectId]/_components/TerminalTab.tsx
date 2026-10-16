@@ -5,6 +5,7 @@ import { Button } from "@heroui/react";
 import { Icon } from "@iconify/react";
 import { LogViewer, type LogLine } from "@/components/ui/LogViewer";
 import { ShellInput } from "@/components/ui/ShellInput";
+import { useNodeApi } from "@/lib/hooks/useNode";
 
 /**
  * A shell inside the project's container.
@@ -27,13 +28,14 @@ export function TerminalTab({
   onActiveChange: (active: boolean) => void;
   onLocalEcho: (text: string) => void;
 }) {
+  const api = useNodeApi();
   const [starting, setStarting] = useState(false);
   const [input, setInput] = useState("");
 
   async function start() {
     setStarting(true);
     try {
-      const res = await fetch(`/api/projects/${projectId}/terminal`, {
+      const res = await fetch(api(`/api/projects/${projectId}/terminal`), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "start" }),
@@ -49,7 +51,7 @@ export function TerminalTab({
 
   async function stop() {
     try {
-      await fetch(`/api/projects/${projectId}/terminal`, {
+      await fetch(api(`/api/projects/${projectId}/terminal`), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "stop" }),
@@ -66,7 +68,7 @@ export function TerminalTab({
     // Echo locally so the prompt feels immediate; the container's own output
     // follows on the stream.
     onLocalEcho(`$ ${command}\n`);
-    void fetch(`/api/projects/${projectId}/terminal`, {
+    void fetch(api(`/api/projects/${projectId}/terminal`), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ input: `${command}\n` }),

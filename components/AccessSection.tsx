@@ -15,6 +15,7 @@ import { formatRelative } from "@/lib/format";
 import { IP_RULE_EVERYTHING, IP_RULE_HINT } from "@/lib/validation";
 import { MSG } from "@/lib/copy";
 import { cn } from "@/lib/utils";
+import { useNodeApi } from "@/lib/hooks/useNode";
 
 /**
  * Who may reach a published port.
@@ -107,6 +108,7 @@ export function AccessSection({
   /** Receives the updated row, so a caller holding one can merge it. */
   onSaved: (updated: Record<string, unknown>) => void;
 }) {
+  const api = useNodeApi();
   const [mode, setMode] = useState<AccessMode>(access.mode);
   const [allow, setAllow] = useState<string[]>(access.allow);
   const [draft, setDraft] = useState("");
@@ -136,7 +138,7 @@ export function AccessSection({
 
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/network/suggestions")
+    fetch(api("/api/network/suggestions"))
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
         if (cancelled || !data) return;
@@ -149,7 +151,7 @@ export function AccessSection({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [api]);
 
   const dirty = JSON.stringify([mode, allow]) !== JSON.stringify([access.mode, access.allow]);
   const modeChanged = mode !== access.mode;
@@ -171,7 +173,7 @@ export function AccessSection({
   async function save(nextMode: AccessMode, nextAllow: string[]) {
     setSaving(true);
     try {
-      const res = await fetch(`/api/${kind === "service" ? "services" : "projects"}/${targetId}`, {
+      const res = await fetch(api(`/api/${kind === "service" ? "services" : "projects"}/${targetId}`), {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ access: { mode: nextMode, allow: nextAllow } }),

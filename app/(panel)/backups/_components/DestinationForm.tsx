@@ -8,6 +8,7 @@ import { Segmented } from "@/components/ui/Segmented";
 import { Field } from "@/components/ui/Field";
 import { FieldHint, Hint } from "@/components/ui/Hint";
 import { MSG } from "@/lib/copy";
+import { useNodeApi } from "@/lib/hooks/useNode";
 
 /**
  * Add a place for the archives to go.
@@ -35,6 +36,7 @@ export function DestinationForm({
   onOpenChange: (open: boolean) => void;
   onCreated: () => void;
 }) {
+  const api = useNodeApi();
   const [kind, setKind] = useState<Kind>("s3");
   const [name, setName] = useState("");
 
@@ -64,7 +66,7 @@ export function DestinationForm({
       (!endpoint.trim() || !region.trim() || !bucket.trim() || !accessKeyId.trim() || !secretAccessKey));
 
   async function submit() {
-    const res = await fetch("/api/backups/destinations", {
+    const res = await fetch(api("/api/backups/destinations"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

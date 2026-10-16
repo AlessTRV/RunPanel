@@ -6,6 +6,7 @@ import { Button } from "@heroui/react";
 import { Icon } from "@iconify/react";
 import { CRUMBS_WITHOUT_PAGE, SEGMENT_LABELS } from "@/lib/nav";
 import { useCrumbLabels } from "@/lib/hooks/useCrumbLabel";
+import { ServerSelector } from "@/components/ServerSelector";
 
 interface Crumb {
   label: string;
@@ -93,10 +94,13 @@ export function TopBar() {
         — on every page. The attribute is what a screen reader reads when the
         text is not rendered.
       */}
-      <Button variant="ghost" size="sm" onPress={handleLogout} aria-label="Esci">
-        <Icon icon="solar:logout-2-linear" width={16} aria-hidden />
-        <span className="hidden sm:inline">Esci</span>
-      </Button>
+      <div className="flex shrink-0 items-center gap-2">
+        <ServerSelector className="hidden sm:block" />
+        <Button variant="ghost" size="sm" onPress={handleLogout} aria-label="Esci">
+          <Icon icon="solar:logout-2-linear" width={16} aria-hidden />
+          <span className="hidden sm:inline">Esci</span>
+        </Button>
+      </div>
     </header>
   );
 }

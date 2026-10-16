@@ -14,7 +14,7 @@ import type { GlobalPermission } from "./authz";
  * is an identifier rather than something the reader is meant to read.
  *
  * Two levels. `NAV_PAGES` is every page, which is what the palette searches and
- * what the breadcrumb names. `NAV_ITEMS` is the sidebar: seven entries, three of
+ * what the breadcrumb names. `NAV_ITEMS` is the sidebar: eight entries, three of
  * which (Sistema, Accessi, Impostazioni) stand for a group of pages shown as
  * tabs (`NAV_SECTIONS`). The sidebar had grown to thirteen flat entries, most of
  * them opened once a month, and the four used daily were lost among them.
@@ -126,6 +126,13 @@ const PAGE = {
     icon: "solar:ssd-square-linear",
     iconActive: "solar:ssd-square-bold-duotone",
   },
+  servers: {
+    label: "Server",
+    href: "/servers",
+    permission: "nodes",
+    icon: "solar:server-2-linear",
+    iconActive: "solar:server-2-bold-duotone",
+  },
   users: {
     label: "Utenti",
     href: "/users",
@@ -172,7 +179,7 @@ export type NavSectionId = "system" | "access" | "settings";
 export const NAV_SECTIONS: Record<NavSectionId, { label: string; tabs: NavPage[] }> = {
   system: {
     label: "Sistema",
-    tabs: [PAGE.diagnostics, PAGE.autostart, PAGE.updates, PAGE.storage],
+    tabs: [PAGE.diagnostics, PAGE.autostart, PAGE.updates, PAGE.storage, PAGE.servers],
   },
   access: { label: "Accessi", tabs: [PAGE.users, PAGE.audit] },
   settings: { label: "Impostazioni", tabs: [PAGE.account, PAGE.settings, PAGE.github] },

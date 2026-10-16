@@ -8,6 +8,7 @@ import { DeleteButton } from "@/components/ui/DangerAction";
 import { CheckboxField } from "@/components/ui/CheckboxField";
 import { serviceLabel } from "@/lib/service-env";
 import { serviceDisplayName } from "@/lib/service-name";
+import { useNodeApi } from "@/lib/hooks/useNode";
 
 export interface LinkedServiceRow {
   id: string;
@@ -32,6 +33,7 @@ export function LinkedServiceDelete({
   service: LinkedServiceRow;
   onDeleted: () => void;
 }) {
+  const api = useNodeApi();
   const [deleteData, setDeleteData] = useState(false);
 
   return (
@@ -79,7 +81,7 @@ export function LinkedServiceDelete({
           }}
           onConfirm={async () => {
             const res = await fetch(
-              `/api/services/${service.id}${deleteData ? "?deleteData=true" : ""}`,
+              api(`/api/services/${service.id}${deleteData ? "?deleteData=true" : ""}`),
               { method: "DELETE" }
             );
             if (res.ok) {

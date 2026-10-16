@@ -14,6 +14,7 @@ import { useResource } from "@/lib/hooks/useResource";
 import { useCan } from "@/lib/hooks/useMe";
 import type { Grant, Level } from "@/lib/authz";
 import { LEVEL_LABEL, LEVEL_OPTIONS } from "./labels";
+import { useNodeApi } from "@/lib/hooks/useNode";
 
 interface Row {
   id: string;
@@ -33,10 +34,11 @@ interface Row {
  * where it lives.
  */
 export function AccessPanel({ kind, id }: { kind: "project" | "service"; id: string }) {
+  const api = useNodeApi();
   const canManage = useCan("users.manage");
-  const access = useResource<{ users: Row[] }>(canManage ? `/api/users/access?kind=${kind}&id=${id}` : null);
+  const access = useResource<{ users: Row[] }>(canManage ? api(`/api/users/access?kind=${kind}&id=${id}`) : null);
   const everyone = useResource<{ users: Array<{ id: string; email: string | null; isOwner: boolean }> }>(
-    canManage ? "/api/users" : null
+    canManage ? api("/api/users") : null
   );
   const [pick, setPick] = useState("");
   const [level, setLevel] = useState<Level>("read");
@@ -48,11 +50,11 @@ export function AccessPanel({ kind, id }: { kind: "project" | "service"; id: str
   async function setDirect(userId: string, next: Grant | null) {
     setBusy(true);
     try {
-      const res = await fetch(`/api/users/${userId}`);
+      const res = await fetch(api(`/api/users/${userId}`));
       const data = await res.json();
       if (!res.ok || !data.access) throw new Error(data.error || "Utente non modificabile");
       const others = (data.access.grants as Grant[]).filter((g) => !(g.scope === kind && g.scopeId === id));
-      const patch = await fetch(`/api/users/${userId}`, {
+      const patch = await fetch(api(`/api/users/${userId}`), {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ access: { permissions: data.access.permissions, grants: next ? [...others, next] : others } }),

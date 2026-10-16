@@ -28,6 +28,7 @@ import { SettingsTab } from "./_components/SettingsTab";
 import { VersionDialog } from "./_components/VersionDialog";
 import { FileManager } from "./_components/FileManager";
 import type { Deployment, EnvVar, ProcessInfo, Project, TabId } from "./_components/types";
+import { useNodeApi } from "@/lib/hooks/useNode";
 
 /**
  * Orchestrates the project view: it owns the single event stream and the shared
@@ -48,6 +49,7 @@ function toLine(text: string, stream: LogLine["stream"] = "stdout"): LogLine {
 }
 
 export default function ProjectDetailPage() {
+  const api = useNodeApi();
   const poll5000 = usePollInterval(5000);
   const params = useParams();
   const router = useRouter();
@@ -84,7 +86,7 @@ export default function ProjectDetailPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const refreshProject = useCallback(
     (signal?: AbortSignal) =>
-      fetch(`/api/projects/${projectId}`, { signal })
+      fetch(api(`/api/projects/${projectId}`), { signal })
         .then((res) => {
           // Only a 404 means the project is gone. Anything else (a 500, a
           // dropped connection mid-deploy) keeps the page where it is.
@@ -107,7 +109,7 @@ export default function ProjectDetailPage() {
           if (err instanceof DOMException && err.name === "AbortError") return;
           setLoadError(err instanceof Error ? err.message : MSG.unreachable);
         }),
-    [projectId, router]
+    [projectId, router, api]
   );
 
   useEffect(() => {
@@ -157,7 +159,7 @@ export default function ProjectDetailPage() {
   // hook stops while the tab is hidden. Derived rather than copied into state:
   // mirroring fetched data into a useState is what turns one render into two.
   const { data: statusData } = useResource<{ process?: ProcessInfo | null }>(
-    `/api/projects/${projectId}/status`,
+    api(`/api/projects/${projectId}/status`),
     { intervalMs: poll5000 }
   );
   const processInfo = statusData?.process ?? null;
@@ -171,12 +173,12 @@ export default function ProjectDetailPage() {
   useEffect(() => {
     if (activeTab !== "logs") return;
     const controller = new AbortController();
-    fetch(`/api/projects/${projectId}/logs?source=process`, { signal: controller.signal })
+    fetch(api(`/api/projects/${projectId}/logs?source=process`), { signal: controller.signal })
       .then((res) => (res.ok ? res.json() : { logs: [] }))
       .then((data: { logs?: string[] }) => resetProcessLog((data.logs ?? []).map((l) => toLine(l))))
       .catch(() => {});
     return () => controller.abort();
-  }, [activeTab, projectId, resetProcessLog]);
+  }, [activeTab, projectId, resetProcessLog, api]);
 
   // Tab data is fetched by the shared hook, which owns its own loading flag —
   // so there is no effect here setting one synchronously. Passing `null` as the
@@ -187,7 +189,7 @@ export default function ProjectDetailPage() {
     error: deploymentsError,
     refresh: refreshDeployments,
   } = useResource<Deployment[]>(
-    activeTab === "deployments" ? `/api/projects/${projectId}/logs` : null
+    activeTab === "deployments" ? api(`/api/projects/${projectId}/logs`) : null
   );
   const deployments = useMemo(
     () => (Array.isArray(deploymentsData) ? deploymentsData : []),
@@ -195,7 +197,7 @@ export default function ProjectDetailPage() {
   );
 
   const { data: envData, loading: envLoading, error: envError, refresh: refreshEnv } = useResource<EnvVar[]>(
-    activeTab === "env" ? `/api/projects/${projectId}/env?reveal=true` : null
+    activeTab === "env" ? api(`/api/projects/${projectId}/env?reveal=true`) : null
   );
 
   // The env tab explains which prefixes reach the build, and the project can
@@ -222,7 +224,7 @@ export default function ProjectDetailPage() {
     setDeploying(true);
     try {
       if (options.branch && options.branch !== project?.source_branch) {
-        const patch = await fetch(`/api/projects/${projectId}`, {
+        const patch = await fetch(api(`/api/projects/${projectId}`), {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ sourceBranch: options.branch }),
@@ -235,7 +237,7 @@ export default function ProjectDetailPage() {
         setProject(await patch.json());
       }
 
-      const res = await fetch(`/api/projects/${projectId}/deploy`, {
+      const res = await fetch(api(`/api/projects/${projectId}/deploy`), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ mode, ...(options.commitSha ? { commitSha: options.commitSha } : {}) }),
@@ -291,7 +293,7 @@ export default function ProjectDetailPage() {
   const handleReleasePin = useCallback(async () => {
     setDeploying(true);
     try {
-      const res = await fetch(`/api/projects/${projectId}/pin`, {
+      const res = await fetch(api(`/api/projects/${projectId}/pin`), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "release", deploy: true }),
@@ -308,13 +310,13 @@ export default function ProjectDetailPage() {
     } finally {
       setDeploying(false);
     }
-  }, [projectId, refreshProject]);
+  }, [projectId, refreshProject, api]);
 
   const openVersions = useCallback(() => setVersionsOpen(true), []);
 
   async function handleControl(action: "start" | "stop" | "restart") {
     try {
-      const res = await fetch(`/api/projects/${projectId}/control`, {
+      const res = await fetch(api(`/api/projects/${projectId}/control`), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action }),
@@ -486,7 +488,7 @@ export default function ProjectDetailPage() {
         submitLabel="Salva"
         isSubmitDisabled={!renameValue.trim() || renameValue.trim() === project.name}
         onSubmit={async () => {
-          const res = await fetch(`/api/projects/${projectId}`, {
+          const res = await fetch(api(`/api/projects/${projectId}`), {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ name: renameValue.trim() }),

@@ -17,6 +17,7 @@ import { ServiceLink } from "@/components/ServiceLink";
 import { StickySaveBar } from "@/components/ui/StickySaveBar";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import type { EnvVar } from "./types";
+import { useNodeApi } from "@/lib/hooks/useNode";
 
 interface LinkedService {
   id: string;
@@ -69,6 +70,7 @@ export function EnvTab({
   /** Below `manage`: the names are shown, the values arrive masked, nothing is editable. */
   readOnly?: boolean;
 }) {
+  const api = useNodeApi();
   const [vars, onChange] = useState<EnvVar[]>(() =>
     initialVars.map((v) => ({ key: v.key, value: v.value }))
   );
@@ -88,7 +90,7 @@ export function EnvTab({
   // because this is where someone looks for DATABASE_URL, does not find it, and
   // pastes a connection string by hand — over the one RunPanel was about to
   // inject, which then silently wins forever.
-  const { data: servicesData, refresh: refreshServices } = useResource<LinkedService[]>("/api/services");
+  const { data: servicesData, refresh: refreshServices } = useResource<LinkedService[]>(api("/api/services"));
   const linkedServices = useMemo(
     () => (Array.isArray(servicesData) ? servicesData : []).filter((s) => s.project_id === projectId),
     [servicesData, projectId]
@@ -131,7 +133,7 @@ export function EnvTab({
   async function send(valid: EnvVar[]) {
     setSaving(true);
     try {
-      const res = await fetch(`/api/projects/${projectId}/env`, {
+      const res = await fetch(api(`/api/projects/${projectId}/env`), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ vars: valid }),

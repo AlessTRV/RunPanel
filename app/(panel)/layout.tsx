@@ -3,6 +3,8 @@ import { getSession } from "@/lib/auth";
 import { GLOBAL_PERMISSIONS, hasPermission } from "@/lib/authz";
 import { loadPrincipal } from "@/lib/principal";
 import { MeProvider } from "@/lib/hooks/useMe";
+import { NodeProvider, type NodeInfo } from "@/lib/hooks/useNode";
+import { clusterState, listMembers } from "@/services/cluster/state";
 import { AppSidebar } from "@/components/AppSidebar";
 import { MobileNav } from "@/components/MobileNav";
 import { CommandPalette } from "@/components/CommandPalette";
@@ -34,8 +36,22 @@ export default async function PanelLayout({
     permissions: GLOBAL_PERMISSIONS.filter((p) => hasPermission(principal, p)),
   };
 
+  // The other servers of the cluster, for the selector. Empty in solo mode.
+  const cluster = await clusterState();
+  const nodes: NodeInfo[] = cluster
+    ? (await listMembers()).map((m) => ({
+        id: m.id,
+        name: m.name,
+        url: m.url,
+        role: m.role === "node" ? "node" : "panel",
+        status: m.id === cluster.selfId ? "ok" : m.status === "ok" || m.status === "unreachable" ? m.status : "unknown",
+        version: m.version,
+      }))
+    : [];
+
   return (
     <MeProvider me={me}>
+    <NodeProvider nodes={nodes} selfId={cluster?.selfId ?? null}>
     <PollingProvider>
     <PanelUpdateProvider>
     <div className="min-h-dvh">
@@ -63,6 +79,7 @@ export default async function PanelLayout({
     </div>
     </PanelUpdateProvider>
     </PollingProvider>
+    </NodeProvider>
     </MeProvider>
   );
 }

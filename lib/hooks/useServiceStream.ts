@@ -1,6 +1,7 @@
 "use client";
 
 import { useEventStream } from "./useEventStream";
+import { useNodeApi } from "./useNode";
 
 export type ConsoleMode = "engine" | "shell" | "logs";
 
@@ -55,8 +56,9 @@ export function useServiceStream(
   serviceId: string | null,
   onEvent: (event: ServiceStreamEvent) => void
 ): { connected: boolean } {
+  const api = useNodeApi();
   return useEventStream<ServiceStreamEvent>(
-    serviceId ? `/api/services/${serviceId}/stream` : null,
+    serviceId ? api(`/api/services/${serviceId}/stream`) : null,
     onEvent
   );
 }

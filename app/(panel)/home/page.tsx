@@ -7,6 +7,7 @@ import { Icon } from "@iconify/react";
 import { toast } from "sonner";
 import { useResource } from "@/lib/hooks/useResource";
 import { usePollInterval } from "@/lib/hooks/usePollingInterval";
+import { useNodeApi } from "@/lib/hooks/useNode";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { LinkButton } from "@/components/ui/LinkButton";
 import { LoadError } from "@/components/ui/LoadError";
@@ -19,6 +20,7 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { PageSkeleton } from "@/components/ui/Skeletons";
 import { StatusBadge } from "@/components/StatusBadge";
 import { HealthBanner } from "@/components/HealthBanner";
+import { ClusterOverview } from "@/components/ClusterOverview";
 import { statusMeta, TONE_DOT } from "@/lib/status";
 import { formatBytes, formatUptime } from "@/lib/format";
 import { groupOverview, type FolderLike } from "@/lib/overview-groups";
@@ -294,6 +296,7 @@ type FolderDialog =
 export default function HomePage() {
   // Every endpoint goes through the shared hook, so they stop polling when the
   // tab is hidden and never overlap requests.
+  const api = useNodeApi();
   const poll5000 = usePollInterval(5000);
 
   const {
@@ -301,15 +304,15 @@ export default function HomePage() {
     loading: projectsLoading,
     error,
     refresh: refreshProjects,
-  } = useResource<Project[]>("/api/projects", { intervalMs: poll5000 });
-  const { data: services, refresh: refreshServices } = useResource<Service[]>("/api/services", {
+  } = useResource<Project[]>(api("/api/projects"), { intervalMs: poll5000 });
+  const { data: services, refresh: refreshServices } = useResource<Service[]>(api("/api/services"), {
     intervalMs: poll5000,
   });
-  const { data: folders, refresh: refreshFolders } = useResource<Folder[]>("/api/folders", {
+  const { data: folders, refresh: refreshFolders } = useResource<Folder[]>(api("/api/folders"), {
     intervalMs: poll5000,
   });
   const canMonitor = useCan("monitor");
-  const { data: metrics } = useResource<Metrics>(canMonitor ? "/api/metrics" : null, { intervalMs: poll5000 });
+  const { data: metrics } = useResource<Metrics>(canMonitor ? api("/api/metrics") : null, { intervalMs: poll5000 });
 
   // Read once, on the client, and only consulted when a section first mounts:
   // the sections are uncontrolled from then on, so a poll never snaps one shut.
@@ -339,20 +342,20 @@ export default function HomePage() {
 
   const moveProject = useCallback(
     async (projectId: string, folderId: string | null) => {
-      const result = await patchJson(`/api/projects/${projectId}`, { folderId });
+      const result = await patchJson(api(`/api/projects/${projectId}`), { folderId });
       if (!result.ok) toast.error(result.error ?? "Spostamento non riuscito");
       await refreshProjects();
     },
-    [refreshProjects]
+    [api, refreshProjects]
   );
 
   const moveService = useCallback(
     async (serviceId: string, folderId: string | null) => {
-      const result = await patchJson(`/api/services/${serviceId}`, { folderId });
+      const result = await patchJson(api(`/api/services/${serviceId}`), { folderId });
       if (!result.ok) toast.error(result.error ?? "Spostamento non riuscito");
       await refreshServices();
     },
-    [refreshServices]
+    [api, refreshServices]
   );
 
   function openDialog(next: Exclude<FolderDialog, null>) {
@@ -364,7 +367,7 @@ export default function HomePage() {
     const name = nameValue.trim();
     if (!dialog || !name) return;
     const isRename = dialog.kind === "rename";
-    const res = await fetch(isRename ? `/api/folders/${dialog.folder.id}` : "/api/folders", {
+    const res = await fetch(api(isRename ? `/api/folders/${dialog.folder.id}` : "/api/folders"), {
       method: isRename ? "PATCH" : "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name }),
@@ -380,7 +383,7 @@ export default function HomePage() {
 
   async function deleteFolder() {
     if (dialog?.kind !== "delete") return;
-    const res = await fetch(`/api/folders/${dialog.folder.id}`, { method: "DELETE" });
+    const res = await fetch(api(`/api/folders/${dialog.folder.id}`), { method: "DELETE" });
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
       toast.error(data.error ?? "Eliminazione non riuscita");
@@ -432,6 +435,9 @@ export default function HomePage() {
       {/* Above the metrics on purpose: a number that is merely interesting
           should never sit above a problem that needs doing. */}
       <HealthBanner />
+
+      {/* The other servers, when there are any: a glance and a way to switch. */}
+      <ClusterOverview />
 
       {/* Host metrics are for accounts with the monitor permission. */}
       {canMonitor && (

@@ -15,6 +15,7 @@ import { isCommitSha } from "@/lib/git-ref";
 import { formatRelative } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { CommitsResponse, Project } from "./types";
+import { useNodeApi } from "@/lib/hooks/useNode";
 
 const PAGE_SIZE = 20;
 const MAX_SIZE = 100;
@@ -43,6 +44,7 @@ export function VersionDialog({
   /** Persists the branch if it changed, then starts the deploy. */
   onDeployCommit: (commitSha: string, branch: string) => Promise<void>;
 }) {
+  const api = useNodeApi();
   const [branch, setBranch] = useState(project.source_branch);
   const [selected, setSelected] = useState<string | null>(null);
   const [size, setSize] = useState(PAGE_SIZE);
@@ -53,7 +55,7 @@ export function VersionDialog({
   // stays idle. Without it, opening any project page would spend a GitHub API
   // call on a list nobody asked to see.
   const { data: branchData } = useResource<{ branches: { name: string }[] }>(
-    isOpen && project.repo ? `/api/github/branches?repo=${encodeURIComponent(project.repo)}` : null
+    isOpen && project.repo ? api(`/api/github/branches?repo=${encodeURIComponent(project.repo)}`) : null
   );
   const branches = branchData?.branches ?? [];
 
@@ -62,7 +64,7 @@ export function VersionDialog({
   // render into two. The cost is refetching the first N — five requests at most.
   const { data, error, loading, refresh } = useResource<CommitsResponse>(
     isOpen && project.repo
-      ? `/api/projects/${project.id}/commits?branch=${encodeURIComponent(branch)}&perPage=${size}`
+      ? api(`/api/projects/${project.id}/commits?branch=${encodeURIComponent(branch)}&perPage=${size}`)
       : null
   );
 

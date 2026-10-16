@@ -22,6 +22,7 @@ import {
 } from "@/lib/backup-settings";
 import type { Project } from "./types";
 import { usePendingSave, type RegisterPendingSave } from "./pending-saves";
+import { useNodeApi } from "@/lib/hooks/useNode";
 
 /**
  * How this project's volumes go into a backup.
@@ -80,11 +81,12 @@ export function BackupSection({
   /** Hands this section's unsaved edits to the tab's save bar. */
   registerPending?: RegisterPendingSave;
 }) {
+  const api = useNodeApi();
   const stored = useMemo(() => parseBackupSettings(project.backup_settings), [project.backup_settings]);
 
   const [expanded, setExpanded] = useState(false);
   const { data: view, loading } = useResource<BackupView>(
-    expanded ? `/api/projects/${project.id}/backup` : null
+    expanded ? api(`/api/projects/${project.id}/backup`) : null
   );
 
   const [consistency, setConsistency] = useState<VolumeConsistency>(stored.consistency);
@@ -189,7 +191,7 @@ export function BackupSection({
 
     setSaving(true);
     try {
-      const res = await fetch(`/api/projects/${project.id}/backup`, {
+      const res = await fetch(api(`/api/projects/${project.id}/backup`), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),

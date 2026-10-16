@@ -12,6 +12,7 @@ import { FieldHint } from "@/components/ui/Hint";
 import { LoadError } from "@/components/ui/LoadError";
 import { SkeletonBlock } from "@/components/ui/Skeletons";
 import { formatRelative } from "@/lib/format";
+import { useNodeApi } from "@/lib/hooks/useNode";
 
 /**
  * The GitHub connection, and the repositories it can see.
@@ -37,6 +38,7 @@ interface Repo {
 }
 
 export default function GitHubPage() {
+  const api = useNodeApi();
   const [token, setToken] = useState("");
   const [hasToken, setHasToken] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -52,7 +54,7 @@ export default function GitHubPage() {
   const loadRepos = useCallback(async () => {
     setLoadingRepos(true);
     try {
-      const res = await fetch("/api/github/repos");
+      const res = await fetch(api("/api/github/repos"));
       const data = await res.json();
       if (data.repos) setRepos(data.repos);
       else if (data.error) toast.error(data.error);
@@ -61,11 +63,11 @@ export default function GitHubPage() {
     } finally {
       setLoadingRepos(false);
     }
-  }, []);
+  }, [api]);
 
   useEffect(() => {
     const controller = new AbortController();
-    fetch("/api/settings", { signal: controller.signal })
+    fetch(api("/api/settings"), { signal: controller.signal })
       .then(async (r) => {
         const data = await r.json().catch(() => ({}));
         if (!r.ok) throw new Error(data.error || `Errore ${r.status}`);
@@ -84,7 +86,7 @@ export default function GitHubPage() {
         setSettingsError(err instanceof Error ? err.message : "Lettura non riuscita");
       });
     return () => controller.abort();
-  }, [loadRepos, settingsAttempt]);
+  }, [loadRepos, settingsAttempt, api]);
 
   async function saveToken() {
     if (!token.trim()) {
@@ -93,7 +95,7 @@ export default function GitHubPage() {
     }
     setSaving(true);
     try {
-      const res = await fetch("/api/settings", {
+      const res = await fetch(api("/api/settings"), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ github_token: token.trim() }),
@@ -116,7 +118,7 @@ export default function GitHubPage() {
 
   async function disconnect() {
     try {
-      const res = await fetch("/api/settings", {
+      const res = await fetch(api("/api/settings"), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ github_token: "" }),

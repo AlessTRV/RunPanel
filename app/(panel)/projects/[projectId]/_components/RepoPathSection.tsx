@@ -10,6 +10,7 @@ import { Code, FieldHint, Hint } from "@/components/ui/Hint";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { MSG } from "@/lib/copy";
 import { NATIVE_PATH_RULE, nativePathSchema } from "@/lib/validation";
+import { useNodeApi } from "@/lib/hooks/useNode";
 
 /**
  * Where a native project's files live.
@@ -48,6 +49,7 @@ export function RepoPathSection({
   move: RepoMove | null;
   onChanged: () => void;
 }) {
+  const api = useNodeApi();
   const [value, setValue] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -58,7 +60,7 @@ export function RepoPathSection({
   async function post(body: Record<string, unknown>) {
     setBusy(true);
     try {
-      const res = await fetch(`/api/projects/${projectId}/repo-path`, {
+      const res = await fetch(api(`/api/projects/${projectId}/repo-path`), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -79,7 +81,7 @@ export function RepoPathSection({
 
   async function removePrevious() {
     try {
-      const res = await fetch(`/api/projects/${projectId}/repo-path`, { method: "DELETE" });
+      const res = await fetch(api(`/api/projects/${projectId}/repo-path`), { method: "DELETE" });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         toast.error(data.error ?? "Eliminazione non riuscita");

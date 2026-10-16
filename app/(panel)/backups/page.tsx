@@ -21,6 +21,7 @@ import { useResource } from "@/lib/hooks/useResource";
 import { usePollInterval } from "@/lib/hooks/usePollingInterval";
 import { formatBytes, formatDuration, formatRelative, formatWhen } from "@/lib/format";
 import { triggerLabel } from "./_components/format";
+import { useNodeApi } from "@/lib/hooks/useNode";
 import {
   describeTarget,
   type DestinationView,
@@ -48,18 +49,19 @@ const NIGHTLY_PRESET = {
 };
 
 export default function BackupsPage() {
+  const api = useNodeApi();
   const poll20000 = usePollInterval(20000);
   const poll5000 = usePollInterval(5000);
   const router = useRouter();
 
-  const runs = useResource<RunsResponse>("/api/backups/runs?limit=25", { intervalMs: poll5000 });
-  const policies = useResource<{ policies: PolicyView[] }>("/api/backups/policies", {
+  const runs = useResource<RunsResponse>(api("/api/backups/runs?limit=25"), { intervalMs: poll5000 });
+  const policies = useResource<{ policies: PolicyView[] }>(api("/api/backups/policies"), {
     intervalMs: poll20000,
   });
   const destinations = useResource<{ destinations: DestinationView[] }>(
-    "/api/backups/destinations"
+    api("/api/backups/destinations")
   );
-  const catalog = useResource<TargetCatalog>("/api/backups/targets");
+  const catalog = useResource<TargetCatalog>(api("/api/backups/targets"));
 
   const [busy, setBusy] = useState<string | null>(null);
   const [addingDestination, setAddingDestination] = useState(false);
@@ -70,7 +72,7 @@ export default function BackupsPage() {
   async function post(url: string, label: string) {
     setBusy(url);
     try {
-      const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" } });
+      const res = await fetch(api(url), { method: "POST", headers: { "Content-Type": "application/json" } });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
         toast.error(body.error ?? `${label} non riuscita`);
@@ -101,7 +103,7 @@ export default function BackupsPage() {
 
     setBusy("preset");
     try {
-      const res = await fetch("/api/backups/policies", {
+      const res = await fetch(api("/api/backups/policies"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...NIGHTLY_PRESET, destinationId }),
@@ -121,7 +123,7 @@ export default function BackupsPage() {
   async function togglePolicy(policy: PolicyView) {
     setBusy(policy.id);
     try {
-      const res = await fetch(`/api/backups/policies/${policy.id}`, {
+      const res = await fetch(api(`/api/backups/policies/${policy.id}`), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ enabled: !policy.enabled }),
@@ -137,7 +139,7 @@ export default function BackupsPage() {
   }
 
   async function removePolicy(policyId: string) {
-    const res = await fetch(`/api/backups/policies/${policyId}`, { method: "DELETE" });
+    const res = await fetch(api(`/api/backups/policies/${policyId}`), { method: "DELETE" });
     if (!res.ok) {
       toast.error("Eliminazione non riuscita");
       return;
@@ -147,7 +149,7 @@ export default function BackupsPage() {
   }
 
   async function removeRun(runId: string) {
-    const res = await fetch(`/api/backups/runs/${runId}`, { method: "DELETE" });
+    const res = await fetch(api(`/api/backups/runs/${runId}`), { method: "DELETE" });
     const body = await res.json().catch(() => ({}));
     if (!res.ok) {
       toast.error(body.error ?? "Eliminazione non riuscita");
@@ -439,7 +441,7 @@ export default function BackupsPage() {
                   <div className="flex items-center gap-1">
                     {run.hasArchive && (
                       <LinkButton
-                        href={`/api/backups/runs/${run.id}/download`}
+                        href={api(`/api/backups/runs/${run.id}/download`)}
                         variant="ghost"
                         download
                         aria-label="Scarica l'archivio"

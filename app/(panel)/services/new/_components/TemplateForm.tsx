@@ -8,6 +8,7 @@ import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { ChoiceCard, ChoiceGroup } from "@/components/ui/ChoiceCard";
 import { Field } from "@/components/ui/Field";
 import type { DockerTemplate } from "../_data/catalog";
+import { useNodeApi } from "@/lib/hooks/useNode";
 
 /**
  * A prebuilt image with a few fields, configured as the project's app.
@@ -22,6 +23,7 @@ export function TemplateForm({
   projectId: string;
   template: DockerTemplate;
 }) {
+  const api = useNodeApi();
   const router = useRouter();
   const [saving, setSaving] = useState(false);
   const [version, setVersion] = useState(template.versions[0]);
@@ -33,7 +35,7 @@ export function TemplateForm({
   async function create() {
     setSaving(true);
     try {
-      const res = await fetch(`/api/projects/${projectId}`, {
+      const res = await fetch(api(`/api/projects/${projectId}`), {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

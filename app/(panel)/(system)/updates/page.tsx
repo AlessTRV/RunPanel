@@ -25,6 +25,7 @@ import { hasUpdate, isUpdateActive, type UpdateStatus } from "@/lib/panel-update
 import { Changelog } from "./_components/Changelog";
 import { UpdateLog } from "./_components/UpdateLog";
 import { SignatureSettings } from "./_components/SignatureSettings";
+import { useNodeApi } from "@/lib/hooks/useNode";
 
 /**
  * Updating the panel, from the panel.
@@ -54,6 +55,7 @@ const INTERVAL_OPTIONS = PANEL_UPDATE_INTERVALS.map((value) => ({
 }));
 
 export default function UpdatesPage() {
+  const api = useNodeApi();
   const [checking, setChecking] = useState(false);
   const [starting, setStarting] = useState(false);
   const [savingInterval, setSavingInterval] = useState(false);
@@ -63,7 +65,7 @@ export default function UpdatesPage() {
   // Two cadences: quick while something is happening, unhurried otherwise. The
   // quick one is also what notices the panel coming back after the restart.
   const [justStarted, setJustStarted] = useState(false);
-  const { data, error, refresh } = useResource<UpdateStatus>("/api/updates", {
+  const { data, error, refresh } = useResource<UpdateStatus>(api("/api/updates"), {
     intervalMs: 30_000,
   });
 
@@ -108,7 +110,7 @@ export default function UpdatesPage() {
   async function checkNow() {
     setChecking(true);
     try {
-      const res = await fetch("/api/updates/check", { method: "POST" });
+      const res = await fetch(api("/api/updates/check"), { method: "POST" });
       if (!res.ok) {
         toast.error(MSG.loadFailed);
         return;
@@ -128,7 +130,7 @@ export default function UpdatesPage() {
   async function startUpdate() {
     setStarting(true);
     try {
-      const res = await fetch("/api/updates/apply", {
+      const res = await fetch(api("/api/updates/apply"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ expectedSha: data?.check?.remoteSha ?? null }),
@@ -151,7 +153,7 @@ export default function UpdatesPage() {
     setChosenInterval(next);
     setSavingInterval(true);
     try {
-      const res = await fetch("/api/settings", {
+      const res = await fetch(api("/api/settings"), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ preferences: { panel_update_interval: next } }),

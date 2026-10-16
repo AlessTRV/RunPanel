@@ -15,6 +15,7 @@ import { useEventStream } from "@/lib/hooks/useEventStream";
 import { useResource } from "@/lib/hooks/useResource";
 import { usePollInterval } from "@/lib/hooks/usePollingInterval";
 import { formatDuration, formatWhen } from "@/lib/format";
+import { useNodeApi } from "@/lib/hooks/useNode";
 
 interface RestoreDetail {
   id: string;
@@ -36,10 +37,11 @@ type OpsEvent =
 
 export default function RestorePage({ params }: { params: Promise<{ restoreId: string }> }) {
   const poll3000 = usePollInterval(3000);
+  const api = useNodeApi();
   const { restoreId } = use(params);
 
   const { data, loading, error, refresh } = useResource<RestoreDetail>(
-    `/api/backups/restore/${restoreId}`,
+    api(`/api/backups/restore/${restoreId}`),
     { intervalMs: poll3000 }
   );
 
@@ -58,7 +60,7 @@ export default function RestorePage({ params }: { params: Promise<{ restoreId: s
     [refresh]
   );
 
-  useEventStream<OpsEvent>(running ? `/api/backups/restore/${restoreId}/stream` : null, onEvent);
+  useEventStream<OpsEvent>(running ? api(`/api/backups/restore/${restoreId}/stream`) : null, onEvent);
 
   const lines = useMemo<LogLine[]>(() => {
     if (running) return streamed;

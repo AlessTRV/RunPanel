@@ -11,6 +11,7 @@ import { SkeletonBlock } from "./Skeletons";
 import { useResource } from "@/lib/hooks/useResource";
 import { MSG } from "@/lib/copy";
 import { NOTIFY_GROUPS, type NotifyEventKey } from "@/lib/notify-events";
+import { useNodeApi } from "@/lib/hooks/useNode";
 
 interface Config {
   tokenSet: boolean;
@@ -39,7 +40,8 @@ interface Chat {
  * draw the difference between "connect" and "replace".
  */
 export function NotificationSettings() {
-  const { data, loading, error: loadError, refresh } = useResource<Config>("/api/notifications");
+  const api = useNodeApi();
+  const { data, loading, error: loadError, refresh } = useResource<Config>(api("/api/notifications"));
 
   const [token, setToken] = useState("");
   const [chatId, setChatId] = useState<string | null>(null);
@@ -58,7 +60,7 @@ export function NotificationSettings() {
   async function save(patch: Record<string, unknown>, message: string) {
     setSaving(true);
     try {
-      const res = await fetch("/api/notifications", {
+      const res = await fetch(api("/api/notifications"), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(patch),
@@ -82,7 +84,7 @@ export function NotificationSettings() {
   async function act(action: "test" | "chats") {
     setBusy(action);
     try {
-      const res = await fetch("/api/notifications", {
+      const res = await fetch(api("/api/notifications"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action }),

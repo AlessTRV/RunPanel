@@ -10,6 +10,7 @@ import { DatabasesPanel } from "./DatabasesPanel";
 import { MountsPanel } from "./MountsPanel";
 import type { Credentials, From, Service } from "./types";
 import { serviceDisplayName } from "@/lib/service-name";
+import { useNodeApi } from "@/lib/hooks/useNode";
 
 /**
  * Everything about the data this service holds: the databases inside it, and
@@ -39,6 +40,7 @@ export function DataSection({
   onDeleted: () => void;
   onChanged: () => void;
 }) {
+  const api = useNodeApi();
   const [deleteData, setDeleteData] = useState(false);
 
   return (
@@ -92,7 +94,7 @@ export function DataSection({
         }}
         onConfirm={async () => {
           const res = await fetch(
-            `/api/services/${service.id}${deleteData ? "?deleteData=true" : ""}`,
+            api(`/api/services/${service.id}${deleteData ? "?deleteData=true" : ""}`),
             { method: "DELETE" }
           );
           if (res.ok) {

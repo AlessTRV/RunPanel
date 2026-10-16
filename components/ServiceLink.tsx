@@ -12,6 +12,7 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { serviceEnvKey, serviceLabel } from "@/lib/service-env";
 import { serviceDisplayName } from "@/lib/service-name";
+import { useNodeApi } from "@/lib/hooks/useNode";
 
 /**
  * A database attached to a project, and what that attachment does.
@@ -55,6 +56,7 @@ export function ServiceLink({
   projectKeys: readonly string[];
   onChanged: () => void;
 }) {
+  const api = useNodeApi();
   const [injecting, setInjecting] = useState(service.inject_env === 1);
   const [pending, setPending] = useState(false);
   const [unlinking, setUnlinking] = useState(false);
@@ -63,7 +65,7 @@ export function ServiceLink({
   const alsoDefined = projectKeys.some((key) => key.trim() === envKey);
 
   async function patch(body: Record<string, unknown>, failure: string) {
-    const res = await fetch(`/api/services/${service.id}`, {
+    const res = await fetch(api(`/api/services/${service.id}`), {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),

@@ -18,6 +18,7 @@ import { Field } from "@/components/ui/Field";
 import { ChoiceCard, ChoiceGroup } from "@/components/ui/ChoiceCard";
 import { CommandField } from "@/components/ui/CommandField";
 import { PortHint, ServiceLinkHint } from "@/components/DeployHints";
+import { useNodeApi } from "@/lib/hooks/useNode";
 
 type SourceType = "github" | "upload";
 type RuntimeType = "node" | "docker" | "compose" | "custom";
@@ -86,6 +87,7 @@ export function AppForm({
   /** Rendered beside the submit button — e.g. "configure later" during creation. */
   secondaryAction?: ReactNode;
 }) {
+  const api = useNodeApi();
   const router = useRouter();
   const [saving, setSaving] = useState(false);
 
@@ -114,14 +116,14 @@ export function AppForm({
       runtime: RuntimeType;
       commands: { install?: string; build?: string; start?: string };
     }[];
-  }>("/api/presets");
+  }>(api("/api/presets"));
   const presets = presetData?.presets ?? [];
   const selectedPreset = presets.find((preset) => preset.id === presetId) ?? null;
 
   const { data: repoData, loading: reposLoading, error: reposError, refresh: refreshRepos } = useResource<{
     connected?: boolean;
     repos?: GhRepo[];
-  }>("/api/github/repos");
+  }>(api("/api/github/repos"));
 
   const connected = repoData?.connected ?? false;
   const repos = repoData?.repos ?? [];
@@ -134,7 +136,7 @@ export function AppForm({
   // Branches are fetched only once a repository is picked; a null url keeps the
   // hook idle until then.
   const { data: branchData, loading: branchesLoading } = useResource<{ branches?: { name: string }[] }>(
-    selectedRepo ? `/api/github/branches?repo=${encodeURIComponent(selectedRepo.full_name)}` : null
+    selectedRepo ? api(`/api/github/branches?repo=${encodeURIComponent(selectedRepo.full_name)}`) : null
   );
   const branches = branchData?.branches ?? [];
 
@@ -161,7 +163,7 @@ export function AppForm({
 
     setSaving(true);
     try {
-      const res = await fetch(`/api/projects/${projectId}`, {
+      const res = await fetch(api(`/api/projects/${projectId}`), {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -195,7 +197,7 @@ export function AppForm({
         const form = new FormData();
         form.append("file", zipFile);
         form.append("projectSlug", project.slug);
-        const upload = await fetch("/api/upload", { method: "POST", body: form });
+        const upload = await fetch(api("/api/upload"), { method: "POST", body: form });
         if (!upload.ok) {
           const data = await upload.json();
           toast.error(data.error ?? "Upload fallito");

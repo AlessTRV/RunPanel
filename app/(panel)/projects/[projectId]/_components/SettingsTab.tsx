@@ -31,6 +31,7 @@ import { WebhookSection } from "./WebhookSection";
 import { parseContractJson, type DeployContract } from "@/lib/deploy-contract";
 import type { RuntimeType } from "@/lib/validation";
 import type { Project } from "./types";
+import { useNodeApi } from "@/lib/hooks/useNode";
 
 type RawContract = Record<string, unknown>;
 
@@ -119,6 +120,7 @@ export function SettingsTab({
   /** Re-read the project from the server, after an action that changed it there. */
   onRefresh: () => void;
 }) {
+  const api = useNodeApi();
   const router = useRouter();
   const [contract, setContract] = useState<DeployContract>(() =>
     parseContractJson(project.builder_config)
@@ -156,14 +158,14 @@ export function SettingsTab({
     edited by hand.
   */
   const [presetId, setPresetId] = useState<string | null>(null);
-  const { data: presetData } = useResource<{ presets: Preset[] }>("/api/presets");
+  const { data: presetData } = useResource<{ presets: Preset[] }>(api("/api/presets"));
   const presets = presetData?.presets ?? [];
   const preset = presets.find((entry) => entry.id === presetId) ?? null;
 
   // The services that would be affected by deleting the project, listed where
   // that decision is made. Their fate is opt-in: kept by default, taken down
   // with the project only when the box below is ticked.
-  const { data: servicesData, refresh: refreshServices } = useResource<LinkedServiceRow[]>("/api/services");
+  const { data: servicesData, refresh: refreshServices } = useResource<LinkedServiceRow[]>(api("/api/services"));
   const linkedServices = useMemo(
     () => (Array.isArray(servicesData) ? servicesData : []).filter((s) => s.project_id === project.id),
     [servicesData, project.id]
@@ -330,7 +332,7 @@ export function SettingsTab({
   /** The deploy fields. Resolves false when they were not saved. */
   async function save(): Promise<boolean> {
     try {
-      const res = await fetch(`/api/projects/${project.id}`, {
+      const res = await fetch(api(`/api/projects/${project.id}`), {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -848,7 +850,7 @@ export function SettingsTab({
             "Processo, file, immagini Docker e cronologia dei deploy verranno eliminati. Il progetto e i suoi servizi restano.",
         }}
         onConfirm={async () => {
-          const res = await fetch(`/api/projects/${project.id}/app`, { method: "DELETE" });
+          const res = await fetch(api(`/api/projects/${project.id}/app`), { method: "DELETE" });
           if (res.ok) {
             toast.success("App rimossa");
             router.push("/home");
@@ -884,7 +886,7 @@ export function SettingsTab({
         }}
         onConfirm={async () => {
           const res = await fetch(
-            `/api/projects/${project.id}${deleteServices ? "?services=delete" : ""}`,
+            api(`/api/projects/${project.id}${deleteServices ? "?services=delete" : ""}`),
             { method: "DELETE" }
           );
           if (res.ok) {

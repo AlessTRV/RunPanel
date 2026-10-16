@@ -19,6 +19,7 @@ import {
   POLL_INTERVALS,
   type PollInterval,
 } from "@/lib/polling";
+import { useNode, useNodeApi } from "@/lib/hooks/useNode";
 
 /**
  * What the panel does for everyone, as opposed to Account, which is yours.
@@ -52,6 +53,8 @@ const POLL_INTERVAL_OPTIONS = POLL_INTERVALS.map((value) => ({
 }));
 
 export default function PanelSettingsPage() {
+  const api = useNodeApi();
+  const { isRemote } = useNode();
   const me = useMe();
   const canNotify = useCan("notifications");
   const canRegistries = useCan("registries");
@@ -82,7 +85,7 @@ export default function PanelSettingsPage() {
     // Panel-wide preferences are the owner's; nobody else is shown the form.
     if (!me.isOwner) return;
     const controller = new AbortController();
-    fetch("/api/settings", { signal: controller.signal })
+    fetch(api("/api/settings"), { signal: controller.signal })
       .then(async (r) => {
         if (!r.ok) throw new Error(`Il server ha risposto ${r.status}`);
         return r.json();
@@ -106,12 +109,12 @@ export default function PanelSettingsPage() {
         setPrefsLoad(err instanceof Error ? err.message : "Errore di rete");
       });
     return () => controller.abort();
-  }, [prefsAttempt, me.isOwner]);
+  }, [prefsAttempt, me.isOwner, api]);
 
   async function savePrefs() {
     setPrefsSaving(true);
     try {
-      const res = await fetch("/api/settings", {
+      const res = await fetch(api("/api/settings"), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -146,6 +149,9 @@ export default function PanelSettingsPage() {
       <PageHeader title="Pannello" description="Preferenze e integrazioni, per tutti gli account" />
 
       <div className="max-w-3xl space-y-4">
+        {isRemote && (
+          <p className="text-muted text-sm">Colore e intervallo di aggiornamento valgono solo per questo pannello.</p>
+        )}
         {me.isOwner && (
           <Panel className="space-y-4">
             <PanelHeader title="Preferenze" description="Come si comporta il pannello, per tutti gli account" />

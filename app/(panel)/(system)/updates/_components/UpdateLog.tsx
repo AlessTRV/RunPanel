@@ -5,6 +5,7 @@ import { LogViewer, type LogLine } from "@/components/ui/LogViewer";
 import { useEventStream } from "@/lib/hooks/useEventStream";
 import { useLineBuffer } from "@/lib/hooks/useLineBuffer";
 import type { UpdateRun } from "@/lib/panel-update";
+import { useNodeApi } from "@/lib/hooks/useNode";
 
 /**
  * The output of the update, live while it runs and as a document once it is
@@ -22,6 +23,7 @@ type StreamEvent =
   | { type: "panel-update:status"; phase: string; step?: string; error?: string };
 
 export function UpdateLog({ run, live }: { run: UpdateRun | null; live: boolean }) {
+  const api = useNodeApi();
   const buffer = useLineBuffer<LogLine>(4000);
   const nextId = useRef(0);
   const { reset, push } = buffer;
@@ -33,7 +35,7 @@ export function UpdateLog({ run, live }: { run: UpdateRun | null; live: boolean 
     nextId.current = 0;
   }, [run?.runId, reset]);
 
-  useEventStream<StreamEvent>(live ? "/api/updates/stream" : null, (event) => {
+  useEventStream<StreamEvent>(live ? api("/api/updates/stream") : null, (event) => {
     if (event.type === "panel-update:log") {
       push({ id: nextId.current++, text: event.line });
     }
@@ -44,7 +46,7 @@ export function UpdateLog({ run, live }: { run: UpdateRun | null; live: boolean 
     if (live || !run) return;
 
     const controller = new AbortController();
-    fetch("/api/updates/log", { signal: controller.signal })
+    fetch(api("/api/updates/log"), { signal: controller.signal })
       .then((res) => res.json())
       .then((body: { runId: string | null; lines: string[] }) => {
         if (body.runId !== run.runId) return;
@@ -56,7 +58,7 @@ export function UpdateLog({ run, live }: { run: UpdateRun | null; live: boolean 
       });
 
     return () => controller.abort();
-  }, [live, run, reset]);
+  }, [live, run, reset, api]);
 
   if (!run) return null;
 

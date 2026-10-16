@@ -13,6 +13,7 @@ import {
   PANEL_UPDATE_ALLOWED_SIGNERS_SETTING,
   PANEL_UPDATE_REQUIRE_SIGNATURE_SETTING,
 } from "@/lib/panel-update";
+import { useNodeApi } from "@/lib/hooks/useNode";
 
 /**
  * Whether an update has to be signed before it is installed.
@@ -24,6 +25,7 @@ import {
  * time says exactly what to configure.
  */
 export function SignatureSettings() {
+  const api = useNodeApi();
   const [required, setRequired] = useState(false);
   const [signers, setSigners] = useState("");
   const [savedSigners, setSavedSigners] = useState("");
@@ -38,7 +40,7 @@ export function SignatureSettings() {
     let alive = true;
     void (async () => {
       try {
-        const res = await fetch("/api/settings");
+        const res = await fetch(api("/api/settings"));
         if (!res.ok) {
           if (alive) setLoadError(`Il server ha risposto ${res.status}`);
           return;
@@ -61,12 +63,12 @@ export function SignatureSettings() {
     return () => {
       alive = false;
     };
-  }, [attempt]);
+  }, [attempt, api]);
 
   async function saveRequired(next: boolean) {
     setRequired(next);
     try {
-      const res = await fetch("/api/settings", {
+      const res = await fetch(api("/api/settings"), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -87,7 +89,7 @@ export function SignatureSettings() {
   async function saveSigners() {
     setSaving(true);
     try {
-      const res = await fetch("/api/settings", {
+      const res = await fetch(api("/api/settings"), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ [PANEL_UPDATE_ALLOWED_SIGNERS_SETTING]: signers }),

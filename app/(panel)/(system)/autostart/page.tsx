@@ -20,6 +20,7 @@ import { cn } from "@/lib/utils";
 import { formatWhen } from "@/lib/format";
 import { CommandBlock } from "@/components/ui/CommandBlock";
 import type { AutostartData, AutostartEntry } from "./_components/types";
+import { useNodeApi } from "@/lib/hooks/useNode";
 
 const METHOD_LABELS: Record<string, string> = {
   systemd: "systemd",
@@ -29,8 +30,9 @@ const METHOD_LABELS: Record<string, string> = {
 };
 
 export default function AutostartPage() {
+  const api = useNodeApi();
   const poll15000 = usePollInterval(15000);
-  const { data, loading, error: loadError, refresh } = useResource<AutostartData>("/api/autostart", {
+  const { data, loading, error: loadError, refresh } = useResource<AutostartData>(api("/api/autostart"), {
     intervalMs: poll15000,
   });
 
@@ -54,7 +56,7 @@ export default function AutostartPage() {
   async function save() {
     setBusy("save");
     try {
-      const res = await fetch("/api/autostart", {
+      const res = await fetch(api("/api/autostart"), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -86,7 +88,7 @@ export default function AutostartPage() {
   async function host(action: "install" | "uninstall" | "preview", method?: "systemd" | "cron") {
     setBusy(action);
     try {
-      const res = await fetch("/api/autostart/host", {
+      const res = await fetch(api("/api/autostart/host"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action, ...(method ? { method } : {}) }),
@@ -118,7 +120,7 @@ export default function AutostartPage() {
   async function reconcile(dryRun: boolean) {
     setBusy(dryRun ? "dry" : "run");
     try {
-      const res = await fetch("/api/autostart/reconcile", {
+      const res = await fetch(api("/api/autostart/reconcile"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ dryRun }),
@@ -142,7 +144,7 @@ export default function AutostartPage() {
   async function fix(body: Record<string, unknown>, label: string) {
     setBusy(label);
     try {
-      const res = await fetch("/api/autostart/fix", {
+      const res = await fetch(api("/api/autostart/fix"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),

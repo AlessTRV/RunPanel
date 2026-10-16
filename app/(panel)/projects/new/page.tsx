@@ -9,6 +9,7 @@ import { AppForm } from "@/components/AppForm";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { cn } from "@/lib/utils";
+import { useNodeApi } from "@/lib/hooks/useNode";
 
 /**
  * Creating a project used to ask for a name and nothing else, dropping you on
@@ -18,6 +19,7 @@ import { cn } from "@/lib/utils";
  * part of creating one.
  */
 export default function NewProjectPage() {
+  const api = useNodeApi();
   const router = useRouter();
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
@@ -31,7 +33,7 @@ export default function NewProjectPage() {
 
     setCreating(true);
     try {
-      const res = await fetch("/api/projects", {
+      const res = await fetch(api("/api/projects"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: name.trim() }),

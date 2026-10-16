@@ -9,14 +9,16 @@ import { SkeletonBlock } from "@/components/ui/Skeletons";
 import { useResource } from "@/lib/hooks/useResource";
 import { PolicyForm } from "../../_components/PolicyForm";
 import type { PolicyView } from "../../_components/types";
+import { useNodeApi } from "@/lib/hooks/useNode";
 
 export default function EditBackupPolicyPage({
   params,
 }: {
   params: Promise<{ policyId: string }>;
 }) {
+  const api = useNodeApi();
   const { policyId } = use(params);
-  const { data, loading, error, refresh } = useResource<PolicyView>(`/api/backups/policies/${policyId}`);
+  const { data, loading, error, refresh } = useResource<PolicyView>(api(`/api/backups/policies/${policyId}`));
 
   if (loading && !data) {
     return (

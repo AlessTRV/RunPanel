@@ -9,6 +9,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { SkeletonBlock } from "@/components/ui/Skeletons";
 import { formatDurationBetween, formatRelative } from "@/lib/format";
 import { type Deployment, type Project } from "./types";
+import { useNodeApi } from "@/lib/hooks/useNode";
 
 /**
  * What started this deploy, when the commit message cannot say.
@@ -24,6 +25,7 @@ const TRIGGER_LABEL: Record<string, string> = {
 };
 
 const DeploymentCard = memo(function DeploymentCard({ deployment }: { deployment: Deployment }) {
+  const api = useNodeApi();
   const [buildLog, setBuildLog] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -37,7 +39,7 @@ const DeploymentCard = memo(function DeploymentCard({ deployment }: { deployment
     try {
       // Only the tail: a Docker build can produce thousands of lines and
       // nobody reads the middle of one in a panel.
-      const res = await fetch(`/api/deployments/${deployment.id}?tail=500`);
+      const res = await fetch(api(`/api/deployments/${deployment.id}?tail=500`));
       if (res.ok) {
         const data = await res.json();
         setBuildLog(data.build_log?.trim() || "(nessun log)");

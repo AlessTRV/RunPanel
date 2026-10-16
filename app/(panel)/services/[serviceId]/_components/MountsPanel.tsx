@@ -18,6 +18,7 @@ import {
 import type { ServiceMount } from "@/lib/mount";
 import type { MountApply, MountPhase } from "@/lib/hooks/useServiceStream";
 import type { Service } from "./types";
+import { useNodeApi } from "@/lib/hooks/useNode";
 
 /**
  * The folders of this service, published where the operator wants them.
@@ -73,6 +74,7 @@ export function MountsPanel({
   progress: { copiedKb: number; totalKb: number | null } | null;
   onApplied: () => void;
 }) {
+  const api = useNodeApi();
   const [rows, setRows] = useState<ServiceMount[]>(service.mounts ?? []);
   const [error, setError] = useState<string | null>(null);
   const [notEmpty, setNotEmpty] = useState<{ id: string; entries: string[] } | null>(null);
@@ -127,7 +129,7 @@ export function MountsPanel({
 
     setBusy(true);
     try {
-      const res = await fetch(`/api/services/${service.id}/mounts`, {
+      const res = await fetch(api(`/api/services/${service.id}/mounts`), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ mounts: filled, adopt, releaseData: release }),

@@ -13,11 +13,13 @@ import { ChoiceCard, ChoiceGroup } from "@/components/ui/ChoiceCard";
 import { Field } from "@/components/ui/Field";
 import { connectionEnvKey } from "@/lib/service-env";
 import { DATABASE_OPTIONS, databaseOption, type ServiceType } from "../_data/catalog";
+import { useNodeApi } from "@/lib/hooks/useNode";
 
 /** Mirrors `serviceNameSchema`: a bad name should not need a round trip. */
 const NAME_PATTERN = /^[a-z0-9][a-z0-9_-]*$/;
 
 export function DatabaseForm({ projectId }: { projectId?: string }) {
+  const api = useNodeApi();
   const router = useRouter();
   const [saving, setSaving] = useState(false);
 
@@ -41,14 +43,14 @@ export function DatabaseForm({ projectId }: { projectId?: string }) {
   const [project, setProject] = useState(projectId ?? "");
 
   const { data: networkData } = useResource<{ networks: { cidr: string; kind: string }[] }>(
-    "/api/network/suggestions"
+    api("/api/network/suggestions")
   );
   const lanNetworks = (networkData?.networks ?? [])
     .filter((network) => network.kind === "lan")
     .map((network) => network.cidr);
 
   const { data: projectsData } = useResource<{ id: string; name: string; slug: string }[]>(
-    "/api/projects"
+    api("/api/projects")
   );
   const projects = Array.isArray(projectsData) ? projectsData : [];
   const projectSlug = projects.find((p) => p.id === project)?.slug;
@@ -78,7 +80,7 @@ export function DatabaseForm({ projectId }: { projectId?: string }) {
 
     setSaving(true);
     try {
-      const res = await fetch("/api/services", {
+      const res = await fetch(api("/api/services"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

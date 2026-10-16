@@ -7,6 +7,7 @@ import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { CheckList, type Check } from "@/components/ui/CheckList";
 import { useResource } from "@/lib/hooks/useResource";
 import { useCan } from "@/lib/hooks/useMe";
+import { useNodeApi } from "@/lib/hooks/useNode";
 import { cn } from "@/lib/utils";
 
 /**
@@ -22,10 +23,11 @@ import { cn } from "@/lib/utils";
  * look at it.
  */
 export function HealthBanner() {
+  const api = useNodeApi();
   // Diagnostics are for accounts holding that permission; nobody else polls.
   const canDiagnose = useCan("diagnostics");
   const { data, error, refresh } = useResource<{ checks: Check[]; tone: string; problems: number }>(
-    canDiagnose ? "/api/diagnostics" : null,
+    canDiagnose ? api("/api/diagnostics") : null,
     { intervalMs: 60_000 }
   );
   const [expanded, setExpanded] = useState(false);

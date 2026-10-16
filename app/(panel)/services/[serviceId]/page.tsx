@@ -30,6 +30,7 @@ import { ConsolePanel } from "./_components/ConsolePanel";
 import { DataSection } from "./_components/DataSection";
 import { AccessPanel } from "@/components/users/AccessPanel";
 import type { Credentials, From, Service, ServiceTabId } from "./_components/types";
+import { useNodeApi } from "@/lib/hooks/useNode";
 
 /**
  * A provisioned service.
@@ -59,6 +60,7 @@ let lineId = 0;
 const toLine = (text: string): LogLine => ({ id: lineId++, text });
 
 export default function ServiceDetailPage() {
+  const api = useNodeApi();
   const poll5000 = usePollInterval(5000);
   const params = useParams();
   const router = useRouter();
@@ -66,7 +68,7 @@ export default function ServiceDetailPage() {
   const serviceId = params.serviceId as string;
 
   const { data: service, loading, error: loadError, refresh } = useResource<Service>(
-    `/api/services/${serviceId}`,
+    api(`/api/services/${serviceId}`),
     { intervalMs: poll5000 }
   );
   useCrumbLabel(serviceId, service?.display_name || service?.name);
@@ -87,7 +89,7 @@ export default function ServiceDetailPage() {
   // anywhere, and that is worth saying out loud rather than leaving to be
   // discovered after a deploy.
   const { data: project } = useResource<{ id: string; name: string }>(
-    service?.project_id ? `/api/projects/${service.project_id}` : null
+    service?.project_id ? api(`/api/projects/${service.project_id}`) : null
   );
 
   const [consoleMode, setConsoleMode] = useState<ConsoleMode>("engine");
@@ -166,7 +168,7 @@ export default function ServiceDetailPage() {
       // produced it: leaving `psql` output above a shell would read as one
       // conversation.
       if (consoleActive) {
-        void fetch(`/api/services/${serviceId}/console`, {
+        void fetch(api(`/api/services/${serviceId}/console`), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ action: "stop" }),
@@ -177,13 +179,13 @@ export default function ServiceDetailPage() {
       consoleLines.reset();
       setConsoleMode(next);
     },
-    [consoleActive, consoleLines, serviceId]
+    [api, consoleActive, consoleLines, serviceId]
   );
 
   const echo = useCallback((text: string) => consoleLines.push(toLine(text.trimEnd())), [consoleLines]);
 
   async function revealCredentials() {
-    const res = await fetch(`/api/services/${serviceId}?reveal=true`);
+    const res = await fetch(api(`/api/services/${serviceId}?reveal=true`));
     if (!res.ok) {
       toast.error("Impossibile leggere le credenziali");
       return;
@@ -198,7 +200,7 @@ export default function ServiceDetailPage() {
 
   async function handleControl(action: "start" | "stop" | "restart") {
     try {
-      const res = await fetch(`/api/services/${serviceId}/control`, {
+      const res = await fetch(api(`/api/services/${serviceId}/control`), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action }),
@@ -422,7 +424,7 @@ export default function ServiceDetailPage() {
         submitLabel="Salva"
         isSubmitDisabled={!renameValue.trim() || renameValue.trim() === service.displayName}
         onSubmit={async () => {
-          const res = await fetch(`/api/services/${serviceId}`, {
+          const res = await fetch(api(`/api/services/${serviceId}`), {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ displayName: renameValue.trim() }),
