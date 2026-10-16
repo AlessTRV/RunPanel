@@ -16,7 +16,8 @@ import { databaseAdmin, execArgs, serviceTarget } from "../service-databases";
 import { containerMounts } from "../docker/volumes";
 import { extractArchiveEntry, isSafeEntryPath, listArchiveEntries } from "./archive-read";
 import { buildDestination } from "./destinations";
-import { assertBackupId, restoreLog } from "./paths";
+import { archiveForRestore } from "./archive-source";
+import { FREE_SPACE_RESERVE, assertBackupId, freeBytes, resolveArchivePath, restoreLog } from "./paths";
 import { backupDocker, projectOwner, projectVolumes } from "./project-export";
 import { startBackup } from "./runner";
 import type { BackupTarget } from "./types";
@@ -144,7 +145,7 @@ async function execute(restoreId: string, request: RestoreRequest): Promise<void
   let failure: string | null = null;
 
   try {
-    const archive = await resolveArchive(request, emit);
+    const archive = await resolveArchive(request, staging, emit);
     emit(`Archivio: ${path.basename(archive)} (${formatBytes(fs.statSync(archive).size)})`);
 
     const artifacts = await loadArtifacts(request);
@@ -224,6 +225,7 @@ async function execute(restoreId: string, request: RestoreRequest): Promise<void
 
 async function resolveArchive(
   request: RestoreRequest,
+  staging: string,
   emit: (line: string) => void
 ): Promise<string> {
   if (request.uploadId) {
@@ -259,9 +261,14 @@ async function resolveArchive(
   if (!stat.exists) throw new Error("L'archivio non è più su disco");
 
   emit(`Sorgente: backup del ${new Date(run.started_at).toLocaleString()}`);
-  // The local destination hands back a path-backed stream; for anything else we
-  // would have to spool it first. Only local exists today, so this stays simple.
-  return (await import("./paths")).resolveArchivePath(run.archive_path);
+  if (destination.type !== "local") emit(`Scarico l'archivio da ${destination.name} (${formatBytes(stat.bytes)})…`);
+  const { file } = await archiveForRestore(destination, run.archive_path, staging, {
+    bytes: stat.bytes,
+    freeBytes: freeBytes(),
+    reserveBytes: FREE_SPACE_RESERVE,
+    localPath: resolveArchivePath,
+  });
+  return file;
 }
 
 export interface RestorableArtifact {
