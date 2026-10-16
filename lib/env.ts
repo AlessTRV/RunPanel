@@ -227,11 +227,22 @@ export const PRIVATE_ENV_KEYS: readonly string[] = [
 
 const PRIVATE_ENV_SET = new Set(PRIVATE_ENV_KEYS.map((k) => k.toLowerCase()));
 
-/** A copy of `process.env` with RunPanel's own configuration removed. */
-export function sanitizedProcessEnv(): NodeJS.ProcessEnv {
-  const out: NodeJS.ProcessEnv = { ...process.env };
+/**
+ * Whether a variable is RunPanel's own. Every `RUNPANEL_*` name is, whether or
+ * not it is listed above: a list of names let `RUNPANEL_SETUP_TOKEN` through
+ * to every build script, and the next variable added would have leaked the
+ * same way. The list stays for the names without the prefix.
+ */
+export function isPrivateEnvKey(key: string): boolean {
+  const lower = key.toLowerCase();
+  return lower.startsWith("runpanel_") || PRIVATE_ENV_SET.has(lower);
+}
+
+/** A copy of `process.env` (or of `source`) with RunPanel's own configuration removed. */
+export function sanitizedProcessEnv(source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const out: NodeJS.ProcessEnv = { ...source };
   for (const key of Object.keys(out)) {
-    if (PRIVATE_ENV_SET.has(key.toLowerCase())) delete out[key];
+    if (isPrivateEnvKey(key)) delete out[key];
   }
   return out;
 }

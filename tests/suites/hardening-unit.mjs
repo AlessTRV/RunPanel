@@ -145,5 +145,24 @@ export async function run({ repoRoot }) {
     JSON.stringify(issues)
   );
 
+  // --- RunPanel's own variables never reach a project's processes -----------
+  {
+    const { sanitizedProcessEnv } = await import(pathToFileURL(join(repoRoot, "lib", "env.ts")).href);
+    const env = sanitizedProcessEnv({
+      PATH: "/usr/bin",
+      HOME: "/home/op",
+      RUNPANEL_SECRET: "a".repeat(64),
+      RUNPANEL_SETUP_TOKEN: "setup",
+      RUNPANEL_TRUSTED_PROXY_HOPS: "1",
+      RUNPANEL_DEV_ORIGINS: "panel.example.com",
+      runpanel_something_new: "x",
+      DATABASE_URL: "postgresql://panel",
+      RUNPANELISH: "not ours",
+    });
+    const leaked = Object.keys(env).filter((k) => /^runpanel_/i.test(k) || k === "DATABASE_URL");
+    r.check("no RUNPANEL_* variable reaches a child process", leaked.length === 0, leaked.join(", "));
+    r.check("the rest of the environment is kept", env.PATH === "/usr/bin" && env.HOME === "/home/op" && env.RUNPANELISH === "not ours", JSON.stringify(env));
+  }
+
   return r.result();
 }
