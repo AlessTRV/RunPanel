@@ -165,13 +165,13 @@ export async function run({ repoRoot }) {
       postgresql: "postgresql://app:s3cret@runpanel-svc-tgshop-shop:5432/shop",
       mysql: "mysql://app:s3cret@runpanel-svc-tgshop-shop:3306/shop",
       redis: "redis://:s3cret@runpanel-svc-tgshop-shop:6379/0",
-      mongodb: "mongodb://app:s3cret@runpanel-svc-tgshop-shop:27017/shop",
+      mongodb: "mongodb://app:s3cret@runpanel-svc-tgshop-shop:27017/shop?authSource=admin",
     };
     const outside = {
       postgresql: "postgresql://app:s3cret@localhost:5433/shop",
       mysql: "mysql://app:s3cret@localhost:5433/shop",
       redis: "redis://:s3cret@localhost:5433/0",
-      mongodb: "mongodb://app:s3cret@localhost:5433/shop",
+      mongodb: "mongodb://app:s3cret@localhost:5433/shop?authSource=admin",
     };
 
     for (const type of Object.keys(inside)) {

@@ -252,7 +252,9 @@ export function buildConnectionString(
     case "redis":
       return `redis://${password ? `:${password}@` : ""}${host}:${port}/0`;
     case "mongodb":
-      return `mongodb://${user}:${password}@${host}:${port}/${database}`;
+      // The user is created as root in `admin` (MONGO_INITDB_ROOT_*), so a
+      // driver must authenticate there and not against the app's database.
+      return `mongodb://${user}:${password}@${host}:${port}/${database}?authSource=admin`;
     case "mysql":
       return `mysql://${user}:${password}@${host}:${port}/${database}`;
     default:

@@ -1,4 +1,5 @@
 import { IServiceTemplate, ServiceConfig, DockerRunConfig } from "./types";
+import { buildConnectionString } from "@/lib/service-env";
 import { defaultVersionFor } from "@/lib/service-versions";
 
 export const mongodbTemplate: IServiceTemplate = {
@@ -20,6 +21,6 @@ export const mongodbTemplate: IServiceTemplate = {
 
   getConnectionString(config: ServiceConfig): string {
     const { user, password, database } = config.credentials;
-    return `mongodb://${user}:${password}@localhost:${config.port}/${database}?authSource=admin`;
+    return buildConnectionString("mongodb", { host: "localhost", port: config.port, user, password, database });
   },
 };
