@@ -12,6 +12,10 @@ export interface ServerCard {
   role: "panel" | "node";
   url: string;
   reachable: boolean;
+  /** Answered, but predates /api/server-summary: an older panel version. */
+  outdated: boolean;
+  /** Version the member last reported to this panel, for when it cannot summarise itself. */
+  version: string | null;
   error: string | null;
   lastSeenAt: string | null;
   summary: ServerSummary | null;
@@ -29,9 +33,13 @@ export async function GET() {
     panelRelease(),
   ]);
 
+  const statusOf = new Map(results.map((r) => [r.member.id, r.status]));
   const servers: ServerCard[] = perServer(results).map((s) => {
     const row = members.find((m) => m.id === s.memberId);
-    const reachable = s.data !== null;
+    const reachable = s.reachable;
+    // A server on an older release has no /api/server-summary yet: it answers 404.
+    const outdated = reachable && s.data === null && statusOf.get(s.memberId) === 404;
+    const version = s.data?.version ?? row?.version ?? null;
     return {
       memberId: s.memberId,
       memberName: s.memberName,
@@ -39,10 +47,14 @@ export async function GET() {
       role: row?.role === "node" ? "node" : "panel",
       url: row?.url ?? "",
       reachable,
-      error: s.error,
+      outdated,
+      version,
+      error: outdated ? null : s.error,
       lastSeenAt: s.self ? new Date().toISOString() : (row?.last_seen_at ?? null),
       summary: s.data,
-      warnings: serverWarnings(s.data, { reachable, panelVersion: release.label }),
+      warnings: outdated
+        ? [{ kind: "version", tone: "warn", text: `Versione ${version ?? "precedente"}` }]
+        : serverWarnings(s.data, { reachable: reachable && s.data !== null, panelVersion: release.label }),
     };
   });
 

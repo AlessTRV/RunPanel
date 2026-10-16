@@ -39,7 +39,7 @@ export function ClusterOverview({ className, interactive = true }: { className?:
 export function ServerCardView({ server: s, active, onSelect }: { server: ServerCard; active?: boolean; onSelect?: () => void }) {
   const m = s.summary?.metrics;
   const worst = s.warnings[0]?.tone ?? null;
-  const dot = !s.reachable ? "bg-danger" : worst === "danger" ? "bg-danger" : worst === "warn" ? "bg-warning" : "bg-success";
+  const dot = !s.reachable || (!s.summary && !s.outdated) ? "bg-danger" : worst === "danger" ? "bg-danger" : worst === "warn" ? "bg-warning" : "bg-success";
 
   const body = (
     <>
@@ -74,6 +74,10 @@ export function ServerCardView({ server: s, active, onSelect }: { server: Server
             {s.summary.version && <span className="font-mono">{s.summary.version}</span>}
           </div>
         </>
+      ) : s.outdated ? (
+        <p className="text-muted mt-2 text-xs">
+          Ha una versione più vecchia di questo pannello: aggiornalo da Sistema › Aggiornamenti per vederne CPU, disco e progetti.
+        </p>
       ) : (
         <p className="text-danger mt-2 text-xs">{s.error ?? "Non raggiungibile"}</p>
       )}
