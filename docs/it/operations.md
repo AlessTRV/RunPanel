@@ -15,7 +15,7 @@ Tutto quello che segue riguarda il server selezionato nella barra: con [più ser
 
 Il pannello non esegue mai `systemctl start`, che metterebbe un secondo pannello sulla stessa porta. La unit ha `KillMode=process`, così `systemctl stop runpanel` non ferma PM2 né le app native che supervisiona; i container Docker non sono coinvolti.
 
-La pagina controlla anche ciò che serve davvero al riavvio: Docker abilitato all'avvio (pulsante **Abilita**) e la lista di PM2 salvata (pulsante **pm2 save**). Senza, dopo un riavvio il pannello torna e le app no.
+La pagina controlla anche ciò che serve davvero al riavvio: Docker abilitato all'avvio (pulsante **Abilita**) e la lista di PM2 salvata (pulsante **pm2 save**), quando PM2 fa girare almeno un'app. Senza, dopo un riavvio il pannello torna e le app no.
 
 Ogni progetto e servizio ha un interruttore, un ordine, un ritardo e se aspettare che sia pronto prima di passare al successivo, al massimo un minuto: un servizio quando il motore risponde, un progetto quando passa l'health check del suo ultimo deploy (o, con l'health check spento, quando il processo è acceso). Di default i servizi ripartono e vengono attesi, i progetti no; i servizi partono sempre prima dei progetti. Al boot il pannello aspetta 20 secondi che Docker riavvii da sé quello che sa, poi avvia solo quello che è ancora giù, a 2 secondi di distanza, senza mai lanciare un build. **Simula** mostra cosa farebbe, **Esegui ora** lo fa subito.
 

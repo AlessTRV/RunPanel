@@ -10,6 +10,7 @@ import { staleWhileRevalidate } from "@/lib/stale-cache";
 import { docker, dockerTry, lines } from "../docker/cli";
 import { toolchainPath } from "../env-utils";
 import { ownedFilters } from "../docker/labels";
+import { countPm2Processes } from "./pm2-list";
 import { UNIT_NAME } from "./render";
 
 /**
@@ -105,7 +106,16 @@ export interface AutostartProbe {
   systemd: UnitState;
   cron: { available: boolean; installed: boolean; line: string | null };
   docker: { available: boolean; enabledAtBoot: boolean | null; detail: string | null };
-  pm2: { available: boolean; startupInstalled: boolean; dumpSaved: boolean; detail: string | null };
+  pm2: {
+    available: boolean;
+    startupInstalled: boolean;
+    dumpSaved: boolean;
+    /** Applications PM2 runs now, modules excluded: what a `pm2 save` would write down. */
+    processes: number;
+    /** Something runs under PM2 and nothing is saved: the one state worth a warning. */
+    needsSave: boolean;
+    detail: string | null;
+  };
   /** Panel's own container, when the panel is itself containerised. */
   selfContainer: { id: string | null; restartPolicy: string | null };
   port: { free: boolean; detail: string };
@@ -380,22 +390,26 @@ async function probeDocker(
 /**
  * PM2 matters on its own account: it runs the user's applications, so if
  * `pm2 save` was never run, none of them come back even when RunPanel does.
+ *
+ * With nothing under PM2 there is nothing to lose, and nothing to fix either:
+ * `pm2 save` refuses to write an empty list ("PM2 is not managing any process,
+ * skipping save") and exits 0, so a warning there could never go away. A
+ * server running only Docker projects is the common case on a cluster node.
  */
-async function probePm2(): Promise<{
-  available: boolean;
-  startupInstalled: boolean;
-  dumpSaved: boolean;
-  detail: string | null;
-}> {
+async function probePm2(): Promise<AutostartProbe["pm2"]> {
   const list = await run("pm2", ["jlist"]);
   if (!list.ok && !list.stdout) {
     return {
       available: false,
       startupInstalled: false,
       dumpSaved: false,
+      processes: 0,
+      needsSave: false,
       detail: "pm2 non è installato o non è nel PATH",
     };
   }
+
+  const processes = countPm2Processes(list.stdout);
 
   const dump = path.join(os.homedir(), ".pm2", "dump.pm2");
   let saved = false;
@@ -406,12 +420,15 @@ async function probePm2(): Promise<{
   }
 
   const unit = await run("systemctl", ["is-enabled", `pm2-${os.userInfo().username}`]);
+  const needsSave = processes > 0 && !saved;
 
   return {
     available: true,
     startupInstalled: unit.stdout === "enabled",
     dumpSaved: saved,
-    detail: saved ? null : "Nessuna lista salvata: pm2 resurrect non riporterebbe su nulla",
+    processes,
+    needsSave,
+    detail: needsSave ? "Nessuna lista salvata: pm2 resurrect non riporterebbe su nulla" : null,
   };
 }
 

@@ -15,7 +15,7 @@ Everything below concerns the server selected in the bar: with [several servers]
 
 The panel never runs `systemctl start`, which would put a second panel on the same port. The unit has `KillMode=process`, so `systemctl stop runpanel` does not stop PM2 or the native apps it supervises; Docker containers are not involved.
 
-The page also checks what a reboot really needs: Docker enabled at boot (**Abilita** button) and PM2's process list saved (**pm2 save** button). Without them, after a reboot the panel comes back and the apps do not.
+The page also checks what a reboot really needs: Docker enabled at boot (**Abilita** button) and PM2's process list saved (**pm2 save** button) when PM2 runs at least one app. Without them, after a reboot the panel comes back and the apps do not.
 
 Every project and service has a switch, an order, a delay and whether to wait for it to be ready before moving on, at most one minute: a service when its engine answers, a project when it passes the health check of its last deploy (or, with the health check off, when the process is up). By default services come back and are waited for, projects do not; services always start before projects. At boot the panel waits 20 seconds for Docker to restart what it knows about, then starts only what is still down, 2 seconds apart, never triggering a build. **Simula** (simulate) shows what it would do, **Esegui ora** (run now) does it.
 

@@ -171,5 +171,24 @@ export async function run({ repoRoot }) {
     r.check("a disabled health check waits for the process only", off.probePort === false && off.healthcheck.enabled === true);
   }
 
+  // --- PM2 resurrect: only applications count -------------------------------
+  // `pm2 save` skips an empty list and exits 0, so a server without PM2 apps
+  // (a Docker-only cluster node) must not be told to save one.
+  {
+    const { countPm2Processes } = await import(
+      pathToFileURL(join(repoRoot, "services", "autostart", "pm2-list.ts")).href
+    );
+    r.check("an empty list has nothing to save", countPm2Processes("[]") === 0);
+    const app = { name: "runpanel-web", pm2_env: { status: "online" } };
+    const mod = { name: "pm2-logrotate", pm2_env: { pmx_module: true } };
+    r.check("modules are not saved, so they do not count", countPm2Processes(JSON.stringify([mod])) === 0);
+    r.check("applications count", countPm2Processes(JSON.stringify([app, mod])) === 1);
+    r.check(
+      "daemon messages before the JSON are skipped",
+      countPm2Processes(`[PM2] Spawning PM2 daemon\n[PM2] PM2 Successfully daemonized\n[]`) === 0
+    );
+    r.check("unreadable output still warns", countPm2Processes("not json") === 1);
+  }
+
   return r.result();
 }

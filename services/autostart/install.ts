@@ -274,11 +274,30 @@ export async function applyFix(
 
     // Idempotent and safe: it writes down the process list PM2 already has, so
     // `pm2 resurrect` brings back what is running rather than what used to be.
-    await run("pm2", ["save"]);
-    return {
-      ok: true,
-      message: `Lista PM2 salvata in ${path.join(os.homedir(), ".pm2", "dump.pm2")}.`,
-    };
+    // The toolchain PATH, as the probe uses: under systemd's bare PATH a pm2
+    // installed in `~/.bun/bin` is not found at all.
+    const dump = path.join(os.homedir(), ".pm2", "dump.pm2");
+    await exec("pm2", ["save"], {
+      timeout: 30_000,
+      windowsHide: true,
+      env: { ...process.env, PATH: toolchainPath(), Path: toolchainPath() },
+    });
+    autostartProbeCache.invalidate();
+    // `pm2 save` exits 0 without writing anything when PM2 runs no application,
+    // so success is the file, not the exit code.
+    let written = false;
+    try {
+      written = fs.statSync(dump).size > 2;
+    } catch {
+      /* missing: not written */
+    }
+    if (!written) {
+      return {
+        ok: false,
+        message: "PM2 non gestisce nessuna app: non c'è niente da salvare.",
+      };
+    }
+    return { ok: true, message: `Lista PM2 salvata in ${dump}.` };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return { ok: false, message };

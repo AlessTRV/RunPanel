@@ -300,7 +300,7 @@ export async function runDiagnostics(): Promise<Check[]> {
     });
   }
 
-  if (probe.pm2.available && !probe.pm2.dumpSaved) {
+  if (probe.pm2.needsSave) {
     checks.push({
       id: "pm2-save",
       title: "PM2 resurrect",

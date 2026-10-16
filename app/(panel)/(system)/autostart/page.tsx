@@ -359,11 +359,13 @@ export default function AutostartPage() {
                   ? "pm2 non installato"
                   : probe.pm2.dumpSaved
                     ? "lista salvata"
-                    : "nessuna lista salvata"
+                    : probe.pm2.processes === 0
+                      ? "nessuna app PM2 da salvare"
+                      : "nessuna lista salvata"
               }
-              tone={probe?.pm2.available && !probe.pm2.dumpSaved ? "warn" : "neutral"}
+              tone={probe?.pm2.needsSave ? "warn" : "neutral"}
               action={
-                probe?.pm2.available && !probe.pm2.dumpSaved ? (
+                probe?.pm2.needsSave ? (
                   <Button
                     size="sm"
                     variant="secondary"
@@ -404,7 +406,7 @@ export default function AutostartPage() {
             </Hint>
           )}
 
-          {probe?.pm2.available && !probe.pm2.dumpSaved && (
+          {probe?.pm2.needsSave && (
             <Hint tone="warn" title="Le app PM2 non tornerebbero su">
               PM2 fa girare i progetti con runtime nativo, e riporta su solo quello che è stato
               salvato con <Code>pm2 save</Code>. Senza, dopo un riavvio il pannello torna e le app no.

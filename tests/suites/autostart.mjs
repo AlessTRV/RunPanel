@@ -53,6 +53,10 @@ export async function run({ base }) {
   r.check("it checks whether Docker itself starts at boot", "enabledAtBoot" in (probe?.docker ?? {}));
   r.check("it checks whether PM2 would resurrect anything", typeof probe?.pm2?.dumpSaved === "boolean");
   r.check(
+    "it warns only when PM2 runs something unsaved",
+    probe?.pm2?.needsSave === (probe?.pm2?.processes > 0 && !probe?.pm2?.dumpSaved)
+  );
+  r.check(
     "the port it listens on shows as occupied, because it is listening",
     probe?.port?.free === false,
     JSON.stringify(probe?.port)

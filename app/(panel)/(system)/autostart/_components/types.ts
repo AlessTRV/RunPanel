@@ -48,7 +48,13 @@ export interface AutostartData {
     };
     cron: { available: boolean; installed: boolean; line: string | null };
     docker: { available: boolean; enabledAtBoot: boolean | null };
-    pm2: { available: boolean; startupInstalled: boolean; dumpSaved: boolean };
+    pm2: {
+      available: boolean;
+      startupInstalled: boolean;
+      dumpSaved: boolean;
+      processes: number;
+      needsSave: boolean;
+    };
     selfContainer: { id: string | null; restartPolicy: string | null };
     port: { free: boolean; detail: string };
   };
