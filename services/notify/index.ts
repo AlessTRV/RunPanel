@@ -10,7 +10,8 @@ import {
   parseNotifyEvents,
   type NotifyEventKey,
 } from "@/lib/notify-events";
-import { describe, escapeHtml, link, render, type Html, type NotifyEvent } from "./messages";
+import { describe, escapeHtml, link, render, type Html, type NotifyEvent, type NotifyMessage } from "./messages";
+import { clusterState, getMember } from "@/services/cluster/state";
 import { sendMessage } from "./telegram";
 
 /**
@@ -165,6 +166,25 @@ async function footer(): Promise<Html | undefined> {
 }
 
 /**
+ * In a cluster every server notifies through the same bot, so each message
+ * starts with the name of the server that sent it. Null in solo mode.
+ */
+async function serverName(): Promise<string | null> {
+  try {
+    const state = await clusterState();
+    if (!state) return null;
+    return (await getMember(state.selfId))?.name ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function withServer(message: NotifyMessage): Promise<NotifyMessage> {
+  const name = await serverName();
+  return name ? { ...message, title: `${name} · ${message.title}` } : message;
+}
+
+/**
  * Announce an event, if the operator asked for this kind and a bot is
  * configured. Fire-and-forget: callers do not await it and nothing observes
  * the result but the log.
@@ -179,7 +199,7 @@ export async function notify(event: NotifyEvent): Promise<void> {
     const result = await sendMessage(
       config.token!,
       config.chatId!,
-      render(describe(event), await footer())
+      render(await withServer(describe(event)), await footer())
     );
 
     if (!result.ok) {
@@ -202,13 +222,13 @@ export async function sendTest(): Promise<{ ok: boolean; error?: string }> {
     config.token,
     config.chatId,
     render(
-      {
+      await withServer({
         level: "ok",
         title: "RunPanel è collegato",
         body: escapeHtml(
           "Questa è una prova. Da qui in poi ti arrivano crash, esiti dei deploy, backup e aggiornamenti del pannello."
         ),
-      },
+      }),
       await footer()
     )
   );
