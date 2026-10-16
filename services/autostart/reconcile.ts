@@ -1,4 +1,13 @@
-import { compareAutostart, resolveAutostart, type AutostartKind } from "@/lib/autostart";
+import {
+  AUTOSTART_READY_TIMEOUT_SEC,
+  compareAutostart,
+  readinessHealthcheck,
+  resolveAutostart,
+  type AutostartKind,
+} from "@/lib/autostart";
+import { listenPort, readAccess } from "@/lib/access-columns";
+import { parseContractJson } from "@/lib/deploy-contract";
+import { waitForHealthy } from "../deploy-steps";
 import { getDb } from "@/lib/db";
 import { getEnv } from "@/lib/env";
 import { setSetting, getSetting } from "@/lib/settings";
@@ -30,7 +39,7 @@ import { serviceDisplayName } from "@/lib/service-name";
 const SETTLE_MS = 20_000;
 /** Between items, so ten projects do not all hit the disk at once. */
 const GAP_MS = 2_000;
-const READY_TIMEOUT_MS = 60_000;
+const READY_TIMEOUT_MS = AUTOSTART_READY_TIMEOUT_SEC * 1000;
 
 export const REPORT_SETTING = "autostart_last_report";
 
@@ -230,7 +239,11 @@ async function handle(
     }
 
     if (dryRun) {
-      return { ...base, action: "would-start", detail: "È fermo: verrebbe avviato" };
+      return {
+        ...base,
+        action: "would-start",
+        detail: candidate.waitHealthy ? "È fermo: verrebbe avviato, aspettando che risponda" : "È fermo: verrebbe avviato",
+      };
     }
 
     emit(`→ avvio ${candidate.kind === "service" ? "servizio" : "progetto"} ${candidate.name}`);
@@ -254,6 +267,16 @@ async function handle(
     // already exists — recreating it is the deploy pipeline's job, and doing it
     // here would duplicate ports and rebuild images at boot.
     await processManager.restart(candidate.slug ?? "", candidate.runtime ?? "node");
+    if (candidate.waitHealthy) {
+      const ready = await waitProjectReady(candidate, emit);
+      if (!ready) {
+        return {
+          ...base,
+          action: "failed",
+          detail: `Avviato ma non ha passato l'health check entro ${AUTOSTART_READY_TIMEOUT_SEC} secondi`,
+        };
+      }
+    }
     return { ...base, action: "started", detail: "Avviato" };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -267,6 +290,41 @@ async function handle(
           : message,
     };
   }
+}
+
+/**
+ * A project is ready when the health check of its last successful deploy
+ * passes again, within the same budget a service gets. The port is the one the
+ * app really listens on: behind an access gate that is the loopback port.
+ */
+async function waitProjectReady(candidate: Candidate, emit: (line: string) => void): Promise<boolean> {
+  const db = await getDb();
+  const project = await db.selectFrom("projects").selectAll().where("id", "=", candidate.id).executeTakeFirst();
+  if (!project) return false;
+  const lastDeploy = await db
+    .selectFrom("deployments")
+    .select("resolved_contract")
+    .where("project_id", "=", project.id)
+    .where("status", "in", ["running", "superseded"])
+    .orderBy("started_at", "desc")
+    .limit(1)
+    .executeTakeFirst();
+  const contract = parseContractJson(lastDeploy?.resolved_contract ?? project.builder_config);
+  const { healthcheck, probePort } = readinessHealthcheck(contract.healthcheck);
+
+  const port = project.port ?? 0;
+  const access = readAccess(project);
+  const listenOn = access.mode === "restricted" && access.port !== null ? listenPort(project, port) : port;
+
+  const result = await waitForHealthy({
+    slug: project.slug,
+    runtimeType: project.runtime_type,
+    port: probePort ? listenOn : 0,
+    contract: { ...contract, healthcheck: probePort ? healthcheck : { ...healthcheck, port: undefined } },
+    onLog: () => undefined,
+  });
+  emit(result.healthy ? `  ${candidate.name} è pronto` : `  ${candidate.name} non ha passato l'health check: ${result.reason ?? "nessuna risposta"}`);
+  return result.healthy;
 }
 
 async function isRunning(candidate: Candidate): Promise<boolean> {

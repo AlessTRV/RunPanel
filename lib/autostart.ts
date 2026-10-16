@@ -87,3 +87,30 @@ export function compareAutostart(
   if (a.order !== b.order) return a.order - b.order;
   return a.createdAt.localeCompare(b.createdAt);
 }
+
+/** How long autostart waits for something to be ready before moving on. */
+export const AUTOSTART_READY_TIMEOUT_SEC = 60;
+
+export interface ReadinessHealthcheck {
+  enabled: boolean;
+  startPeriodSec: number;
+  timeoutSec: number;
+}
+
+/**
+ * The health check a project is held to at boot, when it is set to wait:
+ * the one its last deploy passed, squeezed into the same budget a service gets,
+ * so one slow app cannot hold the whole boot sequence for fifteen minutes.
+ * With the check turned off, the process being up is the whole signal:
+ * `probePort` is false and the caller probes no port.
+ */
+export function readinessHealthcheck<T extends ReadinessHealthcheck>(
+  healthcheck: T,
+  budgetSec: number = AUTOSTART_READY_TIMEOUT_SEC
+): { healthcheck: T; probePort: boolean } {
+  const startPeriodSec = Math.min(healthcheck.startPeriodSec, Math.max(0, budgetSec - 5));
+  return {
+    healthcheck: { ...healthcheck, enabled: true, startPeriodSec, timeoutSec: Math.max(5, budgetSec - startPeriodSec) },
+    probePort: healthcheck.enabled,
+  };
+}

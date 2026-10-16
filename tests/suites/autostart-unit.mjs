@@ -152,5 +152,24 @@ export async function run({ repoRoot }) {
   // on the same port next to the one that just printed these commands.
   r.check("then enable, and never start", commands[2] === "sudo systemctl enable runpanel.service");
 
+  // --- a project set to wait is held to its own health check, within budget --
+  {
+    const { readinessHealthcheck, AUTOSTART_READY_TIMEOUT_SEC } = await import(
+      pathToFileURL(join(repoRoot, "lib", "autostart.ts")).href
+    );
+    const hc = { enabled: true, path: "/health", startPeriodSec: 45, timeoutSec: 600, intervalSec: 2 };
+    const { healthcheck, probePort } = readinessHealthcheck(hc);
+    r.check("the project's health check is probed", probePort === true && healthcheck.path === "/health");
+    r.check(
+      "start period plus timeout fit the service budget",
+      healthcheck.startPeriodSec + healthcheck.timeoutSec <= AUTOSTART_READY_TIMEOUT_SEC,
+      JSON.stringify(healthcheck)
+    );
+    const long = readinessHealthcheck({ ...hc, startPeriodSec: 600 });
+    r.check("a long start period still leaves time to probe", long.healthcheck.timeoutSec >= 5, JSON.stringify(long.healthcheck));
+    const off = readinessHealthcheck({ ...hc, enabled: false });
+    r.check("a disabled health check waits for the process only", off.probePort === false && off.healthcheck.enabled === true);
+  }
+
   return r.result();
 }
