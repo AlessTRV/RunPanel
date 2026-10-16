@@ -500,6 +500,12 @@ export interface UsersTable {
   created_by: string | null;
   created_at: string;
   last_login_at: string | null;
+  /**
+   * When the account, its permissions or its grants last changed — the merge
+   * key between cluster members (migration 024). Null on rows that predate it:
+   * read as `created_at`.
+   */
+  updated_at: string | null;
 }
 
 export interface UserPermissionsTable {
@@ -555,6 +561,44 @@ export interface RateLimitsTable {
   reset_at: string;
 }
 
+/** Another RunPanel install this one is linked with — see migration 024 and services/cluster. */
+export interface ClusterMembersTable {
+  id: string;
+  name: string;
+  /** Origin only, no trailing slash: `http://host:3000`. */
+  url: string;
+  /** `'panel'` serves the UI and manages others; `'node'` is only managed. */
+  role: string;
+  /** `'unknown'` | `'ok'` | `'unreachable'` — a local observation, never replicated. */
+  status: string;
+  /** The member's panel version label as last reported. Local, never replicated. */
+  version: string | null;
+  last_seen_at: string | null;
+  last_error: string | null;
+  created_at: string;
+  /** Merge key between members: the newer row wins. */
+  updated_at: string;
+}
+
+/** A one-time token that lets a fresh install join this cluster. */
+export interface ClusterLinkTokensTable {
+  id: string;
+  /** SHA-256 of the token. The token itself is never stored. */
+  token_hash: string;
+  created_by: string | null;
+  expires_at: string;
+  used_at: string | null;
+  created_at: string;
+}
+
+/** A user or member deleted here, kept so a stale copy elsewhere cannot resurrect it. */
+export interface ClusterTombstonesTable {
+  /** `'user'` | `'member'` */
+  kind: string;
+  id: string;
+  deleted_at: string;
+}
+
 export interface Database {
   settings: SettingsTable;
   sessions: SessionsTable;
@@ -564,6 +608,9 @@ export interface Database {
   user_invites: UserInvitesTable;
   audit_log: AuditLogTable;
   rate_limits: RateLimitsTable;
+  cluster_members: ClusterMembersTable;
+  cluster_link_tokens: ClusterLinkTokensTable;
+  cluster_tombstones: ClusterTombstonesTable;
   projects: ProjectsTable;
   folders: FoldersTable;
   deployments: DeploymentsTable;

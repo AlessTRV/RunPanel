@@ -108,6 +108,15 @@ const nextConfig: NextConfig = {
    * otherwise die. Documented as low-risk in
    * next/dist/docs/01-app/02-guides/memory-usage.md.
    */
+  /**
+   * No `proxyClientMaxBodySize` here on purpose. Every request `proxy.ts`
+   * matches has its body cloned and buffered so the proxy and the handler can
+   * both read it, and past 10 MB Next truncates BOTH copies without an error —
+   * a 40 MB ZIP arrived as its first 10 MB. Raising the limit would instead
+   * double the memory of every upload on a machine that also runs the
+   * projects, so the two large-body routes are kept out of the proxy's
+   * matcher and make its checks themselves (see proxy.ts).
+   */
   experimental: {
     webpackMemoryOptimizations: true,
   },

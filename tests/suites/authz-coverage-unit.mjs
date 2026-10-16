@@ -20,9 +20,11 @@ const PUBLIC = new Set([
   "auth/logout/route.ts",
   "auth/invite/route.ts",
   "webhooks/github/[projectId]/route.ts",
+  // A fresh install joining the cluster: its one-time token is the credential.
+  "cluster/join/route.ts",
 ]);
 
-const GUARD = /await\s+require(User|Owner|Permission|Project|Service|Folder)\s*\(/;
+const GUARD = /await\s+require(User|Owner|Permission|Project|Service|Folder|Member)\s*\(/;
 const HANDLER = /export\s+async\s+function\s+(GET|POST|PUT|PATCH|DELETE)\s*\(/g;
 
 function walk(dir, out = []) {

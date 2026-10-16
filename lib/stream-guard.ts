@@ -1,3 +1,4 @@
+import { isClusterSession } from "./auth";
 import { getDb } from "./db";
 import {
   PROJECT_ACTIONS,
@@ -76,7 +77,9 @@ export function watchAccess(
         .where("id", "=", who.userId)
         .executeTakeFirst();
       if (!user || user.disabled === 1) return lose();
-      if (who.sessionId) {
+      // A request forwarded by another panel has no `sessions` row here: the
+      // signature was its session, and it was checked when the stream opened.
+      if (who.sessionId && !isClusterSession(who.sessionId)) {
         const session = await db.selectFrom("sessions").select("id").where("id", "=", who.sessionId).executeTakeFirst();
         if (!session) return lose();
       }

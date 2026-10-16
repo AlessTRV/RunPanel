@@ -1,8 +1,11 @@
 import crypto from "crypto";
 import bcrypt from "bcryptjs";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 
+import { verifySignedHeaders } from "./cluster-auth";
+import { HDR_MEMBER } from "./cluster-sign";
 import { getDb, rowCount } from "./db";
+import { getSetting } from "./settings";
 import { generateId } from "./utils";
 import { authzEvents } from "@/services/events";
 
@@ -160,6 +163,9 @@ export async function isSessionTokenValid(token: string | undefined | null): Pro
 
 export async function getSession(): Promise<SessionInfo | null> {
   try {
+    const requestHeaders = await headers();
+    if (requestHeaders.get(HDR_MEMBER)) return await clusterSession(requestHeaders);
+
     const cookieStore = await cookies();
     const token = cookieStore.get(SESSION_COOKIE)?.value;
     if (!token) return null;
@@ -167,6 +173,32 @@ export async function getSession(): Promise<SessionInfo | null> {
   } catch {
     return null;
   }
+}
+
+/**
+ * A request forwarded by another panel of the cluster acts for one of the
+ * replicated users: the signed headers name the member and the user, and the
+ * user is read from the local copy of the directory. The synthetic session id
+ * tells streams there is no `sessions` row to watch.
+ */
+async function clusterSession(requestHeaders: { get(name: string): string | null }): Promise<SessionInfo | null> {
+  const caller = await verifySignedHeaders((name) => requestHeaders.get(name));
+  if (!caller?.userId) return null;
+  const db = await getDb();
+  const user = await db
+    .selectFrom("users")
+    .select(["id", "email", "is_owner", "disabled"])
+    .where("id", "=", caller.userId)
+    .executeTakeFirst();
+  if (!user || user.disabled === 1) return null;
+  return {
+    sessionId: `cluster:${caller.member.id}`,
+    user: { id: user.id, email: user.email, isOwner: user.is_owner === 1 },
+  };
+}
+
+export function isClusterSession(sessionId: string | undefined): boolean {
+  return sessionId !== undefined && sessionId.startsWith("cluster:");
 }
 
 export async function destroySession(): Promise<void> {
@@ -235,9 +267,14 @@ export async function listSessions(userId?: string) {
 
 // --- First run ---
 
-/** No owner yet: the setup form is what the login page shows. */
+/**
+ * No owner yet: the setup form is what the login page shows. An install that
+ * joined a cluster has no owner of its own — the accounts come from the
+ * directory — so membership counts as set up too.
+ */
 export async function isFirstRun(): Promise<boolean> {
   const db = await getDb();
   const owner = await db.selectFrom("users").select("id").where("is_owner", "=", 1).executeTakeFirst();
-  return owner === undefined;
+  if (owner !== undefined) return false;
+  return (await getSetting("cluster_id")) === null;
 }

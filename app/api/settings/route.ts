@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isDenied, requireOwner, requirePermission, requireUser } from "@/lib/auth-guard";
 import { withAudit } from "@/lib/audit";
-import { encrypt } from "@/lib/crypto";
 import { z } from "zod";
+import { writeSharedSetting } from "@/services/cluster/directory";
+import { broadcastDirectory } from "@/services/cluster/sync";
 import { getAllSettings, getSetting, setSetting } from "@/lib/settings";
 import { isValidTimeZone } from "@/lib/cron";
 import { rescheduleRestarts } from "@/services/restart-scheduler";
@@ -190,7 +191,9 @@ export async function PUT(request: NextRequest) {
       const denied = await requirePermission("github");
       if (isDenied(denied)) return denied;
       const token = typeof body.github_token === "string" ? body.github_token.trim() : "";
-      await setSetting("github_token", token ? encrypt(token) : "");
+      // Shared across the cluster: every member clones with the same token.
+      await writeSharedSetting("github_token", token || null);
+      void broadcastDirectory();
       return NextResponse.json({ success: true });
     }
 

@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isDenied, requireProject, requireUser } from "@/lib/auth-guard";
+import { HDR_BODY, HDR_MEMBER, sha256Hex } from "@/lib/cluster-sign";
 import { requireHostFor } from "@/lib/host-guard";
+import { refuseCrossOrigin } from "@/lib/request-origin";
 import { withAudit } from "@/lib/audit";
 import { config } from "@/lib/config";
 import { getDb } from "@/lib/db";
@@ -14,6 +16,11 @@ const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
 
 export async function POST(request: NextRequest) {
   return withAudit(request, { category: "config", action: "project.upload", scope: null, scopeId: null }, async () => {
+    // Kept out of `proxy.ts` (its body clone would double the memory of a
+    // 100 MB upload), so the two checks the proxy would have made are here.
+    const refused = refuseCrossOrigin(request);
+    if (refused) return refused;
+
     const denied = await requireUser();
     if (isDenied(denied)) return denied;
 
@@ -25,7 +32,18 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "File too large (max 100MB)" }, { status: 413 });
     }
 
-    const formData = await request.formData();
+    // Forwarded by another member of the cluster: the signature covers the
+    // body's hash, and with no proxy in front nobody has compared it yet.
+    let source: Request = request;
+    if (request.headers.get(HDR_MEMBER)) {
+      const raw = await request.arrayBuffer();
+      if (sha256Hex(new Uint8Array(raw)) !== request.headers.get(HDR_BODY)) {
+        return NextResponse.json({ error: "Firma non valida" }, { status: 401 });
+      }
+      source = new Request(request.url, { method: "POST", headers: request.headers, body: raw });
+    }
+
+    const formData = await source.formData();
     const file = formData.get("file") as File | null;
     const projectSlug = formData.get("projectSlug") as string | null;
 

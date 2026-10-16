@@ -5,6 +5,7 @@ import { canEditUser, grantableProblem } from "@/lib/authz";
 import { getDb } from "@/lib/db";
 import { updateUserSchema } from "@/lib/users-schema";
 import { deleteUser, getUser, getUserAccess, listUsers, setUserAccess, setUserDisabled } from "@/lib/users";
+import { clusterState } from "@/services/cluster/state";
 
 type Params = { params: Promise<{ userId: string }> };
 
@@ -105,6 +106,13 @@ export async function DELETE(request: NextRequest, { params }: Params) {
 }
 
 async function missingTarget(grants: ReadonlyArray<{ scope: string; scopeId: string | null }>): Promise<string | null> {
+  // In a cluster a grant may point at a project on another server, which this
+  // store cannot see. The id's shape is still checked; the server that holds
+  // the project applies the grant.
+  if (await clusterState()) {
+    const bad = grants.find((g) => g.scope !== "all" && g.scopeId && !/^[A-Za-z0-9_-]{1,32}$/.test(g.scopeId));
+    return bad ? `${bad.scope} ${bad.scopeId}` : null;
+  }
   const db = await getDb();
   const tables = { folder: "folders", project: "projects", service: "services" } as const;
   for (const grant of grants) {

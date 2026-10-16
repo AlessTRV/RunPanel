@@ -32,6 +32,7 @@ export const GLOBAL_PERMISSIONS = [
   "users.manage",
   "audit.view",
   "host",
+  "nodes",
 ] as const;
 export type GlobalPermission = (typeof GLOBAL_PERMISSIONS)[number];
 

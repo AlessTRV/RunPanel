@@ -136,6 +136,11 @@ export async function register() {
   const { startPanelUpdatePoller } = await import("./services/panel-update/check");
   startPanelUpdatePoller();
 
+  // The other members of the cluster, if there are any: reachability and the
+  // replicated directory. Does nothing in solo mode.
+  const { startClusterSync } = await import("./services/cluster/sync");
+  startClusterSync();
+
   // Docker reachability and free disk space, which are the two conditions
   // nothing else here watches over time — every other notification is a side
   // effect of something the panel was already doing.

@@ -35,6 +35,7 @@ export const PERMISSION_GROUPS: { title: string; items: { key: GlobalPermission;
     items: [
       { key: "users.manage", label: "Gestione utenti", description: "Invita e modifica gli account che non hanno più accessi dei suoi." },
       { key: "audit.view", label: "Registro attività", description: "Consulta le attività sulle risorse che può vedere." },
+      { key: "nodes", label: "Server collegati", description: "Collega, diagnostica e revoca gli altri RunPanel del cluster." },
     ],
   },
 ];

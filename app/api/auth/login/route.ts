@@ -4,8 +4,14 @@ import { audit } from "@/lib/audit";
 import { isFirstRun, verifyPasswordOrDummy, createSession } from "@/lib/auth";
 import { claimOwner, findLoginUser, normalizeEmail, recordLogin } from "@/lib/users";
 import { trustedClientIp } from "@/lib/client-ip";
+import { linkSetupSchema } from "@/lib/cluster-schema";
 import { isValidSetupToken } from "@/lib/setup-token";
 import { clearRateLimit, consumeRateLimit } from "@/lib/rate-limit";
+import { joinCluster } from "@/services/cluster/join";
+import { isNodeOnly } from "@/services/cluster/state";
+import { panelRelease } from "@/services/panel-update/release";
+
+const clearBucketsFor = (buckets: { key: string }[]) => Promise.all(buckets.map((bucket) => clearRateLimit(bucket.key)));
 
 /** Per client address, once there is a client address worth counting. */
 const MAX_ATTEMPTS_PER_IP = 5;
@@ -79,12 +85,40 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Richiesta non valida" }, { status: 400 });
   }
 
-  const { email: rawEmail, password, setup, setupToken } = (body ?? {}) as {
+  const { email: rawEmail, password, setup, setupToken, link } = (body ?? {}) as {
     email?: unknown;
     password?: unknown;
     setup?: unknown;
     setupToken?: unknown;
+    link?: unknown;
   };
+
+  // A managed node of a cluster signs nobody in: its panels do.
+  if (await isNodeOnly()) {
+    return NextResponse.json({ error: "Questo server è gestito da un altro RunPanel: accedi da lì." }, { status: 403 });
+  }
+
+  // First-run setup, the other way: join an existing cluster instead of
+  // creating an owner. No password here — the accounts arrive with the link.
+  if (setup && link !== undefined) {
+    if (!(await isFirstRun())) {
+      return NextResponse.json({ error: "Il pannello è già stato configurato. Ricarica la pagina." }, { status: 409 });
+    }
+    if (!isValidSetupToken(setupToken)) {
+      return NextResponse.json(
+        { error: "Token di setup mancante o errato. Lo trovi nel log di avvio del pannello." },
+        { status: 403 }
+      );
+    }
+    const parsed = linkSetupSchema.safeParse(link);
+    if (!parsed.success) {
+      return NextResponse.json({ error: "Dati non validi", details: parsed.error.issues }, { status: 400 });
+    }
+    const outcome = await joinCluster(parsed.data, (await panelRelease()).label);
+    if (!outcome.ok) return NextResponse.json({ error: outcome.error }, { status: outcome.status });
+    await clearBucketsFor(buckets);
+    return NextResponse.json({ success: true, linked: true, role: outcome.role });
+  }
 
   if (!password || typeof password !== "string" || password.length > 128) {
     return NextResponse.json({ error: "Credenziali non valide" }, { status: 400 });

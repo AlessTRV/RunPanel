@@ -22,6 +22,7 @@ import * as scheduledRestart from "./020-scheduled-restart";
 import * as projectBackupSettings from "./021-project-backup-settings";
 import * as serviceDisplayName from "./022-service-display-name";
 import * as usersAndPermissions from "./023-users-and-permissions";
+import * as cluster from "./024-cluster";
 
 /**
  * Migrations are registered statically rather than read from disk with
@@ -54,6 +55,7 @@ export const migrations: Record<string, Migration> = {
   "021-project-backup-settings": projectBackupSettings,
   "022-service-display-name": serviceDisplayName,
   "023-users-and-permissions": usersAndPermissions,
+  "024-cluster": cluster,
 };
 
 export class StaticMigrationProvider implements MigrationProvider {

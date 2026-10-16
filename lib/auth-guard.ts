@@ -1,6 +1,9 @@
+import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 
 import { getSession, type SessionInfo } from "./auth";
+import { verifySignedHeaders } from "./cluster-auth";
+import type { ClusterMembersTable } from "./db/schema";
 import {
   PROJECT_ACTIONS,
   SERVICE_ACTIONS,
@@ -95,6 +98,25 @@ export async function requireService(
   if (access.level === null) return notFound("Servizio");
   if (!satisfies(access, SERVICE_ACTIONS[action])) return forbidden();
   return { ...ctx, access };
+}
+
+export interface MemberContext {
+  member: ClusterMembersTable;
+  /** The user the calling panel acts for, when it does. */
+  userId: string | null;
+}
+
+/**
+ * For the few endpoints another member of the cluster calls directly — ping,
+ * directory exchange, leave — which carry a signature and no cookie. `role`
+ * narrows them to panels: a managed node is never allowed to push a directory.
+ */
+export async function requireMember(opts: { role?: "panel" } = {}): Promise<NextResponse | MemberContext> {
+  const requestHeaders = await headers();
+  const caller = await verifySignedHeaders((name) => requestHeaders.get(name));
+  if (!caller) return unauthorized();
+  if (opts.role && caller.member.role !== opts.role) return forbidden("Solo un pannello può farlo");
+  return caller;
 }
 
 /** For folders: renaming or deleting one needs `manage` on it (or on everything). */

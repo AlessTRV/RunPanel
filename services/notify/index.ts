@@ -1,6 +1,8 @@
 import { getSetting, setSetting } from "@/lib/settings";
-import { encrypt, tryDecrypt } from "@/lib/crypto";
+import { tryDecrypt } from "@/lib/crypto";
 import { panelBaseUrl } from "@/lib/panel-url";
+import { writeSharedSetting } from "@/services/cluster/directory";
+import { broadcastDirectory } from "@/services/cluster/sync";
 import {
   NOTIFY_EVENTS_SETTING,
   TELEGRAM_CHAT_SETTING,
@@ -55,15 +57,18 @@ export async function writeConfig(patch: {
   chatId?: string | null;
   events?: NotifyEventKey[];
 }): Promise<void> {
+  // The bot and chat are shared across the cluster; which events to send stays
+  // per server, since each one reports on its own projects.
   if (patch.token !== undefined) {
-    await setSetting(TELEGRAM_TOKEN_SETTING, patch.token ? encrypt(patch.token) : "");
+    await writeSharedSetting(TELEGRAM_TOKEN_SETTING, patch.token || null);
   }
   if (patch.chatId !== undefined) {
-    await setSetting(TELEGRAM_CHAT_SETTING, patch.chatId ?? "");
+    await writeSharedSetting(TELEGRAM_CHAT_SETTING, patch.chatId || null);
   }
   if (patch.events !== undefined) {
     await setSetting(NOTIFY_EVENTS_SETTING, JSON.stringify(patch.events));
   }
+  if (patch.token !== undefined || patch.chatId !== undefined) void broadcastDirectory();
 }
 
 export function isConfigured(config: NotifyConfig): boolean {

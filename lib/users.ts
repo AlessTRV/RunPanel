@@ -1,5 +1,6 @@
 import crypto from "crypto";
 
+import { bumpedUpdatedAt } from "./cluster-directory";
 import { getDb, nowIso } from "./db";
 import { generateId } from "./utils";
 import { destroyUserSessions, hashPassword, hashToken } from "./auth";
@@ -37,6 +38,32 @@ function changed(userId: string): void {
 }
 
 /**
+ * Stamp an account as edited now and push the directory to the other members
+ * of the cluster, if any. The stamp is the merge key between panels: strictly
+ * after whatever the row carried, so an edit made here wins over the copy it
+ * was merged from even when this clock is behind.
+ */
+async function touch(userId: string): Promise<void> {
+  const db = await getDb();
+  const row = await db.selectFrom("users").select("updated_at").where("id", "=", userId).executeTakeFirst();
+  if (row) {
+    await db
+      .updateTable("users")
+      .set({ updated_at: bumpedUpdatedAt(row.updated_at, nowIso()) })
+      .where("id", "=", userId)
+      .execute();
+  }
+  replicate();
+}
+
+/** Best effort and off the request path; a member that is down is caught by the poller. */
+function replicate(): void {
+  void import("@/services/cluster/sync")
+    .then((m) => m.broadcastDirectory())
+    .catch(() => undefined);
+}
+
+/**
  * Create the owner, unless one exists. Returns its id, or null when someone
  * else got there first — the partial unique index on `is_owner` makes the
  * insert itself the claim, so two racing setups cannot both win.
@@ -56,8 +83,10 @@ export async function claimOwner(email: string, password: string): Promise<strin
         created_by: null,
         created_at: nowIso(),
         last_login_at: null,
+        updated_at: nowIso(),
       })
       .execute();
+    replicate();
     return id;
   } catch {
     return null;
@@ -103,9 +132,11 @@ export async function createInvitedUser(email: string, createdBy: string): Promi
     created_by: createdBy,
     created_at: nowIso(),
     last_login_at: null,
+    updated_at: nowIso(),
   };
   try {
     await db.insertInto("users").values(row).execute();
+    replicate();
     return row;
   } catch {
     return null;
@@ -193,6 +224,7 @@ export async function redeemInvite(token: string, password: string): Promise<str
 
   await db.updateTable("users").set({ password_hash: passwordHash }).where("id", "=", invite.userId).execute();
   await destroyUserSessions(invite.userId);
+  await touch(invite.userId);
   return invite.userId;
 }
 
@@ -206,13 +238,25 @@ export async function setUserDisabled(userId: string, disabled: boolean): Promis
     .execute();
   if (disabled) await destroyUserSessions(userId);
   else changed(userId);
+  await touch(userId);
 }
 
 export async function deleteUser(userId: string): Promise<void> {
   const db = await getDb();
-  await db.deleteFrom("users").where("id", "=", userId).where("is_owner", "=", 0).execute();
+  const deleted = await db
+    .deleteFrom("users")
+    .where("id", "=", userId)
+    .where("is_owner", "=", 0)
+    .returning("id")
+    .executeTakeFirst();
   // After the delete: a recheck that ran first would still find the account.
   changed(userId);
+  if (deleted) {
+    // So no other member's copy brings the account back.
+    const { tombstone } = await import("@/services/cluster/directory");
+    await tombstone("user", userId);
+    replicate();
+  }
 }
 
 /**
@@ -284,6 +328,7 @@ export async function setUserAccess(userId: string, access: UserAccess): Promise
     }
   });
   changed(userId);
+  await touch(userId);
 }
 
 /**
@@ -309,6 +354,7 @@ export async function grantCreator(userId: string, scope: "project" | "service",
     .onConflict((oc) => oc.columns(["user_id", "scope", "scope_id"]).doUpdateSet({ level: "manage" }))
     .execute();
   changed(userId);
+  await touch(userId);
 }
 
 /** Drop every grant pointing at something that is being deleted. */
@@ -320,7 +366,10 @@ export async function deleteGrantsFor(scope: "folder" | "project" | "service", t
     .where("scope_id", "=", targetId)
     .returning("user_id")
     .execute();
-  for (const userId of new Set(rows.map((r) => r.user_id))) changed(userId);
+  for (const userId of new Set(rows.map((r) => r.user_id))) {
+    changed(userId);
+    await touch(userId);
+  }
 }
 
 export async function setOwnEmail(userId: string, email: string): Promise<"ok" | "taken"> {
@@ -329,6 +378,7 @@ export async function setOwnEmail(userId: string, email: string): Promise<"ok" |
   if (other && other.id !== userId) return "taken";
   try {
     await db.updateTable("users").set({ email }).where("id", "=", userId).execute();
+    await touch(userId);
     return "ok";
   } catch {
     return "taken";
@@ -338,6 +388,7 @@ export async function setOwnEmail(userId: string, email: string): Promise<"ok" |
 export async function setOwnPassword(userId: string, password: string): Promise<void> {
   const db = await getDb();
   await db.updateTable("users").set({ password_hash: await hashPassword(password) }).where("id", "=", userId).execute();
+  await touch(userId);
 }
 
 export type UserStatus = "active" | "invited" | "invite_expired" | "disabled";
