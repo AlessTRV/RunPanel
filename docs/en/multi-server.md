@@ -54,7 +54,7 @@ Each server keeps its own: sessions (you sign in on each panel separately), invi
 
 **Diagnostica**, next to each server in **Sistema › Server**, asks it who it is and compares: reachable, same secret (the signature is accepted), same cluster, version, clock and accounts in step. A different version is also highlighted in the list. The clock turns red past two and a half minutes of difference; past five, requests are refused because signatures expire.
 
-A node is updated like the panel: select it and open **Sistema › Aggiornamenti**. It restarts by itself and is unreachable for a few seconds.
+A node has no panel of its own: its updates are handled from the panel's **Sistema › Aggiornamenti**, which lists every server. Each one shows its version, the commits waiting, **Controlla**, **Aggiorna** and how often it checks by itself (every 1, 6 or 24 hours); the server runs that check on its own and announces it on Telegram under its name. **Controlla tutti** and **Aggiorna tutti** act on every server at once, the panel last. **Dettagli** opens that server's commits and live log. A server that updates restarts by itself and is unreachable for a few seconds; the check never applies anything on its own.
 
 ## Revocation and the secret
 

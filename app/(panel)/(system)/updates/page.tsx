@@ -18,6 +18,7 @@ import { MSG } from "@/lib/copy";
 import {
   DEFAULT_PANEL_UPDATE_INTERVAL,
   isPanelUpdateInterval,
+  PANEL_UPDATE_INTERVAL_LABELS,
   PANEL_UPDATE_INTERVALS,
   type PanelUpdateInterval,
 } from "@/lib/polling";
@@ -44,15 +45,9 @@ import { UpdatesOverview } from "./_components/UpdatesOverview";
  * rather than as the consequence of the update the operator just asked for.
  */
 
-const INTERVAL_LABELS: Record<PanelUpdateInterval, string> = {
-  "3600": "1 ora",
-  "21600": "6 ore",
-  "86400": "24 ore",
-};
-
 const INTERVAL_OPTIONS = PANEL_UPDATE_INTERVALS.map((value) => ({
   value,
-  label: INTERVAL_LABELS[value],
+  label: PANEL_UPDATE_INTERVAL_LABELS[value],
 }));
 
 /** Every server's updates at once in a cluster; one server's page when the URL names it. */

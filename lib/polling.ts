@@ -58,6 +58,12 @@ export const DEFAULT_PANEL_UPDATE_INTERVAL: PanelUpdateInterval = "21600";
 
 export const PANEL_UPDATE_INTERVAL_SETTING = "panel_update_interval";
 
+export const PANEL_UPDATE_INTERVAL_LABELS: Record<PanelUpdateInterval, string> = {
+  "3600": "1 ora",
+  "21600": "6 ore",
+  "86400": "24 ore",
+};
+
 export function isPanelUpdateInterval(value: unknown): value is PanelUpdateInterval {
   return PANEL_UPDATE_INTERVALS.includes(value as PanelUpdateInterval);
 }

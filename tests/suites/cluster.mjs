@@ -223,6 +223,16 @@ export async function run({ base, repoRoot }) {
     res = await a.call("/api/cluster/updates");
     r.check("updates of every server", res.body.servers?.length === 2 && res.body.servers.every((s) => s.data?.release?.label), JSON.stringify(res.body).slice(0, 200));
 
+    // A node has no panel of its own: its automatic check is scheduled from here.
+    res = await a.call(`/api/nodes/${memberB.id}/settings`, { method: "PUT", body: JSON.stringify({ preferences: { panel_update_interval: "3600" } }) });
+    r.check("the panel sets a node's update check interval", res.status === 200, JSON.stringify(res.body));
+    res = await a.call("/api/cluster/updates");
+    const updB = res.body.servers?.find((s) => s.memberId === memberB.id);
+    const updA = res.body.servers?.find((s) => s.memberId !== memberB.id);
+    r.check("and the node reports it, while the panel keeps its own", updB?.data?.interval === "3600" && updA?.data?.interval !== "3600", JSON.stringify(res.body.servers?.map((s) => s.data?.interval)));
+    res = await b.call("/api/updates");
+    r.check("the node itself stores it", res.body.interval === "3600", JSON.stringify(res.body.interval));
+
     res = await a.call(`/api/cluster/locate?kind=project&id=${projectId}`);
     r.check("locate finds the project on B", res.body.memberId === memberB.id, JSON.stringify(res.body));
     res = await a.call("/api/cluster/locate?kind=project&id=nope");

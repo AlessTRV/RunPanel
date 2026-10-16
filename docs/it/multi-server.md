@@ -54,7 +54,7 @@ Restano di ogni server: le sessioni (si entra su ogni pannello separatamente), i
 
 **Diagnostica**, accanto a ogni server in **Sistema › Server**, lo interroga e confronta: raggiungibile, stesso segreto (la firma viene accettata), stesso cluster, versione, orologio e account allineati. Una versione diversa è evidenziata anche nell'elenco. L'orologio diventa rosso oltre i due minuti e mezzo di differenza; oltre i cinque le richieste vengono rifiutate, perché la firma scade.
 
-Un nodo si aggiorna come il pannello: selezionalo e apri **Sistema › Aggiornamenti**. Si riavvia da solo e per qualche secondo risulta irraggiungibile.
+Un nodo non ha un pannello suo: i suoi aggiornamenti si gestiscono da **Sistema › Aggiornamenti** del pannello, che elenca tutti i server. Per ognuno ci sono la versione, i commit in arrivo, **Controlla**, **Aggiorna** e la frequenza del controllo automatico (ogni 1, 6 o 24 ore), che il server esegue da sé e notifica su Telegram con il suo nome. **Controlla tutti** e **Aggiorna tutti** agiscono su ogni server insieme, con il pannello per ultimo. **Dettagli** apre commit e log in diretta di quel server. Un server che si aggiorna si riavvia da solo e per qualche secondo risulta irraggiungibile; il controllo non applica mai niente da solo.
 
 ## Revoca e segreto
 
