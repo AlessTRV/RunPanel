@@ -1,4 +1,7 @@
+import fs from "fs";
 import { getDb, nowIso } from "@/lib/db";
+import { config } from "@/lib/config";
+import { relocatedArtifactDir, relocatedStartCmd } from "@/lib/artifact-dir";
 import { decrypt } from "@/lib/crypto";
 import { parseContractJson } from "@/lib/deploy-contract";
 import { listenPort, readAccess } from "@/lib/access-columns";
@@ -42,7 +45,7 @@ export async function restartFromLastDeployment(
 
   const lastDeploy = await db
     .selectFrom("deployments")
-    .select(["start_cmd", "artifact_dir", "resolved_contract"])
+    .select(["id", "start_cmd", "artifact_dir", "resolved_contract"])
     .where("project_id", "=", projectId)
     .where("status", "in", ["running", "superseded"])
     .where("start_cmd", "is not", null)
@@ -52,6 +55,29 @@ export async function restartFromLastDeployment(
 
   if (!lastDeploy?.start_cmd || !lastDeploy.artifact_dir) {
     return { error: "Non c'è nessun deploy riuscito da riavviare. Fai prima un deploy." };
+  }
+
+  // A deploy recorded before the data directory moved still names the old
+  // tree. Follow the checkout to where it is now and fix the row, so the next
+  // restart does not have to; with no checkout anywhere, say so rather than
+  // hand PM2 a cwd it will fail on without a word. A docker project only
+  // needs its image, so a missing directory is not a reason to refuse it.
+  if (!fs.existsSync(lastDeploy.artifact_dir)) {
+    const moved = relocatedArtifactDir(lastDeploy.artifact_dir, project.slug, config.reposDir);
+    if (moved && fs.existsSync(moved)) {
+      const startCmd = relocatedStartCmd(lastDeploy.start_cmd, lastDeploy.artifact_dir, moved);
+      await db
+        .updateTable("deployments")
+        .set({ artifact_dir: moved, start_cmd: startCmd })
+        .where("id", "=", lastDeploy.id)
+        .execute();
+      lastDeploy.artifact_dir = moved;
+      lastDeploy.start_cmd = startCmd;
+    } else if (project.runtime_type !== "docker") {
+      return {
+        error: `La cartella dell'ultimo deploy non esiste più (${lastDeploy.artifact_dir}). Fai un nuovo deploy.`,
+      };
+    }
   }
 
   const envRows = await db
