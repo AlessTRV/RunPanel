@@ -268,6 +268,13 @@ export const pm2Driver: IProcessDriver = {
   async start(slug: string, startCmd: string, opts: StartOpts): Promise<void> {
     const name = processName(slug);
 
+    // PM2 cannot spawn in a directory that is not there, and does not say so:
+    // the app stays "online" with no pid and an empty log. Checked before the
+    // old process is deleted, so a bad start leaves the running one alone.
+    if (!fs.existsSync(opts.cwd)) {
+      throw new Error(`La cartella di lavoro non esiste: ${opts.cwd}. Fai un nuovo deploy.`);
+    }
+
     // Delete existing process if any
     try {
       await shellExec(`${resolvePm2Command()} delete ${name}`, { timeout: 30_000 });
@@ -483,6 +490,15 @@ child.on("error", (e) => { console.error("Process error:", e.message); process.e
     const pm2 = resolvePm2Command();
 
     if (fs.existsSync(ecosystemFile)) {
+      // Same silent failure as in `start`: the ecosystem file keeps the cwd of
+      // the deploy that wrote it.
+      let cwd: unknown;
+      try {
+        cwd = JSON.parse(fs.readFileSync(ecosystemFile, "utf8")).apps?.[0]?.cwd;
+      } catch { /* unreadable: let pm2 report it */ }
+      if (typeof cwd === "string" && !fs.existsSync(cwd)) {
+        throw new Error(`La cartella di lavoro non esiste: ${cwd}. Fai un nuovo deploy.`);
+      }
       try {
         await shellExec(`${pm2} delete ${name}`, { timeout: 30_000 });
       } catch { /* ignore */ }
@@ -498,12 +514,19 @@ child.on("error", (e) => { console.error("Process error:", e.message); process.e
 
   async status(slug: string): Promise<ProcessInfo> {
     const name = processName(slug);
-    const proc = (await pm2List()).find((p) => p.name === name);
+    // PM2 allows several entries under one name. A `pm2 resurrect` from a stale
+    // dump leaves errored ones behind, and reading the first match reported a
+    // project that had just started as stopped. The live entry wins.
+    const matches = (await pm2List()).filter((p) => p.name === name);
+    const proc = matches.find((p) => p.pm2_env?.status === "online" && !!p.pid) ?? matches[0];
 
     if (!proc) return { running: false };
 
     return {
-      running: proc.pm2_env?.status === "online",
+      // "online" with no pid is a spawn that failed before the app existed (a
+      // missing cwd, for one): PM2 never moves it to errored, so the pid is the
+      // only sign. Counting it as running kept a dead app green indefinitely.
+      running: proc.pm2_env?.status === "online" && !!proc.pid,
       pid: proc.pid,
       uptime: proc.pm2_env?.pm_uptime
         ? Math.floor((Date.now() - proc.pm2_env.pm_uptime) / 1000)
