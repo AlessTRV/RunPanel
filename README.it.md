@@ -97,6 +97,14 @@ Una pagina che dice cosa non va in questa installazione e cosa premere per siste
 <tr>
 <td valign="top" colspan="2">
 
+### 🔐 Un sottodominio per progetto
+Aggiungi un dominio una volta e dai a ogni progetto `app.tuodominio.it`: il pannello scrive i blocchi per l'nginx che usi già, ottiene e rinnova un certificato Let's Encrypt per ogni nome e tiene i progetti limitati dietro la stessa lista di indirizzi — senza toccare la tua configurazione di nginx.
+
+</td>
+</tr>
+<tr>
+<td valign="top" colspan="2">
+
 ### 🌐 Più server
 Collega altre installazioni di RunPanel a questa: stessi account ovunque, progetti, database, backup, monitor, diagnostica e aggiornamenti di ogni server nelle stesse liste, con una scheda per server per carico, disco e avvisi, tutto da un solo pannello — sulla tua rete privata, con richieste firmate e niente esposto su internet.
 
@@ -160,7 +168,7 @@ Sistema, Accessi e Impostazioni raggruppano più pagine in schede, ognuna con il
 | **Servizi** | database gestiti, i loro database interni, collegamenti ai progetti |
 | **Backup** | policy, destinazioni, esecuzioni, archivi, ripristini |
 | **Monitor** | processi e container con CPU, memoria e uptime, più il riepilogo dell'host (di ogni server, se sono più d'uno) |
-| **Sistema** | *Diagnostica* (cosa manca e cosa premere), *Avvio automatico* (cosa torna su dopo un riavvio), *Aggiornamenti* (versione, commit nuovi, il pulsante che li applica), *Pulizia Docker* (cosa occupa il disco e cosa si recupera), *Server* (le installazioni collegate: stato, versione, diagnosi, ruolo, revoca) |
+| **Sistema** | *Diagnostica* (cosa manca e cosa premere), *Avvio automatico* (cosa torna su dopo un riavvio), *Aggiornamenti* (versione, commit nuovi, il pulsante che li applica), *Domini* (i domini serviti da nginx e il sottodominio di ogni progetto), *Pulizia Docker* (cosa occupa il disco e cosa si recupera), *Server* (le installazioni collegate: stato, versione, diagnosi, ruolo, revoca) |
 | **Accessi** | *Utenti* (inviti con link a scadenza, permessi per account) e *Registro attività* (chi ha fatto cosa) |
 | **Impostazioni** | *Account* (email, password, sessioni, tema chiaro o scuro), *Pannello* (frequenza di refresh, fuso, indirizzo pubblico, intervallo del controllo periodico, colore d'accento, notifiche Telegram, registry privati), *GitHub* (token, repository, branch) |
 
@@ -283,6 +291,12 @@ Tutto sta in `.env` (vedi `.env.example` per la versione commentata) ed è contr
 <sub>Collegare i server, ruoli, selettore, account condivisi, diagnostica, revoca</sub>
 
 </td>
+<td valign="top">
+
+**[🔐 Domini](docs/it/domains.md)**<br>
+<sub>Un sottodominio per progetto sul tuo nginx, certificati HTTPS, la preparazione iniziale</sub>
+
+</td>
 </tr>
 </table>
 
@@ -305,6 +319,7 @@ Tutto sta in `.env` (vedi `.env.example` per la versione commentata) ed è contr
 - Gli URL dei repository devono essere `https://` pubblici, e il token GitHub è allegato soltanto alle richieste verso GitHub
 - I comandi esterni passano sempre da un array di argomenti, mai da una stringa di shell
 - Qualunque porta pubblicata può essere limitata a reti indicate, davanti a un ascoltatore spostato su loopback perché non ci sia modo di aggirarla
+- Sottodomini: i blocchi nginx nascono da nomi validati due volte, dalla route e dal renderer; certbot gira con l'utente del pannello; a root si arriva solo per `nginx -t` e `nginx -s reload`, tramite path unit systemd che non leggono mai ciò che scrive il pannello ([Domini](docs/it/domains.md))
 
 Per il TLS e i reverse proxy davanti al pannello, vedi [Metterlo su internet](docs/it/configuration.md#metterlo-su-internet).
 

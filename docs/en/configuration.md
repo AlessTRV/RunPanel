@@ -24,7 +24,7 @@ Everything lives in `.env` in the panel's folder; `.env.example` is the commente
 
 **The secret key.** It encrypts project variables, service credentials, registries, backup destinations, the GitHub token and the Telegram bot. If it changes or is lost, all of these become unreadable: keep it with your backups. With [several servers](multi-server.md) each install has its own; shared values (GitHub token, Telegram bot) are encrypted again by each server.
 
-**Background timers.** `RUNPANEL_DISABLE_SCHEDULERS` is for a test instance next to the real one. It turns off Docker cleanup, scheduled backups and restarts, auto-deploy, the update check, cluster sync, status checks with their notifications, and bringing projects and services back after the machine reboots. It also turns off the access gates: restricted ports stay closed.
+**Background timers.** `RUNPANEL_DISABLE_SCHEDULERS` is for a test instance next to the real one. It turns off Docker cleanup, scheduled backups and restarts, auto-deploy, the update check, cluster sync, status checks with their notifications, and bringing projects and services back after the machine reboots. It also turns off the access gates: restricted ports stay closed. And it keeps the panel away from the host's nginx: [domains](domains.md) are stored but never applied.
 
 **What projects see.** No `RUNPANEL_*` variable, nor `DATABASE_URL`, reaches your projects' build commands, processes or containers: the secret key, the store's credentials and the setup token stay with the panel.
 
