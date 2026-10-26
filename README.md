@@ -98,7 +98,7 @@ One page that says what is wrong with this installation and what to press to fix
 <td valign="top" colspan="2">
 
 ### 🔐 A subdomain per project
-Add a domain once, give each project `app.yourdomain.com`: the panel writes the blocks for the nginx you already run, gets and renews a Let's Encrypt certificate per name, and keeps restricted projects behind the same allow list — without touching your own nginx configuration.
+Add a domain once, give each project `app.yourdomain.com`: the panel writes the blocks for the nginx you already run, gets and renews a Let's Encrypt certificate per name — through Cloudflare's API too, orange cloud and all — and keeps restricted projects behind the same allow list — without touching your own nginx configuration.
 
 </td>
 </tr>
@@ -322,7 +322,7 @@ Everything lives in `.env` (see `.env.example` for the annotated version) and is
 - Repository URLs must be public `https://`, and the GitHub token is only ever attached to requests to GitHub
 - External commands always go through an argv array, never a shell string
 - Any published port can be restricted to named networks, in front of a listener that is moved to loopback so there is no way around it
-- Subdomains: the nginx blocks are written from names validated twice, by the route and by the renderer; certbot runs as the panel's user; root is reached only for `nginx -t` and `nginx -s reload`, through systemd path units that never read what the panel writes ([Domains](docs/en/domains.md))
+- Subdomains: the nginx blocks are written from names validated twice, by the route and by the renderer; certbot runs as the panel's user; root is reached only for `nginx -t` and `nginx -s reload`, through systemd path units that never read what the panel writes; a Cloudflare token is encrypted at rest and reaches certbot's hook only through the environment of each run ([Domains](docs/en/domains.md))
 
 For TLS and reverse proxies in front of the panel, see [Putting it on the internet](docs/en/configuration.md#putting-it-on-the-internet).
 

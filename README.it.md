@@ -98,7 +98,7 @@ Una pagina che dice cosa non va in questa installazione e cosa premere per siste
 <td valign="top" colspan="2">
 
 ### 🔐 Un sottodominio per progetto
-Aggiungi un dominio una volta e dai a ogni progetto `app.tuodominio.it`: il pannello scrive i blocchi per l'nginx che usi già, ottiene e rinnova un certificato Let's Encrypt per ogni nome e tiene i progetti limitati dietro la stessa lista di indirizzi — senza toccare la tua configurazione di nginx.
+Aggiungi un dominio una volta e dai a ogni progetto `app.tuodominio.it`: il pannello scrive i blocchi per l'nginx che usi già, ottiene e rinnova un certificato Let's Encrypt per ogni nome — anche tramite l'API di Cloudflare, nuvola arancione compresa — e tiene i progetti limitati dietro la stessa lista di indirizzi — senza toccare la tua configurazione di nginx.
 
 </td>
 </tr>
@@ -319,7 +319,7 @@ Tutto sta in `.env` (vedi `.env.example` per la versione commentata) ed è contr
 - Gli URL dei repository devono essere `https://` pubblici, e il token GitHub è allegato soltanto alle richieste verso GitHub
 - I comandi esterni passano sempre da un array di argomenti, mai da una stringa di shell
 - Qualunque porta pubblicata può essere limitata a reti indicate, davanti a un ascoltatore spostato su loopback perché non ci sia modo di aggirarla
-- Sottodomini: i blocchi nginx nascono da nomi validati due volte, dalla route e dal renderer; certbot gira con l'utente del pannello; a root si arriva solo per `nginx -t` e `nginx -s reload`, tramite path unit systemd che non leggono mai ciò che scrive il pannello ([Domini](docs/it/domains.md))
+- Sottodomini: i blocchi nginx nascono da nomi validati due volte, dalla route e dal renderer; certbot gira con l'utente del pannello; a root si arriva solo per `nginx -t` e `nginx -s reload`, tramite path unit systemd che non leggono mai ciò che scrive il pannello; un token Cloudflare è cifrato a riposo e arriva all'hook di certbot solo nell'ambiente di ogni esecuzione ([Domini](docs/it/domains.md))
 
 Per il TLS e i reverse proxy davanti al pannello, vedi [Metterlo su internet](docs/it/configuration.md#metterlo-su-internet).
 

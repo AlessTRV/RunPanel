@@ -9,8 +9,8 @@ Ogni progetto con una porta può essere servito su un sottodominio in HTTPS: `ap
 ## Cosa serve
 
 - Linux, con nginx e certbot installati (per esempio `sudo apt install nginx certbot`).
-- Un dominio tuo e, presso il suo provider DNS, **un solo record wildcard**: `*.esempio.it` → l'indirizzo pubblico del server (`A`, più `AAAA` se ha IPv6). Un record copre tutti i sottodomini; ogni nome ha il suo certificato, quindi non serve nessuna API DNS.
-- Le porte 80 e 443 che arrivano a nginx: sulla 80 Let's Encrypt verifica il nome, per il primo certificato e a ogni rinnovo.
+- Un dominio tuo e, presso il suo provider DNS, **un solo record wildcard**: `*.esempio.it` → l'indirizzo pubblico del server (`A`, più `AAAA` se ha IPv6). Un record copre tutti i sottodomini e ogni nome ha il suo certificato.
+- Le porte 80 e 443 che arrivano a nginx: sulla 80 Let's Encrypt verifica il nome, per il primo certificato e a ogni rinnovo. Per i domini su [Cloudflare](#domini-su-cloudflare) la verifica passa invece dal DNS.
 
 ## Preparare nginx
 
@@ -39,6 +39,20 @@ Cancellare `/etc/nginx/conf.d/runpanel.conf` e ricaricare spegne in un colpo tut
 Il pannello scrive il blocco, ricarica nginx, controlla che il nome arrivi davvero a questo server e chiede il certificato in background: dopo qualche secondo il nome risulta *HTTPS attivo*. Se la richiesta non va, il motivo compare sotto il nome (il messaggio di Let's Encrypt, per esempio `NXDOMAIN` quando manca il record DNS) con **Richiedi il certificato** per riprovare.
 
 I certificati li rinnova il pannello, che controlla due volte al giorno come fa certbot: il rinnovo avviene solo negli ultimi 30 giorni, e ogni nome mostra la sua scadenza. Let's Encrypt non manda più email di scadenza, quindi l'indirizzo in **Email per Let's Encrypt** è facoltativo: è solo il contatto dell'account.
+
+## Domini su Cloudflare
+
+Se il DNS di un dominio sta su Cloudflare, il pannello può chiedere i certificati tramite la sua API: funzionano anche con il record in proxy (nuvola arancione) e con la porta 80 chiusa.
+
+1. Su Cloudflare, **My Profile › API Tokens › Create Token**, con i permessi **Zone · Zone · Read** e **Zone · DNS · Edit** sulle zone che vuoi usare.
+2. In **Sistema › Domini › Cloudflare** incolla il token e premi **Collega**: il pannello lo prova elencando le zone, e lo rifiuta con il motivo di Cloudflare se non basta.
+3. La pagina mostra i domini del tuo account: **Aggiungi** li porta fra i domini del pannello. Quelli già aggiunti la cui zona è attiva su Cloudflare prendono l'etichetta *Cloudflare*, e i nomi che aspettavano un certificato, o se l'erano visto rifiutare sulla porta 80, lo richiedono da soli.
+
+Per un dominio su Cloudflare certbot fa la verifica DNS-01: un hook del pannello pubblica il record TXT `_acme-challenge` tramite l'API, aspetta che i nameserver di Cloudflare lo restituiscano e lo cancella a verifica finita. Il token è cifrato nello store del pannello e arriva a certbot solo nell'ambiente di ogni esecuzione: non finisce mai in un file né nelle impostazioni di rinnovo.
+
+**Con la nuvola arancione.** In Cloudflare metti **SSL/TLS** su **Full (strict)**: con *Flexible* Cloudflare parla HTTP al server, che una volta in HTTPS lo rimanda su HTTPS, e la pagina gira in tondo. Dietro il proxy ogni connessione arriva da Cloudflare, quindi nei blocchi di questi domini nginx prende l'indirizzo del visitatore da `CF-Connecting-IP`, e solo dagli [indirizzi di Cloudflare](https://www.cloudflare.com/ips/): le regole d'accesso dei progetti continuano a valere, e chi aggira Cloudflare non può scegliersi l'indirizzo.
+
+Se scolleghi Cloudflare, i certificati già emessi restano e al rinnovo i loro nomi tornano alla verifica sulla porta 80. Allo stesso modo, un dominio che entra o esce dall'account cambia verifica al primo rinnovo.
 
 ## Come un nome arriva all'app
 

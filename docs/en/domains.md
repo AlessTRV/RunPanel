@@ -9,8 +9,8 @@ Every project with a port can be served on a subdomain over HTTPS: `app.example.
 ## What you need
 
 - Linux, with nginx and certbot installed (for instance `sudo apt install nginx certbot`).
-- A domain you own, and at its DNS provider **one wildcard record**: `*.example.com` → the server's public address (`A`, plus `AAAA` if it has IPv6). One record covers every subdomain; each name gets its own certificate, so no DNS API is needed.
-- Ports 80 and 443 reaching nginx: port 80 is where Let's Encrypt checks the name, for the first certificate and every renewal.
+- A domain you own, and at its DNS provider **one wildcard record**: `*.example.com` → the server's public address (`A`, plus `AAAA` if it has IPv6). One record covers every subdomain, and each name gets its own certificate.
+- Ports 80 and 443 reaching nginx: port 80 is where Let's Encrypt checks the name, for the first certificate and every renewal. For domains on [Cloudflare](#domains-on-cloudflare) the check goes through DNS instead.
 
 ## Setting nginx up
 
@@ -39,6 +39,20 @@ Deleting `/etc/nginx/conf.d/runpanel.conf` and reloading takes every managed nam
 The panel writes the block, reloads nginx, checks that the name really reaches this server and asks for the certificate in the background: a few seconds later the name reads *HTTPS attivo*. If the request fails, the reason shows under the name (Let's Encrypt's own message, for instance `NXDOMAIN` when the DNS record is missing) with **Richiedi il certificato** to try again.
 
 Certificates are renewed by the panel itself, checking twice a day as certbot does: a renewal happens only within 30 days of expiry, and each name shows its expiry date. Let's Encrypt no longer sends expiry emails, so the address under **Email per Let's Encrypt** is optional: it is only the account's contact.
+
+## Domains on Cloudflare
+
+When a domain's DNS is on Cloudflare, the panel can get its certificates through Cloudflare's API: they work with the record proxied (orange cloud) and with port 80 closed.
+
+1. On Cloudflare, **My Profile › API Tokens › Create Token**, with the permissions **Zone · Zone · Read** and **Zone · DNS · Edit** on the zones you want to use.
+2. In **Sistema › Domini › Cloudflare**, paste the token and press **Collega**: the panel tries it by listing the zones, and refuses it with Cloudflare's reason if it is not enough.
+3. The page lists your account's domains: **Aggiungi** adds one to the panel. Domains already added whose zone is active on Cloudflare get the *Cloudflare* label, and their names that were waiting for a certificate, or were refused one on port 80, ask again by themselves.
+
+For a domain on Cloudflare certbot answers the DNS-01 challenge: a hook of the panel's publishes the `_acme-challenge` TXT record through the API, waits until Cloudflare's nameservers give it back, and deletes it once the check is over. The token is encrypted in the panel's store and reaches certbot only through the environment of each run: it is never written to a file or to the renewal settings.
+
+**With the orange cloud.** Set Cloudflare's **SSL/TLS** mode to **Full (strict)**: with *Flexible* Cloudflare speaks HTTP to the server, which once on HTTPS redirects it back to HTTPS, round and round. Behind the proxy every connection comes from Cloudflare, so in these domains' blocks nginx reads the visitor's address from `CF-Connecting-IP`, and only from [Cloudflare's addresses](https://www.cloudflare.com/ips/): the projects' access rules keep holding, and someone going around Cloudflare cannot pick their own address.
+
+If you disconnect Cloudflare, the certificates already issued stay, and at renewal their names go back to the port-80 check. In the same way, a domain that joins or leaves the account switches challenge at its next renewal.
 
 ## How a name reaches the app
 
