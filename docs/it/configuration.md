@@ -24,7 +24,7 @@ Tutto sta in `.env` nella cartella del pannello; `.env.example` è la versione c
 
 **La chiave segreta.** Cifra le variabili dei progetti, le credenziali dei servizi, i registry, le destinazioni di backup, il token GitHub e il bot Telegram. Se cambia o va persa, tutti questi valori diventano illeggibili: salvala insieme ai backup. Con [più server](multi-server.md) ogni installazione ha la propria; i valori condivisi (token GitHub, bot Telegram) vengono cifrati di nuovo da ciascun server.
 
-**I timer di fondo.** `RUNPANEL_DISABLE_SCHEDULERS` serve per un'istanza di prova accanto a quella vera. Spegne pulizia Docker, backup e riavvii pianificati, deploy automatico, controllo degli aggiornamenti, sincronizzazione del cluster, controlli di stato con le relative notifiche e la ripartenza di progetti e servizi dopo un riavvio della macchina. Spegne anche i gate d'accesso: le porte limitate restano chiuse.
+**I timer di fondo.** `RUNPANEL_DISABLE_SCHEDULERS` serve per un'istanza di prova accanto a quella vera. Spegne pulizia Docker, backup e riavvii pianificati, deploy automatico, controllo degli aggiornamenti, sincronizzazione del cluster, controlli di stato con le relative notifiche e la ripartenza di progetti e servizi dopo un riavvio della macchina. Spegne anche i gate d'accesso: le porte limitate restano chiuse. E tiene il pannello lontano dall'nginx dell'host: i [domini](domains.md) vengono salvati ma mai applicati.
 
 **Cosa vedono i progetti.** Nessuna variabile `RUNPANEL_*`, né `DATABASE_URL`, arriva ai comandi di build, ai processi o ai container dei progetti: la chiave segreta, le credenziali dello store e il token di setup restano del pannello.
 

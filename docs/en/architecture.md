@@ -41,6 +41,7 @@ lib/
   deploy-contract.ts    the contract, its parser and preflight checks
   deploy-phases.ts      the points a one-time command can pin to
   ip-access.ts          CIDR matching, and the host's own networks
+  proxy-names.ts        what a domain and a subdomain may look like, no imports
   service-versions.ts   which engine versions are offered
   hooks/                SSE streams, polling (useResource), selected server (useNode), user (useMe)
 services/
@@ -49,6 +50,7 @@ services/
   deploy-poll.ts        polling-based auto-deploy
   one-time-commands.ts  the one-time queue: claim, run, outcome, history
   access.ts, access-gate.ts  the TCP gates in front of restricted ports
+  proxy/                domains: nginx blocks (render.ts, no imports), host probe and reload, certbot
   cluster/              cluster state, signed client, fan-out to every server, directory, join, sync
   backup/               policies, dumps, archives, destinations, restore
   autostart/            detection, unit generation, reconcile

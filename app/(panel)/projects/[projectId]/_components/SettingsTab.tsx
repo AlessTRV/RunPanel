@@ -22,6 +22,7 @@ import { EnvFilePathHint, HealthcheckHint, PortHint } from "@/components/DeployH
 import { AccessSection } from "@/components/AccessSection";
 import { ScheduledRestart } from "@/components/ScheduledRestart";
 import { BackupSection } from "./BackupSection";
+import { DomainSection } from "./DomainSection";
 import { LinkedServiceDelete, type LinkedServiceRow } from "./LinkedServiceDelete";
 import { MountsSection } from "./MountsSection";
 import { OneTimeCommandsSection } from "./OneTimeCommandsSection";
@@ -641,6 +642,9 @@ export function SettingsTab({
         unavailable={accessUnavailable}
         onSaved={(updated) => onProjectChange((prev) => ({ ...prev, ...(updated as Partial<Project>) }))}
       />
+
+      {/* Right after who may connect: a name is one more way in, and follows those rules. */}
+      <DomainSection projectId={project.id} />
 
       {/*
         Saved on its own, like the access section above, rather than through the

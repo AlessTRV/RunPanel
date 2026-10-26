@@ -23,6 +23,8 @@ import * as projectBackupSettings from "./021-project-backup-settings";
 import * as serviceDisplayName from "./022-service-display-name";
 import * as usersAndPermissions from "./023-users-and-permissions";
 import * as cluster from "./024-cluster";
+import * as domains from "./025-domains";
+import * as domainCloudflare from "./026-domain-cloudflare";
 
 /**
  * Migrations are registered statically rather than read from disk with
@@ -56,6 +58,8 @@ export const migrations: Record<string, Migration> = {
   "022-service-display-name": serviceDisplayName,
   "023-users-and-permissions": usersAndPermissions,
   "024-cluster": cluster,
+  "025-domains": domains,
+  "026-domain-cloudflare": domainCloudflare,
 };
 
 export class StaticMigrationProvider implements MigrationProvider {

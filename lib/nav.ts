@@ -133,6 +133,13 @@ const PAGE = {
     icon: "solar:server-2-linear",
     iconActive: "solar:server-2-bold-duotone",
   },
+  domains: {
+    label: "Domini",
+    href: "/domains",
+    permission: "host",
+    icon: "solar:global-linear",
+    iconActive: "solar:global-bold-duotone",
+  },
   users: {
     label: "Utenti",
     href: "/users",
@@ -179,7 +186,7 @@ export type NavSectionId = "system" | "access" | "settings";
 export const NAV_SECTIONS: Record<NavSectionId, { label: string; tabs: NavPage[] }> = {
   system: {
     label: "Sistema",
-    tabs: [PAGE.diagnostics, PAGE.autostart, PAGE.updates, PAGE.storage, PAGE.servers],
+    tabs: [PAGE.diagnostics, PAGE.autostart, PAGE.updates, PAGE.domains, PAGE.storage, PAGE.servers],
   },
   access: { label: "Accessi", tabs: [PAGE.users, PAGE.audit] },
   settings: { label: "Impostazioni", tabs: [PAGE.account, PAGE.settings, PAGE.github] },

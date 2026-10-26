@@ -41,6 +41,7 @@ lib/
   deploy-contract.ts    il contratto, il suo parser e i controlli preliminari
   deploy-phases.ts      i punti a cui si aggancia un comando una tantum
   ip-access.ts          confronto CIDR, e le reti della macchina
+  proxy-names.ts        com'è fatto un dominio e un sottodominio, senza import
   service-versions.ts   quali versioni dei motori sono offerte
   hooks/                stream SSE, polling (useResource), server selezionato (useNode), utente (useMe)
 services/
@@ -49,6 +50,7 @@ services/
   deploy-poll.ts        il deploy automatico a polling
   one-time-commands.ts  la coda una tantum: presa, esecuzione, esito, cronologia
   access.ts, access-gate.ts  i gate TCP davanti alle porte limitate
+  proxy/                domini: blocchi nginx (render.ts, senza import), stato dell'host e reload, certbot
   cluster/              stato del cluster, client firmato, fan-out su tutti i server, directory, join, sync
   backup/               policy, dump, archivi, destinazioni, ripristino
   autostart/            rilevamento, generazione della unit, riconciliazione

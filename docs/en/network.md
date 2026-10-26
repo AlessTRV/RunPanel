@@ -26,6 +26,7 @@ Refused connections appear under **Rifiutati di recente** (the last five) with a
 
 - **It fails closed.** The port is held open by the panel's process: if the panel is not running, or runs with `RUNPANEL_DISABLE_SCHEDULERS`, the port is closed. A rule that must hold with the panel down needs a host firewall as well.
 - **The project network is untouched.** A Docker or Compose project reaches its own database by name on the `runpanel-net-<slug>` network (see [Databases](databases.md)), which does not go through the gate. Traffic from `host.docker.internal` does.
+- **A subdomain follows the same rules.** nginx reaches the app over loopback, which the gate always lets through, so it applies the list itself: a project's [subdomain](domains.md) lets in the listed addresses and this machine, unless the name is explicitly opened to everyone.
 
 It is not available for a **Compose** project (its ports come from a file RunPanel does not rewrite), for a container on `network: host`, or for a project without a port. The page says so.
 

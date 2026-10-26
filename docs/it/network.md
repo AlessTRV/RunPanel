@@ -26,6 +26,7 @@ Le connessioni respinte compaiono sotto **Rifiutati di recente** (le ultime cinq
 
 - **Fallisce in chiusura.** La porta è tenuta aperta dal processo del pannello: se il pannello non gira, o gira con `RUNPANEL_DISABLE_SCHEDULERS`, la porta è chiusa. Una regola che deve valere anche a pannello spento ha bisogno anche di un firewall sulla macchina.
 - **La rete del progetto non è toccata.** Un progetto Docker o Compose raggiunge il proprio database per nome sulla rete `runpanel-net-<slug>` (vedi [Database](databases.md)), che non passa dal gate. Ci passa invece il traffico da `host.docker.internal`.
+- **Un sottodominio segue le stesse regole.** nginx raggiunge l'app in loopback, che il gate lascia sempre passare, quindi applica la lista da sé: il [sottodominio](domains.md) di un progetto fa entrare gli indirizzi della lista e questa macchina, a meno che il nome non sia aperto a tutti esplicitamente.
 
 Non è disponibile per un progetto **Compose** (pubblica le porte da un file che RunPanel non riscrive), per un container su `network: host` e per un progetto senza porta. La pagina lo dice.
 

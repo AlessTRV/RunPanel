@@ -97,6 +97,14 @@ One page that says what is wrong with this installation and what to press to fix
 <tr>
 <td valign="top" colspan="2">
 
+### 🔐 A subdomain per project
+Add a domain once, give each project `app.yourdomain.com`: the panel writes the blocks for the nginx you already run, gets and renews a Let's Encrypt certificate per name — through Cloudflare's API too, orange cloud and all — and keeps restricted projects behind the same allow list — without touching your own nginx configuration.
+
+</td>
+</tr>
+<tr>
+<td valign="top" colspan="2">
+
 ### 🌐 More than one server
 Link other RunPanel installs to this one: the same accounts everywhere, every server's projects, databases, backups, monitor, diagnostics and updates in the same lists, with a card per server for load, disk and warnings, all from one panel — over your private network, with signed requests and nothing exposed to the internet.
 
@@ -163,7 +171,7 @@ System, Access and Settings group several pages as tabs, each with its own addre
 | **Services** | managed databases, the databases inside them, project links |
 | **Backups** | policies, destinations, runs, archives, restores |
 | **Monitor** | processes and containers with CPU, memory and uptime, plus a summary of the host (of every server, with several) |
-| **System** | *Diagnostics* (what is missing and what to press), *Autostart* (what comes back after a reboot), *Updates* (version, waiting commits, the button that applies them), *Docker cleanup* (what is using the disk and what can be reclaimed), *Servers* (the linked installs: status, version, diagnosis, role, revocation) |
+| **System** | *Diagnostics* (what is missing and what to press), *Autostart* (what comes back after a reboot), *Updates* (version, waiting commits, the button that applies them), *Domains* (the domains nginx serves and every project's subdomain), *Docker cleanup* (what is using the disk and what can be reclaimed), *Servers* (the linked installs: status, version, diagnosis, role, revocation) |
 | **Access** | *Users* (invitations with expiring links, per-account permissions) and *Activity log* (who did what) |
 | **Settings** | *Account* (email, password, sessions, light or dark theme), *Panel* (refresh rate, timezone, public address, polling interval, accent colour, Telegram notifications, private registries), *GitHub* (token, repositories, branches) |
 
@@ -286,6 +294,12 @@ Everything lives in `.env` (see `.env.example` for the annotated version) and is
 <sub>Linking servers, roles, the selector, shared accounts, diagnosis, revocation</sub>
 
 </td>
+<td valign="top">
+
+**[🔐 Domains](docs/en/domains.md)**<br>
+<sub>A subdomain per project on your nginx, HTTPS certificates, the one-time setup</sub>
+
+</td>
 </tr>
 </table>
 
@@ -308,6 +322,7 @@ Everything lives in `.env` (see `.env.example` for the annotated version) and is
 - Repository URLs must be public `https://`, and the GitHub token is only ever attached to requests to GitHub
 - External commands always go through an argv array, never a shell string
 - Any published port can be restricted to named networks, in front of a listener that is moved to loopback so there is no way around it
+- Subdomains: the nginx blocks are written from names validated twice, by the route and by the renderer; certbot runs as the panel's user; root is reached only for `nginx -t` and `nginx -s reload`, through systemd path units that never read what the panel writes; a Cloudflare token is encrypted at rest and reaches certbot's hook only through the environment of each run ([Domains](docs/en/domains.md))
 
 For TLS and reverse proxies in front of the panel, see [Putting it on the internet](docs/en/configuration.md#putting-it-on-the-internet).
 
