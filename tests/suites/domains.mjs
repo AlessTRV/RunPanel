@@ -130,6 +130,23 @@ export async function run({ base }) {
   res = await owner.call("/api/domains/settings", json("PUT", { acmeEmail: "" }));
   r.check("an empty email clears it", res.status === 200, show(res));
 
+  // --- Cloudflare ---------------------------------------------------------------------------------
+  // Only what never reaches Cloudflare: a well-formed token would be tried against the real API.
+  res = await owner.call("/api/domains");
+  r.check(
+    "Cloudflare starts disconnected, with no domain on it",
+    res.body.cloudflare?.connected === false && res.body.domains?.every((domain) => domain.cloudflare === false),
+    show(res)
+  );
+  for (const bad of ["", "too-short", "a token with spaces in the middle of it", "line-one-of-a-token\nline-two"]) {
+    res = await owner.call("/api/domains/cloudflare", json("PUT", { token: bad }));
+    r.check(`the token ${JSON.stringify(bad.slice(0, 16))} is a 400`, res.status === 400, show(res));
+  }
+  res = await owner.call("/api/domains/cloudflare", { method: "PUT", body: "{" });
+  r.check("a token body that is not JSON is a 400", res.status === 400, show(res));
+  res = await owner.call("/api/domains/cloudflare", { method: "DELETE" });
+  r.check("disconnecting with nothing connected is fine", res.status === 200 && res.body.cloudflare?.connected === false, show(res));
+
   // --- who may do what ----------------------------------------------------------------------------
   res = await owner.call("/api/users", json("POST", { email: "dev@example.test", hours: 1 }));
   const devId = res.body?.user?.id;
@@ -145,6 +162,10 @@ export async function run({ base }) {
   r.check("without the host permission the Domains page is refused", res.status === 403, show(res));
   res = await dev.call("/api/domains", json("POST", { name: "altro.it" }));
   r.check("and so is adding a domain", res.status === 403, show(res));
+  res = await dev.call("/api/domains/cloudflare", json("PUT", { token: "x".repeat(40) }));
+  r.check("and connecting Cloudflare", res.status === 403, show(res));
+  res = await dev.call("/api/domains/cloudflare", { method: "DELETE" });
+  r.check("and disconnecting it", res.status === 403, show(res));
   res = await dev.call(`/api/projects/${projectId}/hosts`);
   r.check("reading a project shows its names", res.status === 200 && res.body.canManageDomains === false, show(res));
   res = await dev.call(`/api/projects/${projectId}/hosts`, json("POST", { domainId, subdomain: "dev" }));

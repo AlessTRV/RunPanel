@@ -71,12 +71,12 @@ export interface Ran {
 }
 
 /** Run a host command. Never throws; a failure is a result like any other. */
-async function run(command: string, args: string[], timeoutMs: number): Promise<Ran> {
+async function run(command: string, args: string[], timeoutMs: number, env: Record<string, string> = {}): Promise<Ran> {
   try {
     const { stdout, stderr } = await exec(command, args, {
       timeout: timeoutMs,
       windowsHide: true,
-      env: { ...process.env, PATH: toolchainPath() },
+      env: { ...process.env, ...env, PATH: toolchainPath() },
       maxBuffer: 4 * 1024 * 1024,
     });
     return { ok: true, output: `${stdout}${stderr}`.trim() };
@@ -323,11 +323,15 @@ export function nginx(found: ProxyProbe, action: RequestAction): Promise<Ran> {
 /**
  * certbot as the panel's own user: its directories are under `PROXY_ROOT`, so
  * it needs no root, and a renewal never depends on anything root set up.
+ *
+ * `env` is for the Cloudflare hook, which inherits it: the token goes through
+ * the environment of one run rather than into a file.
  */
-export function certbot(found: ProxyProbe, args: string[]): Promise<Ran> {
+export function certbot(found: ProxyProbe, args: string[], env?: Record<string, string>): Promise<Ran> {
   if (!found.certbot.path) return Promise.resolve({ ok: false, output: "certbot non trovato" });
-  // Let's Encrypt can take a while to look at a challenge; certbot waits.
-  return run(found.certbot.path, args, 180_000);
+  // Let's Encrypt can take a while to look at a challenge, and the Cloudflare
+  // hook waits for the record to be published before it lets certbot ask.
+  return run(found.certbot.path, args, 300_000, env);
 }
 
 export type RootSetup = Ran & {

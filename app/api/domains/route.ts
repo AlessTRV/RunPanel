@@ -6,7 +6,7 @@ import { getSetting } from "@/lib/settings";
 import { generateId } from "@/lib/utils";
 import { createDomainSchema } from "@/lib/validation";
 import { isVisible, visibleProjectIds } from "@/lib/principal";
-import { ACME_EMAIL_SETTING, hostView, proxyProbe, publicAddresses } from "@/services/proxy";
+import { ACME_EMAIL_SETTING, hostView, proxyProbe, publicAddresses, syncCloudflare } from "@/services/proxy";
 
 /**
  * The Domains page: what this server's nginx can do, the domains it answers
@@ -20,9 +20,12 @@ export async function GET(request: NextRequest) {
   const denied = await requirePermission("host");
   if (isDenied(denied)) return denied;
 
+  const fresh = request.nextUrl.searchParams.get("fresh") === "1";
+  // First, because it may link or unlink a domain, and the list below should say so.
+  const cloudflare = await syncCloudflare(fresh);
   const db = await getDb();
   const [proxy, acmeEmail, domains, hosts, visible] = await Promise.all([
-    proxyProbe(request.nextUrl.searchParams.get("fresh") === "1"),
+    proxyProbe(fresh),
     getSetting(ACME_EMAIL_SETTING),
     db.selectFrom("domains").selectAll().orderBy("name", "asc").execute(),
     db
@@ -39,8 +42,16 @@ export async function GET(request: NextRequest) {
     proxy,
     acmeEmail: acmeEmail ?? "",
     addresses: publicAddresses(),
+    cloudflare: {
+      ...cloudflare,
+      zones: cloudflare.zones.map((zone) => ({
+        ...zone,
+        domainId: domains.find((domain) => domain.name === zone.name)?.id ?? null,
+      })),
+    },
     domains: domains.map((domain) => ({
       ...domain,
+      cloudflare: domain.cloudflare === 1,
       // Every name, visible or not: it is what decides whether the domain can go.
       hostCount: hosts.filter((host) => host.domain_id === domain.id).length,
     })),
@@ -72,8 +83,12 @@ export async function POST(request: NextRequest) {
     }
 
     const now = nowIso();
-    const domain = { id: generateId(), name, created_at: now, updated_at: now };
+    const domain = { id: generateId(), name, cloudflare: 0, created_at: now, updated_at: now };
     await db.insertInto("domains").values(domain).execute();
-    return NextResponse.json({ ...domain, hostCount: 0 }, { status: 201 });
+
+    // On the Cloudflare account it is linked now, so even its first certificate goes through DNS.
+    await syncCloudflare();
+    const linked = await db.selectFrom("domains").select("cloudflare").where("id", "=", domain.id).executeTakeFirst();
+    return NextResponse.json({ ...domain, cloudflare: linked?.cloudflare === 1, hostCount: 0 }, { status: 201 });
   });
 }

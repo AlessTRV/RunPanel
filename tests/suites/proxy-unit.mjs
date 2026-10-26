@@ -1,6 +1,10 @@
 import { createReporter } from "../harness.mjs";
 import { pathToFileURL } from "node:url";
 import { join } from "node:path";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { createServer } from "node:http";
+import { spawn } from "node:child_process";
 
 /**
  * Domains as nginx sees them: which names are accepted, and the exact
@@ -20,7 +24,7 @@ export async function run({ repoRoot }) {
   const r = createReporter("proxy-unit");
   const names = await import(pathToFileURL(join(repoRoot, "lib", "proxy-names.ts")).href);
   const render = await import(pathToFileURL(join(repoRoot, "services", "proxy", "render.ts")).href);
-  const { normalizeDomain, normalizeSubdomain, hostnameFor, isHostname } = names;
+  const { normalizeDomain, normalizeSubdomain, hostnameFor, isHostname, zoneFor } = names;
 
   const throws = (fn) => {
     try {
@@ -50,6 +54,12 @@ export async function run({ repoRoot }) {
   r.check("a stored hostname passes the renderer's check", isHostname("app.esempio.it") === true);
   r.check("a bare domain is not a hostname here", isHostname("esempio.it") === false);
 
+  r.check("a domain is in its own zone", zoneFor("esempio.it", ["altro.it", "esempio.it"]) === "esempio.it");
+  r.check("a domain under a zone is in it", zoneFor("clienti.esempio.it", ["esempio.it"]) === "esempio.it");
+  r.check("the closest zone wins", zoneFor("a.clienti.esempio.it", ["esempio.it", "clienti.esempio.it"]) === "clienti.esempio.it");
+  r.check("a name that only ends the same way is not in the zone", zoneFor("altroesempio.it", ["esempio.it"]) === null);
+  r.check("no zones, no zone", zoneFor("esempio.it", []) === null);
+
   // --- HTTP/2 syntax by nginx version ------------------------------------------------
   const { http2Syntax } = render;
   r.check("Ubuntu 24.04's 1.24 uses the listen parameter", http2Syntax("nginx version: nginx/1.24.0 (Ubuntu)") === "listen");
@@ -68,6 +78,7 @@ export async function run({ repoRoot }) {
     checkToken: token,
     ipv6: true,
     http2: "directive",
+    cloudflare: false,
   };
   const plain = render.renderSite(base);
   r.check("it listens on 80, both families", plain.includes("    listen 80;") && plain.includes("    listen [::]:80;"));
@@ -105,6 +116,16 @@ export async function run({ repoRoot }) {
   r.check("the challenge on 80 is not behind the list", !limited80.includes("deny all;"));
   const onlyHere = render.renderSite({ ...base, allow: [] });
   r.check("an empty list means this machine only", onlyHere.includes("allow 127.0.0.1;") && onlyHere.includes("deny all;") && !/allow \d+\.\d+\.\d+\.\d+\/\d+/.test(onlyHere));
+
+  // --- behind Cloudflare's proxy ---------------------------------------------------------
+  const proxied = render.renderSite({ ...base, certificate, cloudflare: true, allow: ["192.168.1.0/24"] });
+  const [proxied80, proxied443] = proxied.split("\nserver {").slice(1);
+  const believes = (block) => render.CLOUDFLARE_RANGES.every((range) => block.includes(`    set_real_ip_from ${range};`));
+  r.check("both blocks read the visitor from CF-Connecting-IP", proxied80.includes("real_ip_header CF-Connecting-IP;") && proxied443?.includes("real_ip_header CF-Connecting-IP;"));
+  r.check("and believe it only from Cloudflare's ranges", believes(proxied80) && believes(proxied443) && proxied.match(/set_real_ip_from /g).length === 2 * render.CLOUDFLARE_RANGES.length);
+  r.check("the allow list still applies, to the visitor", proxied443.includes("allow 192.168.1.0/24;") && proxied443.includes("deny all;"));
+  r.check("a name not on Cloudflare believes no header", !plain.includes("real_ip") && !tls.includes("real_ip"));
+  r.check("Cloudflare's ranges are all plain CIDR", render.CLOUDFLARE_RANGES.every((range) => /^[0-9a-f.:]+\/\d{1,3}$/.test(range)));
 
   // --- refusals -------------------------------------------------------------------------
   r.check("a hostname with a semicolon is refused", throws(() => render.renderSite({ ...base, hostname: "app.esempio.it; include /etc/shadow" })));
@@ -198,6 +219,24 @@ export async function run({ repoRoot }) {
   r.check("renew is non-interactive", render.certbotRenewArgs().slice(0, 2).join(" ") === "renew --non-interactive");
   r.check("delete names the certificate", render.certbotDeleteArgs("app.esempio.it").slice(0, 3).join(" ") === "delete --cert-name app.esempio.it");
 
+  const viaDns = render.certbotIssueArgs("app.esempio.it", null, "cloudflare");
+  const dnsAt = (flag) => viaDns[viaDns.indexOf(flag) + 1];
+  r.check("through Cloudflare certbot answers on DNS, with no webroot", viaDns.includes("--manual") && dnsAt("--preferred-challenges") === "dns" && !viaDns.includes("--webroot"));
+  r.check(
+    "the hooks are the panel's, run by node",
+    dnsAt("--manual-auth-hook") === `node ${render.CLOUDFLARE_HOOK_PATH} auth` && dnsAt("--manual-cleanup-hook") === `node ${render.CLOUDFLARE_HOOK_PATH} cleanup`
+  );
+  r.check("the hook lives in certbot's private directory", render.CLOUDFLARE_HOOK_PATH.startsWith(`${render.CERTBOT_DIR}/`));
+  r.check("the name and its certificate are the same either way", dnsAt("-d") === "app.esempio.it" && dnsAt("--cert-name") === "app.esempio.it" && viaDns.includes("--keep-until-expiring"));
+
+  r.check("the renewal settings are named after the host", render.renewalConfPath("app.esempio.it") === `${render.LETSENCRYPT_DIR}/renewal/app.esempio.it.conf`);
+  r.check(
+    "a renewal through the hook reads as Cloudflare",
+    render.renewalChallenge(`[renewalparams]\nauthenticator = manual\nmanual_auth_hook = node ${render.CLOUDFLARE_HOOK_PATH} auth\n`) === "cloudflare"
+  );
+  r.check("a webroot renewal reads as HTTP", render.renewalChallenge("[renewalparams]\nauthenticator = webroot\n") === "http");
+  r.check("someone else's manual hook is not ours", render.renewalChallenge("authenticator = manual\nmanual_auth_hook = /root/other.sh\n") === "http");
+
   // --- reading the tools' output ------------------------------------------------------------------
   const nginxOutput = [
     'nginx: [warn] conflicting server name "App.esempio.it" on 0.0.0.0:80, ignored',
@@ -234,5 +273,110 @@ export async function run({ repoRoot }) {
   r.check("a certbot failure keeps Let's Encrypt's detail", failure.includes("NXDOMAIN") && !failure.includes("Saving debug log"), failure);
   r.check("without a detail the last lines are kept", render.certbotFailure("a\nb\nc\nd\ne").startsWith("b"));
 
+  const hookFailure = render.certbotFailure(
+    [
+      "Hook '--manual-auth-hook' for app.esempio.it ran with error output:",
+      " RunPanel: il token Cloudflare non vede nessuna zona che contenga app.esempio.it",
+      "Certbot failed to authenticate some domains (authenticator: manual).",
+      "  Domain: app.esempio.it",
+      "  Type:   unauthorized",
+      "  Detail: No TXT record found at _acme-challenge.app.esempio.it",
+    ].join("\n")
+  );
+  r.check("a hook failure is the reason shown, not the record it left missing", hookFailure.startsWith("il token Cloudflare") && !hookFailure.includes("No TXT"), hookFailure);
+
+  await checkCloudflareHook(r, render);
   return r.result();
+}
+
+/**
+ * The hook certbot runs, as certbot runs it — a node process with the token in
+ * its environment — against a stand-in for Cloudflare's API that keeps the
+ * records it is given. The stand-in answers TXT content quoted, as Cloudflare
+ * may, and only to the right bearer token.
+ */
+async function checkCloudflareHook(r, render) {
+  const dir = mkdtempSync(join(tmpdir(), "runpanel-hook-"));
+  const hook = join(dir, "cloudflare-hook.mjs");
+  writeFileSync(hook, render.renderCloudflareHook());
+
+  const records = new Map();
+  const asked = [];
+  let nextId = 1;
+  const server = createServer((req, res) => {
+    let body = "";
+    req.on("data", (chunk) => (body += chunk));
+    req.on("end", () => {
+      asked.push(`${req.method} ${req.url}`);
+      const url = new URL(req.url, "http://stand-in");
+      const send = (status, payload) => {
+        res.writeHead(status, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(payload));
+      };
+      if (req.headers.authorization !== "Bearer good-token") {
+        return send(403, { success: false, errors: [{ code: 9109, message: "Invalid access token" }] });
+      }
+      if (req.method === "GET" && url.pathname === "/zones") {
+        const found = url.searchParams.get("name") === "esempio.it";
+        return send(200, { success: true, result: found ? [{ id: "z1", name: "esempio.it", name_servers: [] }] : [] });
+      }
+      if (req.method === "POST" && url.pathname === "/zones/z1/dns_records") {
+        const record = JSON.parse(body);
+        const id = `r${nextId++}`;
+        records.set(id, { ...record, id, content: `"${record.content}"` });
+        return send(200, { success: true, result: { id } });
+      }
+      if (req.method === "GET" && url.pathname === "/zones/z1/dns_records") {
+        const named = [...records.values()].filter((record) => record.name === url.searchParams.get("name"));
+        return send(200, { success: true, result: named });
+      }
+      const one = url.pathname.match(/^\/zones\/z1\/dns_records\/(\w+)$/);
+      if (req.method === "DELETE" && one) {
+        records.delete(one[1]);
+        return send(200, { success: true, result: { id: one[1] } });
+      }
+      send(404, { success: false, errors: [{ code: 7003, message: "No route for that URI" }] });
+    });
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  const run = (phase, env) =>
+    new Promise((resolve) => {
+      const child = spawn(process.execPath, [hook, phase], {
+        env: {
+          ...process.env,
+          RUNPANEL_CLOUDFLARE_API: `http://127.0.0.1:${server.address().port}`,
+          CERTBOT_DOMAIN: "app.esempio.it",
+          CERTBOT_VALIDATION: "the-validation",
+          [render.CLOUDFLARE_TOKEN_ENV]: "good-token",
+          ...env,
+        },
+      });
+      let output = "";
+      child.stdout.on("data", (chunk) => (output += chunk));
+      child.stderr.on("data", (chunk) => (output += chunk));
+      child.on("close", (code) => resolve({ code, output }));
+    });
+
+  try {
+    let ran = await run("auth");
+    const [published] = records.values();
+    r.check(
+      "the hook publishes the challenge as a TXT record",
+      ran.code === 0 && records.size === 1 && published.type === "TXT" && published.name === "_acme-challenge.app.esempio.it",
+      ran.output
+    );
+    r.check("it finds the zone through the name's parent", asked.includes("GET /zones?name=app.esempio.it") && asked.includes("GET /zones?name=esempio.it"));
+    ran = await run("cleanup");
+    r.check("cleanup removes it, quoted as it came back", ran.code === 0 && records.size === 0, ran.output);
+    ran = await run("auth", { [render.CLOUDFLARE_TOKEN_ENV]: "bad-token" });
+    r.check("a refused token fails it with Cloudflare's reason", ran.code === 1 && ran.output.includes("RunPanel: ") && ran.output.includes("Invalid access token"), ran.output);
+    ran = await run("auth", { [render.CLOUDFLARE_TOKEN_ENV]: "" });
+    r.check("without a token it says where to put one", ran.code === 1 && ran.output.includes("RunPanel: manca il token"), ran.output);
+    ran = await run("auth", { CERTBOT_DOMAIN: "app.altro.it" });
+    r.check("a name outside the account is named", ran.code === 1 && ran.output.includes("app.altro.it") && records.size === 0, ran.output);
+  } finally {
+    server.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
 }

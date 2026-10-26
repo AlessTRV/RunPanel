@@ -19,7 +19,10 @@ import {
   type ProxyProbe,
 } from "./host";
 import {
+  CERTBOT_DIR,
   CHECK_PATH,
+  CLOUDFLARE_HOOK_PATH,
+  CLOUDFLARE_TOKEN_ENV,
   SITES_DIR,
   blamedNames,
   certbotDeleteArgs,
@@ -28,10 +31,15 @@ import {
   certbotRenewArgs,
   certificatePaths,
   conflictingNames,
+  renderCloudflareHook,
   renderSite,
+  renewalChallenge,
+  renewalConfPath,
   siteFileName,
+  type Challenge,
   type SiteInput,
 } from "./render";
+import { cloudflareToken, cloudflareZones, linkDomains, type CloudflareZone } from "./cloudflare";
 
 /**
  * Domains, end to end: the store says which names exist, this makes nginx and
@@ -116,6 +124,7 @@ async function loadHosts() {
   return db
     .selectFrom("project_hosts")
     .innerJoin("projects", "projects.id", "project_hosts.project_id")
+    .innerJoin("domains", "domains.id", "project_hosts.domain_id")
     .select([
       "project_hosts.id",
       "project_hosts.hostname",
@@ -126,6 +135,7 @@ async function loadHosts() {
       "projects.access_mode",
       "projects.access_allow",
       "projects.access_port",
+      "domains.cloudflare",
     ])
     .orderBy("project_hosts.hostname")
     .execute();
@@ -169,6 +179,7 @@ function siteFor(found: ProxyProbe, row: HostRow, withoutCertificate: boolean): 
     checkToken: row.check_token,
     ipv6: found.ipv6,
     http2: found.nginx.http2,
+    cloudflare: row.cloudflare === 1,
   };
 }
 
@@ -383,6 +394,26 @@ async function setHost(hostId: string, values: Partial<ProjectHostsTable>): Prom
     .execute();
 }
 
+/**
+ * What certbot needs for a domain on Cloudflare: its hook, written again, and
+ * the token for its environment. Null without a token the panel can read.
+ */
+async function cloudflareEnv(): Promise<Record<string, string> | null> {
+  const token = await cloudflareToken();
+  if (!token) return null;
+  fs.mkdirSync(CERTBOT_DIR, { recursive: true, mode: 0o700 });
+  fs.writeFileSync(CLOUDFLARE_HOOK_PATH, renderCloudflareHook(), { mode: 0o600 });
+  return { [CLOUDFLARE_TOKEN_ENV]: token };
+}
+
+function readText(file: string): string {
+  try {
+    return fs.readFileSync(file, "utf8");
+  } catch {
+    return "";
+  }
+}
+
 async function issue(hostId: string): Promise<void> {
   const found = await proxyProbe();
   if (found.state !== "ready") {
@@ -391,7 +422,13 @@ async function issue(hostId: string): Promise<void> {
   }
 
   const db = await getDb();
-  const row = await db.selectFrom("project_hosts").selectAll().where("id", "=", hostId).executeTakeFirst();
+  const row = await db
+    .selectFrom("project_hosts")
+    .innerJoin("domains", "domains.id", "project_hosts.domain_id")
+    .selectAll("project_hosts")
+    .select("domains.cloudflare")
+    .where("project_hosts.id", "=", hostId)
+    .executeTakeFirst();
   if (!row) return;
   await setHost(hostId, { status: "issuing", last_error: null });
 
@@ -404,9 +441,20 @@ async function issue(hostId: string): Promise<void> {
     return;
   }
 
-  const routing = await checkRouting(row.hostname, row.check_token);
+  // On Cloudflare the proof is a TXT record, so the name does not have to reach
+  // this server for it — and behind Cloudflare's proxy it would not.
+  const challenge: Challenge = row.cloudflare === 1 ? "cloudflare" : "http";
+  const env = challenge === "cloudflare" ? await cloudflareEnv() : null;
+  if (challenge === "cloudflare" && !env) {
+    await setHost(hostId, {
+      status: "error",
+      last_error: "Il dominio è su Cloudflare, ma il pannello non ha più il token: ricollegalo da Sistema › Domini.",
+    });
+    return;
+  }
+  const routing = challenge === "http" ? await checkRouting(row.hostname, row.check_token) : null;
   const email = (await getSetting(ACME_EMAIL_SETTING))?.trim() || null;
-  const result = await certbot(found, certbotIssueArgs(row.hostname, email));
+  const result = await certbot(found, certbotIssueArgs(row.hostname, email, challenge), env ?? undefined);
 
   const still = await db.selectFrom("project_hosts").select("id").where("id", "=", hostId).executeTakeFirst();
   if (!still) {
@@ -416,7 +464,7 @@ async function issue(hostId: string): Promise<void> {
   }
   if (!result.ok) {
     const why = certbotFailure(result.output);
-    await setHost(hostId, { status: "error", last_error: routing.reaches ? why : `${routing.detail} ${why}` });
+    await setHost(hostId, { status: "error", last_error: !routing || routing.reaches ? why : `${routing.detail} ${why}` });
     return;
   }
 
@@ -448,6 +496,48 @@ export async function issuePending(): Promise<number> {
   const rows = await db.selectFrom("project_hosts").select("id").where("status", "=", "pending").execute();
   for (const row of rows) issueCertificate(row.id);
   return rows.length;
+}
+
+export interface CloudflareStatus {
+  connected: boolean;
+  zones: CloudflareZone[];
+  /** Why the zones could not be read: a revoked token, Cloudflare not answering. */
+  error: string | null;
+}
+
+/**
+ * Bring each domain's Cloudflare link in line with what the token sees, apply
+ * nginx when one changed, and ask again — now through DNS — for the names of a
+ * newly linked domain still waiting for a certificate or refused one on port 80.
+ *
+ * A token Cloudflare does not answer for leaves the links alone: a network blip
+ * must not take the real-IP lines out of every block. A zone still pending on
+ * Cloudflare is left out, because its nameservers do not answer for it yet.
+ */
+export async function syncCloudflare(fresh = false): Promise<CloudflareStatus> {
+  const token = await cloudflareToken();
+  if (!token) {
+    if ((await linkDomains([])).changed) applyProxySoon();
+    return { connected: false, zones: [], error: null };
+  }
+
+  const outcome = await cloudflareZones(token, fresh);
+  if (outcome.error !== null) return { connected: true, zones: [], error: outcome.error };
+
+  const active = outcome.zones.filter((zone) => zone.status === "active").map((zone) => zone.name);
+  const { changed, linked } = await linkDomains(active);
+  if (changed) applyProxySoon();
+  if (linked.length > 0 && (await proxyProbe()).state === "ready") {
+    const db = await getDb();
+    const waiting = await db
+      .selectFrom("project_hosts")
+      .select("id")
+      .where("domain_id", "in", linked)
+      .where("status", "in", ["pending", "error"])
+      .execute();
+    for (const host of waiting) issueCertificate(host.id);
+  }
+  return { connected: true, zones: outcome.zones, error: null };
 }
 
 /** After a name is deleted: its certificate is of no use to anything else. */
@@ -499,10 +589,30 @@ async function renew(): Promise<void> {
   const found = await proxyProbe();
   if (found.state !== "ready") return;
   const db = await getDb();
-  const any = await db.selectFrom("project_hosts").select("id").where("status", "=", "active").executeTakeFirst();
-  if (!any) return;
+  const active = await db
+    .selectFrom("project_hosts")
+    .innerJoin("domains", "domains.id", "project_hosts.domain_id")
+    .select(["project_hosts.hostname", "domains.cloudflare"])
+    .where("project_hosts.status", "=", "active")
+    .execute();
+  if (active.length === 0) return;
 
-  const result = await certbot(found, certbotRenewArgs());
+  const env = (await cloudflareEnv().catch(() => null)) ?? undefined;
+  const email = (await getSetting(ACME_EMAIL_SETTING))?.trim() || null;
+
+  // A domain that joined or left Cloudflare after its names got their
+  // certificates: `certbot renew` would repeat the old challenge, so those
+  // names renew with the new one — which also becomes how they renew from then
+  // on. `--keep-until-expiring` keeps it to the same 30 days as the rest.
+  for (const host of active) {
+    const conf = readText(renewalConfPath(host.hostname));
+    const challenge: Challenge = host.cloudflare === 1 && env ? "cloudflare" : "http";
+    if (!conf || renewalChallenge(conf) === challenge) continue;
+    const switched = await certbot(found, certbotIssueArgs(host.hostname, email, challenge), env);
+    if (!switched.ok) console.warn(`[proxy] Rinnovo di ${host.hostname} non riuscito: ${certbotFailure(switched.output)}`);
+  }
+
+  const result = await certbot(found, certbotRenewArgs(), env);
   if (!result.ok) console.warn(`[proxy] Rinnovo dei certificati non riuscito: ${certbotFailure(result.output)}`);
   // Reloads nginx onto whatever was renewed, and reads the new expiries.
   const applied = await applyProxy();

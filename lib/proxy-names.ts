@@ -50,6 +50,20 @@ export function hostnameFor(subdomain: string, domain: string): string | null {
   return hostname.length <= 253 ? hostname : null;
 }
 
+/**
+ * The DNS zone a domain lives in, out of the ones an account holds: the domain
+ * itself or its closest parent. `clienti.esempio.it` is in `esempio.it`, and
+ * so is `esempio.it`; `altroesempio.it` is not.
+ */
+export function zoneFor(domain: string, zones: readonly string[]): string | null {
+  let best: string | null = null;
+  for (const zone of zones) {
+    const inside = domain === zone || domain.endsWith(`.${zone}`);
+    if (inside && (best === null || zone.length > best.length)) best = zone;
+  }
+  return best;
+}
+
 /** Whether a stored name still passes, for the renderer's own last check. */
 export function isHostname(value: string): boolean {
   return normalizeDomain(value) === value && value.split(".").length >= 3;

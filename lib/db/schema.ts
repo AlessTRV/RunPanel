@@ -607,6 +607,11 @@ export interface DomainsTable {
   id: string;
   /** Canonical and unique — see `normalizeDomain` in lib/proxy-names.ts. */
   name: string;
+  /**
+   * 0 | 1 — its zone is on the Cloudflare account the panel holds a token for:
+   * certificates through DNS, and the visitor's address from `CF-Connecting-IP`.
+   */
+  cloudflare: number;
   created_at: string;
   updated_at: string;
 }

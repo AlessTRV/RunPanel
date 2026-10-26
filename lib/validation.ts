@@ -994,6 +994,20 @@ export const hostActionSchema = z.object({ action: z.literal("retry") });
 export const proxyActionSchema = z.object({ action: z.enum(["setup", "apply"]) });
 
 /**
+ * A Cloudflare API token, as pasted. It only ever travels as a bearer header and
+ * through the environment of certbot's hook — never a command line — but it is
+ * kept to printable ASCII so a stray newline cannot split either.
+ */
+export const cloudflareTokenSchema = z.object({
+  token: z
+    .string()
+    .trim()
+    .min(20, "Il token sembra troncato: copialo intero")
+    .max(512)
+    .regex(/^[\x21-\x7e]+$/, "Incolla solo il token, senza spazi"),
+});
+
+/**
  * The Let's Encrypt account's contact. Optional — it no longer sends expiry
  * emails — and handed to certbot as one argv entry: the leading-dash rule is so
  * it can never read as a flag.
