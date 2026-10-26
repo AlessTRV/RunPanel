@@ -38,7 +38,12 @@ interface DomainsData {
   proxy: ProxyProbe;
   acmeEmail: string;
   addresses: string[];
-  domains: { id: string; name: string; hostCount: number; created_at: string }[];
+  cloudflare: {
+    connected: boolean;
+    zones: { id: string; name: string; status: string; domainId: string | null }[];
+    error: string | null;
+  };
+  domains: { id: string; name: string; cloudflare: boolean; hostCount: number; created_at: string }[];
   hosts: HostView[];
 }
 
@@ -59,6 +64,8 @@ export default function DomainsPage() {
   const [busy, setBusy] = useState<string | null>(null);
   const [commands, setCommands] = useState<string[] | null>(null);
   const [removing, setRemoving] = useState<DomainsData["domains"][number] | null>(null);
+  const [cloudflareToken, setCloudflareToken] = useState("");
+  const [disconnecting, setDisconnecting] = useState(false);
 
   // The field shows what is stored until the operator types; then it is theirs.
   const emailValue = email ?? data?.acmeEmail ?? "";
@@ -92,6 +99,37 @@ export default function DomainsPage() {
     setName("");
     setNameError(null);
     await refresh();
+  }
+
+  /** One of the Cloudflare account's zones, added as it is. */
+  async function addZone(zone: string) {
+    setBusy(`zone:${zone}`);
+    const body = await send("/api/domains", { method: "POST", body: JSON.stringify({ name: zone }) });
+    setBusy(null);
+    if (!body) return;
+    toast.success(`${zone} aggiunto`);
+    await refresh();
+  }
+
+  async function connectCloudflare() {
+    setBusy("cloudflare");
+    const body = await send("/api/domains/cloudflare", {
+      method: "PUT",
+      body: JSON.stringify({ token: cloudflareToken }),
+    });
+    setBusy(null);
+    if (!body) return;
+    toast.success("Cloudflare collegato");
+    setCloudflareToken("");
+    await refresh();
+  }
+
+  async function disconnectCloudflare(): Promise<boolean> {
+    const body = await send("/api/domains/cloudflare", { method: "DELETE" });
+    if (!body) return false;
+    toast.success("Cloudflare scollegato");
+    await refresh();
+    return true;
   }
 
   async function proxyAction(action: "setup" | "apply") {
@@ -151,6 +189,7 @@ export default function DomainsPage() {
   }
 
   const proxy = data?.proxy;
+  const cloudflare = data?.cloudflare;
   const ready = proxy ? READY_STATES.has(proxy.state) : false;
   // A root panel gets a button instead, and the commands only if /etc turned out read-only.
   const shownCommands =
@@ -256,7 +295,14 @@ export default function DomainsPage() {
                 {data?.domains.map((domain) => (
                   <li key={domain.id} className="flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:justify-between">
                     <div className="min-w-0 space-y-1">
-                      <p className="text-foreground font-mono text-sm">{domain.name}</p>
+                      <p className="flex items-center gap-2">
+                        <span className="text-foreground font-mono text-sm">{domain.name}</span>
+                        {domain.cloudflare && (
+                          <span className="bg-surface-secondary text-muted text-meta rounded px-1.5 py-0.5">
+                            Cloudflare
+                          </span>
+                        )}
+                      </p>
                       <p className="text-muted text-xs">
                         Record DNS: <Code>*.{domain.name}</Code> → {target}
                         {" · "}
@@ -300,6 +346,100 @@ export default function DomainsPage() {
               record copre tutti i sottodomini.
             </FieldHint>
           </div>
+        </Panel>
+
+        <Panel>
+          <PanelHeader
+            title={cloudflare?.connected ? "Cloudflare collegato" : "Cloudflare"}
+            description={
+              cloudflare?.connected
+                ? "I domini che il token vede: i loro certificati passano dal DNS, anche con il proxy attivo"
+                : "Facoltativo: con un API token i certificati passano dal DNS di Cloudflare, e qui vedi i tuoi domini"
+            }
+            actions={
+              cloudflare?.connected ? (
+                <Button variant="ghost" size="sm" className="text-danger" onPress={() => setDisconnecting(true)}>
+                  Scollega
+                </Button>
+              ) : undefined
+            }
+          />
+          {cloudflare?.connected ? (
+            <div className="mt-4 space-y-4">
+              {cloudflare.error ? (
+                <p className="text-danger text-sm">{cloudflare.error}</p>
+              ) : cloudflare.zones.length === 0 ? (
+                <p className="text-muted text-sm">
+                  Il token non vede nessun dominio: gli serve il permesso Zone · Zone · Read.
+                </p>
+              ) : (
+                <ul className="divide-border divide-y">
+                  {cloudflare.zones.map((zone) => (
+                    <li key={zone.id} className="flex items-center justify-between gap-3 py-2.5">
+                      <div className="min-w-0">
+                        <p className="text-foreground truncate font-mono text-sm">{zone.name}</p>
+                        {zone.status !== "active" && (
+                          <p className="text-muted text-xs">
+                            In attesa su Cloudflare: finché i nameserver non puntano lì, i certificati passano dalla
+                            porta 80
+                          </p>
+                        )}
+                      </div>
+                      {zone.domainId ? (
+                        <span className="text-muted shrink-0 text-xs">Aggiunto</span>
+                      ) : (
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          className="shrink-0"
+                          onPress={() => addZone(zone.name)}
+                          isPending={busy === `zone:${zone.name}`}
+                        >
+                          <Icon icon="solar:add-circle-linear" width={16} aria-hidden />
+                          Aggiungi
+                        </Button>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <Hint title="Con la nuvola arancione">
+                In Cloudflare metti SSL/TLS su <strong className="text-foreground">Full (strict)</strong>: con Flexible
+                il redirect a HTTPS gira in tondo. nginx prende l&apos;indirizzo del visitatore da{" "}
+                <Code>CF-Connecting-IP</Code>, e solo dalle connessioni che arrivano da Cloudflare, così le regole di
+                accesso dei progetti continuano a valere.
+              </Hint>
+            </div>
+          ) : (
+            <div className="mt-4">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+                <TextField
+                  type="password"
+                  value={cloudflareToken}
+                  onChange={setCloudflareToken}
+                  aria-label="API token di Cloudflare"
+                  className="flex-1"
+                >
+                  <Input placeholder="API token" className="font-mono text-sm" />
+                </TextField>
+                <Button
+                  size="sm"
+                  onPress={connectCloudflare}
+                  isPending={busy === "cloudflare"}
+                  isDisabled={!cloudflareToken.trim()}
+                >
+                  <Icon icon="solar:link-round-linear" width={16} aria-hidden />
+                  Collega
+                </Button>
+              </div>
+              <FieldHint>
+                Su Cloudflare: My Profile › API Tokens › Create Token, con i permessi{" "}
+                <strong className="text-foreground">Zone · Zone · Read</strong> e{" "}
+                <strong className="text-foreground">Zone · DNS · Edit</strong>. Viene cifrato nel pannello e passato a
+                certbot solo per pubblicare il record della verifica.
+              </FieldHint>
+            </div>
+          )}
         </Panel>
 
         <Panel>
@@ -378,6 +518,16 @@ export default function DomainsPage() {
         confirmLabel="Rimuovi"
         destructive
         onConfirm={removeDomain}
+      />
+
+      <ConfirmDialog
+        isOpen={disconnecting}
+        onOpenChange={(open) => !open && setDisconnecting(false)}
+        title="Scollegare Cloudflare?"
+        description="Il token viene cancellato dal pannello. I certificati già emessi restano, ma ai rinnovi i loro nomi tornano alla verifica sulla porta 80, che dietro il proxy di Cloudflare non passa."
+        confirmLabel="Scollega"
+        destructive
+        onConfirm={disconnectCloudflare}
       />
     </>
   );
