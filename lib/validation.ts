@@ -3,6 +3,7 @@ import { isValidTimeZone, parseCron } from "./cron";
 import { BRANCH_NAME_RULE, COMMIT_SHA_RULE, isBranchName, isCommitSha } from "./git-ref";
 import { parseMountString } from "./mount";
 import { ruleProblem } from "./ip-access";
+import { normalizeDomain, normalizeSubdomain } from "./proxy-names";
 import { deployPhases } from "./deploy-phases";
 import { MAX_DISPLAY_NAME } from "./service-name";
 import {
@@ -946,4 +947,63 @@ export const autostartFixSchema = z.object({
   fix: z.enum(["docker-enable", "pm2-save", "restart-policy"]),
   /** Only meaningful for `restart-policy`. */
   target: z.object({ kind: z.enum(["project", "service"]), id: z.string().min(1).max(32) }).optional(),
+});
+
+// --- Domains ---
+
+export const DOMAIN_RULE = "Un dominio come esempio.it: lettere, numeri e trattini, senza http:// né *";
+export const SUBDOMAIN_RULE = "Una sola parola: minuscole, numeri e trattini, es. app";
+
+/** Canonicalised on the way in, so `Esempio.IT.` and `esempio.it` are the same row. */
+export const domainNameSchema = z
+  .string()
+  .max(260)
+  .transform((raw, ctx) => {
+    const name = normalizeDomain(raw);
+    if (name === null) {
+      ctx.addIssue({ code: "custom", message: DOMAIN_RULE });
+      return z.NEVER;
+    }
+    return name;
+  });
+
+export const subdomainSchema = z
+  .string()
+  .max(70)
+  .transform((raw, ctx) => {
+    const label = normalizeSubdomain(raw);
+    if (label === null) {
+      ctx.addIssue({ code: "custom", message: SUBDOMAIN_RULE });
+      return z.NEVER;
+    }
+    return label;
+  });
+
+export const createDomainSchema = z.object({ name: domainNameSchema });
+
+export const createHostSchema = z.object({
+  domainId: z.string().min(1).max(32),
+  subdomain: subdomainSchema,
+  publicAccess: z.boolean().optional(),
+});
+
+export const updateHostSchema = z.object({ publicAccess: z.boolean() });
+
+export const hostActionSchema = z.object({ action: z.literal("retry") });
+
+export const proxyActionSchema = z.object({ action: z.enum(["setup", "apply"]) });
+
+/**
+ * The Let's Encrypt account's contact. Optional — it no longer sends expiry
+ * emails — and handed to certbot as one argv entry: the leading-dash rule is so
+ * it can never read as a flag.
+ */
+export const acmeEmailSchema = z.object({
+  acmeEmail: z
+    .string()
+    .trim()
+    .max(254)
+    .refine((value) => value === "" || /^[^\s@-][^\s@]*@[^\s@]+\.[^\s@]+$/.test(value), {
+      message: "Un indirizzo email valido, o vuoto",
+    }),
 });

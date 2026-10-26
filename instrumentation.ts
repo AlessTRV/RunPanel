@@ -108,6 +108,16 @@ export async function register() {
   const { reconcileGates } = await import("./services/access");
   await reconcileGates();
 
+  // Domains: nginx brought back to what the store says — a restored backup or
+  // a moved data directory may disagree with it — and a certificate request a
+  // restart cut short marked as such. Behind the flag for the gates' reason: it
+  // rewrites the host's nginx, which a throwaway instance must never do.
+  const { reconcileProxy, startProxyRenewal } = await import("./services/proxy");
+  await reconcileProxy().catch((err) => {
+    console.error("[proxy] Reconcile failed:", err instanceof Error ? err.message : err);
+  });
+  startProxyRenewal();
+
   // Housekeeping on a timer, in addition to the per-project sweep after each
   // deploy: a project deleted while Docker was unreachable leaves resources
   // nothing else would ever come back for.

@@ -599,6 +599,58 @@ export interface ClusterTombstonesTable {
   deleted_at: string;
 }
 
+/**
+ * A domain this server's nginx serves subdomains of, through a wildcard DNS
+ * record. Per server and never replicated: the record points at one machine.
+ */
+export interface DomainsTable {
+  id: string;
+  /** Canonical and unique — see `normalizeDomain` in lib/proxy-names.ts. */
+  name: string;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Where the name's certificate stands. Whether nginx serves the name at all is
+ * `apply_error`, a separate question with a separate answer.
+ *
+ * `pending`  no certificate, and none asked for since — or the one it had is gone.
+ * `issuing`  certbot is running for it.
+ * `active`   a certificate is on disk and nginx serves the name over HTTPS.
+ * `error`    the last request failed; `last_error` says why. Still served over
+ *            HTTP if the block itself went in.
+ */
+export type ProjectHostStatus = "pending" | "issuing" | "active" | "error";
+
+export interface ProjectHostsTable {
+  id: string;
+  project_id: string;
+  domain_id: string;
+  subdomain: string;
+  /** `subdomain.domain`, stored so uniqueness is one index and nginx needs no join. */
+  hostname: string;
+  /**
+   * 0 | 1 — open to everyone through the name while the project's port stays
+   * restricted. 0 makes the name follow the port's allow list.
+   */
+  public_access: number;
+  /** Served at `/.well-known/runpanel-check`, so the panel can tell the name reaches it. */
+  check_token: string;
+  status: ProjectHostStatus;
+  /** Why the last certificate request failed. */
+  last_error: string | null;
+  /**
+   * Why the last nginx apply left this name out — a name another block already
+   * serves, a project without a port. Null once an apply served it.
+   */
+  apply_error: string | null;
+  /** The certificate's expiry as last read from disk. */
+  cert_expires_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface Database {
   settings: SettingsTable;
   sessions: SessionsTable;
@@ -624,4 +676,6 @@ export interface Database {
   backup_runs: BackupRunsTable;
   backup_artifacts: BackupArtifactsTable;
   restore_runs: RestoreRunsTable;
+  domains: DomainsTable;
+  project_hosts: ProjectHostsTable;
 }

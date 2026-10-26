@@ -34,6 +34,7 @@ import { removeEnvFile } from "@/services/env-file";
 import { clearQueuedDeploy } from "@/services/deploy-queue";
 import { syncAutoDeploy } from "@/services/webhook-manage";
 import { processLogHub } from "@/services/process-logs";
+import { applyProxy, applyProxySoon, forgetCertificate } from "@/services/proxy";
 import fs from "fs";
 import path from "path";
 import { config } from "@/lib/config";
@@ -387,6 +388,13 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       }
     }
 
+    // nginx proxies to the port the app really listens on, behind the allow
+    // list: moving either means a different block for every name it has.
+    if (port !== undefined || access !== undefined) {
+      const named = await db.selectFrom("project_hosts").select("id").where("project_id", "=", projectId).executeTakeFirst();
+      if (named) applyProxySoon();
+    }
+
     const updated = await db
       .selectFrom("projects")
       .selectAll()
@@ -549,11 +557,20 @@ export async function DELETE(request: NextRequest, { params }: Params) {
       await removeProjectNetwork(slug);
     } catch { /* ignore */ }
 
+    // Read before the delete cascades them away: nginx still has their blocks.
+    const hostnames = (
+      await db.selectFrom("project_hosts").select("hostname").where("project_id", "=", projectId).execute()
+    ).map((row) => row.hostname);
+
     // Child rows go with the parent: the schema declares ON DELETE CASCADE on
-    // deployments, env_vars, services and webhook_deliveries, so a single delete
-    // is enough — no hand-rolled ordering to get wrong.
+    // deployments, env_vars, services, webhook_deliveries and project_hosts, so
+    // a single delete is enough — no hand-rolled ordering to get wrong.
     await db.deleteFrom("projects").where("id", "=", projectId).execute();
     await deleteGrantsFor("project", projectId);
+
+    if (hostnames.length > 0) {
+      void applyProxy().then(() => hostnames.forEach(forgetCertificate));
+    }
 
     return NextResponse.json({ success: true, volumesRemoved, servicesKept });
   });
